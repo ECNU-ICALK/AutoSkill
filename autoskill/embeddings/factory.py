@@ -24,6 +24,7 @@ def build_embeddings(config: Dict[str, Any]) -> EmbeddingModel:
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.openai.com")),
             timeout_s=int(config.get("timeout_s", 60)),
+            max_text_chars=int(config.get("max_text_chars", 10000)),
         )
 
     if provider in {"glm", "bigmodel", "zhipu"}:
@@ -38,7 +39,7 @@ def build_embeddings(config: Dict[str, Any]) -> EmbeddingModel:
             token_time_unit=str(config.get("token_time_unit", "ms")),
             auth_mode=str(config.get("auth_mode", "auto")),
             extra_body=(config.get("extra_body") or config.get("extra_payload")),
-            max_text_chars=int(config.get("max_text_chars", 12000)),
+            max_text_chars=int(config.get("max_text_chars", 10000)),
             min_text_chars=int(config.get("min_text_chars", 512)),
         )
 

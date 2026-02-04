@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .base import EmbeddingModel
+from ..utils.units import truncate_keep_head_tail
 
 
 @dataclass
@@ -19,14 +20,19 @@ class OpenAIEmbedding(EmbeddingModel):
     api_key: Optional[str] = None
     base_url: str = "https://api.openai.com"
     timeout_s: int = 60
+    max_text_chars: int = 10000
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OpenAIEmbedding requires api_key or OPENAI_API_KEY")
 
+        texts2 = [
+            truncate_keep_head_tail(t, max_units=int(self.max_text_chars or 0))
+            for t in (texts or [])
+        ]
         url = self.base_url.rstrip("/") + "/v1/embeddings"
-        payload = {"model": self.model, "input": texts}
+        payload = {"model": self.model, "input": texts2}
         data = json.dumps(payload).encode("utf-8")
 
         req = urllib.request.Request(

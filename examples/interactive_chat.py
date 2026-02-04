@@ -73,12 +73,15 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
     if provider == "mock":
         return {"provider": "mock"}
 
+    timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
+
     if provider == "openai":
         return {
             "provider": "openai",
             "model": model or _env("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
             "api_key": _require_key("OPENAI_API_KEY"),
             "base_url": _env("OPENAI_BASE_URL", "https://api.openai.com"),
+            "timeout_s": timeout_s,
         }
 
     if provider == "anthropic":
@@ -87,6 +90,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "model": model or _env("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
             "api_key": _require_key("ANTHROPIC_API_KEY"),
             "base_url": _env("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+            "timeout_s": timeout_s,
         }
 
     if provider in {"glm", "bigmodel", "zhipu"}:
@@ -99,6 +103,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "base_url": _env("BIGMODEL_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
             "max_tokens": int(_env("BIGMODEL_MAX_TOKENS", "4096")),
             "extra_body": _env_json("BIGMODEL_LLM_EXTRA_BODY"),
+            "timeout_s": timeout_s,
         }
 
     raise SystemExit(f"Unknown LLM provider: {provider}")
@@ -119,12 +124,15 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
     if provider == "hashing":
         return {"provider": "hashing", "dims": 256}
 
+    timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
+
     if provider == "openai":
         return {
             "provider": "openai",
             "model": model or _env("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
             "api_key": _require_key("OPENAI_API_KEY"),
             "base_url": _env("OPENAI_BASE_URL", "https://api.openai.com"),
+            "timeout_s": timeout_s,
         }
 
     if provider in {"glm", "bigmodel", "zhipu"}:
@@ -136,8 +144,9 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
             "token_time_unit": _env("BIGMODEL_TOKEN_TIME_UNIT", "ms"),
             "base_url": _env("BIGMODEL_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
             "extra_body": _env_json("BIGMODEL_EMB_EXTRA_BODY"),
-            "max_text_chars": int(_env("BIGMODEL_EMB_MAX_TEXT_CHARS", "12000")),
+            "max_text_chars": int(_env("BIGMODEL_EMB_MAX_TEXT_CHARS", "10000")),
             "min_text_chars": int(_env("BIGMODEL_EMB_MIN_TEXT_CHARS", "512")),
+            "timeout_s": timeout_s,
         }
 
     raise SystemExit(f"Unknown embeddings provider: {provider}")
@@ -165,7 +174,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--rewrite-mode",
-        default=_env("AUTOSKILL_REWRITE_MODE", "auto"),
+        default=_env("AUTOSKILL_REWRITE_MODE", "always"),
         help="Rewrite query before retrieval: auto|always|never.",
     )
     parser.add_argument(
@@ -177,19 +186,19 @@ def main() -> None:
     parser.add_argument(
         "--rewrite-history-chars",
         type=int,
-        default=int(_env("AUTOSKILL_REWRITE_HISTORY_CHARS", "2000")),
-        help="Max characters of history to include in query rewriting.",
+        default=int(_env("AUTOSKILL_REWRITE_HISTORY_CHARS", "4090")),
+        help="Max history units for query rewriting (CJK chars + English words).",
     )
     parser.add_argument(
         "--rewrite-max-query-chars",
         type=int,
         default=int(_env("AUTOSKILL_REWRITE_MAX_QUERY_CHARS", "256")),
-        help="Max characters of the rewritten query.",
+        help="Max query units for rewritten query (CJK chars + English words).",
     )
     parser.add_argument(
         "--min-score",
         type=float,
-        default=float(_env("AUTOSKILL_MIN_SCORE", "0.8")),
+        default=float(_env("AUTOSKILL_MIN_SCORE", "0.4")),
         help="Minimum similarity score for retrieved skills (post-search filter).",
     )
     parser.add_argument(
@@ -204,7 +213,7 @@ def main() -> None:
     parser.add_argument(
         "--extract-turn-limit",
         type=int,
-        default=int(_env("AUTOSKILL_EXTRACT_TURN_LIMIT", "100")),
+        default=int(_env("AUTOSKILL_EXTRACT_TURN_LIMIT", "10")),
         help="Long conversation hint for extraction gating (in turns).",
     )
     parser.add_argument("--extract-mode", default=_env("AUTOSKILL_EXTRACT_MODE", "auto"), help="auto|always|never")
@@ -264,7 +273,7 @@ def main() -> None:
     extraction_gate = None
     if interactive_cfg.gating_mode == "llm" and llm_provider != "mock":
         gate_cfg = dict(llm_cfg)
-        gate_cfg.setdefault("max_tokens", 256)
+        gate_cfg.setdefault("max_tokens", 4096)
         extraction_gate = LLMExtractionGate(build_llm(gate_cfg))
 
     query_rewriter = None
@@ -272,9 +281,9 @@ def main() -> None:
         rewrite_cfg = dict(llm_cfg)
         if str(rewrite_cfg.get("provider") or "").lower() in {"glm", "bigmodel", "zhipu"}:
             try:
-                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 4096)), 256)
+                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 4096)), 4096)
             except Exception:
-                rewrite_cfg["max_tokens"] = 256
+                rewrite_cfg["max_tokens"] = 4096
         query_rewriter = LLMQueryRewriter(
             build_llm(rewrite_cfg),
             max_history_turns=int(interactive_cfg.rewrite_history_turns),
@@ -283,15 +292,17 @@ def main() -> None:
         )
 
     skill_selector = None
-    if llm_provider != "mock":
-        select_cfg = dict(llm_cfg)
-        if str(select_cfg.get("provider") or "").lower() in {"glm", "bigmodel", "zhipu"}:
-            try:
-                select_cfg["max_tokens"] = min(int(select_cfg.get("max_tokens", 4096)), 256)
-            except Exception:
-                select_cfg["max_tokens"] = 256
-        skill_selector = LLMSkillSelector(build_llm(select_cfg))
+    # if llm_provider != "mock":
+    #     select_cfg = dict(llm_cfg)
+    #     if str(select_cfg.get("provider") or "").lower() in {"glm", "bigmodel", "zhipu"}:
+    #         try:
+    #             select_cfg["max_tokens"] = min(int(select_cfg.get("max_tokens", 4096)), 4096)
+    #         except Exception:
+    #             select_cfg["max_tokens"] = 4096
+    #     skill_selector = LLMSkillSelector(build_llm(select_cfg))
 
+    # print("skill_selector", skill_selector)
+    # print("query_rewriter", query_rewriter)
     app = InteractiveChatApp(
         sdk=sdk,
         config=interactive_cfg,

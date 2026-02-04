@@ -16,7 +16,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.bigmodel_auth import BigModelAuth
 from ..utils.json import json_from_llm_text
+from ..utils.units import truncate_system_user
 from .base import LLM
+
+
+def _truncate_inputs(
+    *, system: Optional[str], user: str, max_input_chars: int
+) -> tuple[Optional[str], str]:
+    return truncate_system_user(system=system, user=user, max_units=int(max_input_chars or 0))
 
 
 @dataclass
@@ -33,6 +40,7 @@ class GLMChatLLM(LLM):
     base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     timeout_s: int = 60
     max_tokens: int = 4096
+    max_input_chars: int = 10000
     token_ttl_s: int = 3600
     token_time_unit: str = "ms"  # "ms" | "s"
     auth_mode: str = "auto"  # "jwt" | "api_key" | "auto"
@@ -55,10 +63,13 @@ class GLMChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        system2, user2 = _truncate_inputs(
+            system=system, user=user, max_input_chars=int(self.max_input_chars or 0)
+        )
         messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
+        if system2:
+            messages.append({"role": "system", "content": system2})
+        messages.append({"role": "user", "content": user2})
 
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -205,7 +216,17 @@ def _looks_like_structured_output(text: str) -> bool:
     if s[0] in "{[":
         return True
     low = s.lower()
-    return any(k in low for k in ['"skills"', '"should_extract"', '"prompt"'])
+    # Heuristic: the model likely produced structured JSON, but it may be placed in reasoning_content.
+    needles = [
+        '"skills"',
+        '"should_extract"',
+        '"use_skills"',
+        '"selected_skill_ids"',
+        '"action"',
+        '"target_skill_id"',
+        '"prompt"',
+    ]
+    return any(k in low for k in needles)
 
 
 def _extract_best_text(parsed: Dict[str, Any]) -> Optional[str]:
@@ -229,7 +250,9 @@ def _extract_best_text(parsed: Dict[str, Any]) -> Optional[str]:
         normalized_r = _try_extract_json_text(reasoning)
         if normalized_r is not None:
             return normalized_r
-        return ""
+        # Avoid returning chain-of-thought: only surface reasoning_content when it appears to contain
+        # structured output (e.g., JSON decisions for extract/select/maintain flows).
+        return reasoning.strip() if _looks_like_structured_output(reasoning) else ""
 
     if _find_choices(parsed):
         return ""

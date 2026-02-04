@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .base import LLM
+from ..utils.units import truncate_system_user
 
 
 @dataclass
@@ -23,6 +24,8 @@ class OpenAIChatLLM(LLM):
     api_key: Optional[str] = None
     base_url: str = "https://api.openai.com"
     timeout_s: int = 60
+    max_input_chars: int = 10000
+    max_tokens: int = 4096
 
     def complete(
         self,
@@ -36,17 +39,23 @@ class OpenAIChatLLM(LLM):
         if not key:
             raise RuntimeError("OpenAIChatLLM requires api_key or OPENAI_API_KEY")
 
+        system2, user2 = truncate_system_user(
+            system=system, user=user, max_units=int(self.max_input_chars or 0)
+        )
+
         url = self.base_url.rstrip("/") + "/v1/chat/completions"
         messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
+        if system2:
+            messages.append({"role": "system", "content": system2})
+        messages.append({"role": "user", "content": user2})
 
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": float(temperature),
         }
+        if int(self.max_tokens or 0) > 0:
+            payload["max_tokens"] = int(self.max_tokens)
         data = json.dumps(payload).encode("utf-8")
 
         req = urllib.request.Request(

@@ -256,7 +256,6 @@ class InteractiveChatApp:
                     self.io.print(f"\n[retrieve] rewritten query: {rewritten}")
                 if rewrite_mode in {"auto", "always"}:
                     search_query = rewritten.strip()
-
         hits = self.sdk.search(
             search_query,
             user_id=self.config.user_id,
@@ -297,7 +296,6 @@ class InteractiveChatApp:
             if use_skills
             else ""
         )
-
         # 2) Generate assistant response.
         latest_assistant = self._generate_assistant_response(context=context, use_skills=use_skills)
         self.io.print("\nAssistant> " + latest_assistant)

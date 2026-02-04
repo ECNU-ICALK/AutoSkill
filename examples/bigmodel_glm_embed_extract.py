@@ -93,6 +93,7 @@ def main() -> None:
     args = parser.parse_args()
 
     api_key = _require_api_key()
+    timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
     base_url = _env("BIGMODEL_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     auth_mode = _env("BIGMODEL_AUTH_MODE", "auto")
     token_time_unit = _env("BIGMODEL_TOKEN_TIME_UNIT", "ms")
@@ -111,6 +112,7 @@ def main() -> None:
         "base_url": base_url,
         "max_tokens": max_tokens,
         "extra_body": llm_extra,
+        "timeout_s": timeout_s,
     }
     emb_cfg: Dict[str, Any] = {
         "provider": "glm",
@@ -120,6 +122,7 @@ def main() -> None:
         "token_time_unit": token_time_unit,
         "base_url": base_url,
         "extra_body": emb_extra,
+        "timeout_s": timeout_s,
     }
 
     embeddings = build_embeddings(emb_cfg)

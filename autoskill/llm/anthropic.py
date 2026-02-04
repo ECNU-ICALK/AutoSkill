@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .base import LLM
+from ..utils.units import truncate_system_user
 
 
 @dataclass
@@ -23,6 +24,8 @@ class AnthropicLLM(LLM):
     api_key: Optional[str] = None
     base_url: str = "https://api.anthropic.com"
     timeout_s: int = 60
+    max_input_chars: int = 10000
+    max_tokens: int = 4096
 
     def complete(
         self,
@@ -36,13 +39,18 @@ class AnthropicLLM(LLM):
         if not key:
             raise RuntimeError("AnthropicLLM requires api_key or ANTHROPIC_API_KEY")
 
+        system2, user2 = truncate_system_user(
+            system=system, user=user, max_units=int(self.max_input_chars or 0)
+        )
+        system2 = str(system2 or "")
+
         url = self.base_url.rstrip("/") + "/v1/messages"
         payload = {
             "model": self.model,
-            "max_tokens": 1024,
+            "max_tokens": int(self.max_tokens),
             "temperature": float(temperature),
-            "system": system or "",
-            "messages": [{"role": "user", "content": user}],
+            "system": system2,
+            "messages": [{"role": "user", "content": user2}],
         }
         data = json.dumps(payload).encode("utf-8")
 

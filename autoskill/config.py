@@ -34,6 +34,7 @@ class AutoSkillConfig:
     max_similar_skills_to_consider: int = 5
 
     default_search_limit: int = 5
+    # "chars" here means sizing units: CJK ideographs count by character; ASCII/English counts by word.
     max_context_chars: int = 6_000
 
     redact_sources_before_llm: bool = True

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ..utils.bigmodel_auth import BigModelAuth
+from ..utils.units import text_units, truncate_keep_head, truncate_keep_head_tail
 from .base import EmbeddingModel
 
 
@@ -36,7 +37,7 @@ class BigModelEmbedding3(EmbeddingModel):
     token_time_unit: str = "ms"  # "ms" | "s"
     auth_mode: str = "auto"  # "jwt" | "api_key" | "auto"
     extra_body: Optional[Dict[str, Any]] = None
-    max_text_chars: int = 12000
+    max_text_chars: int = 10000
     min_text_chars: int = 512
 
     def __post_init__(self) -> None:
@@ -57,7 +58,7 @@ class BigModelEmbedding3(EmbeddingModel):
 
     def _embed_with_auto_split(self, texts: List[str]) -> List[List[float]]:
         # Pre-truncate very large inputs so a single huge skill cannot break embedding.
-        texts2 = [_truncate_text(t, max_chars=int(self.max_text_chars or 0)) for t in texts]
+        texts2 = [truncate_keep_head_tail(t, max_units=int(self.max_text_chars or 0)) for t in texts]
         try:
             return self._embed_once(texts2)
         except RuntimeError as e:
@@ -67,9 +68,10 @@ class BigModelEmbedding3(EmbeddingModel):
             if len(texts2) <= 1:
                 # Fall back to aggressive truncation for a single oversized input.
                 t = texts2[0] if texts2 else ""
-                min_chars = max(0, int(self.min_text_chars or 0))
-                if min_chars and len(t) > min_chars:
-                    return self._embed_with_auto_split([t[:min_chars]])
+                min_units = max(0, int(self.min_text_chars or 0))
+                if min_units and text_units(t) > min_units:
+                    t2 = truncate_keep_head(t, max_units=min_units, marker="")
+                    return self._embed_with_auto_split([t2])
                 raise
 
             mid = len(texts2) // 2
@@ -224,16 +226,3 @@ def _looks_like_request_too_large(message: str) -> bool:
         "code\":1210",
     ]
     return any(n in s for n in needles)
-
-
-def _truncate_text(text: str, *, max_chars: int) -> str:
-    t = str(text or "")
-    m = int(max_chars or 0)
-    if m <= 0 or len(t) <= m:
-        return t
-    # Keep both head and tail to preserve key identifiers and any final checklists/output formats.
-    head = int(m * 0.7)
-    tail = max(0, m - head - 32)
-    if tail <= 0:
-        return t[:m]
-    return t[:head] + "\n\n...[truncated]...\n\n" + t[-tail:]

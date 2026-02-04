@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Iterable, List, Optional
 
 from .models import Skill
+from .utils.units import text_units, truncate_keep_head
 
 
 def select_skills_for_context(
@@ -31,7 +32,7 @@ def select_skills_for_context(
 
     parts: List[str] = [header]
     selected: List[Skill] = []
-    used = len(header)
+    used = text_units(header)
     for i, skill in enumerate(skills, start=1):
         remaining = max_chars - used
         if remaining <= 0:
@@ -39,11 +40,12 @@ def select_skills_for_context(
         block = _render_one(skill, index=i, max_chars=remaining)
         if not block.strip():
             continue
-        if used + len(block) + 2 > max_chars:
+        block_units = text_units(block)
+        if used + block_units > max_chars:
             continue
         parts.append(block)
         selected.append(skill)
-        used += len(block) + 2
+        used += block_units
     return selected
 
 
@@ -58,7 +60,7 @@ def render_skills_context(
     if query:
         header += f"\nQuery: {query}"
     parts.append(header)
-    used = len(header)
+    used = text_units(header)
 
     for i, skill in enumerate(skills, start=1):
         remaining = max_chars - used
@@ -67,10 +69,11 @@ def render_skills_context(
         block = _render_one(skill, index=i, max_chars=remaining)
         if not block.strip():
             continue
-        if used + len(block) + 2 > max_chars:
+        block_units = text_units(block)
+        if used + block_units > max_chars:
             continue
         parts.append(block)
-        used += len(block) + 2
+        used += block_units
 
     return "\n\n".join(parts).strip() + "\n"
 
@@ -98,14 +101,12 @@ def _render_one(skill: Skill, *, index: int, max_chars: Optional[int] = None) ->
     limit = max(0, int(max_chars))
     if limit == 0:
         return ""
-    if len(base) >= limit:
-        return base[:limit].strip()
+    if text_units(base) >= limit:
+        return truncate_keep_head(base, max_units=limit, marker="").strip()
 
-    avail = limit - len(base)
-    if len(instr) <= avail:
+    avail = limit - text_units(base)
+    if text_units(instr) <= avail:
         return (base + instr).strip()
 
-    suffix = "\n...[truncated]..."
-    if avail <= len(suffix):
-        return (base + instr[:avail]).strip()
-    return (base + instr[: avail - len(suffix)] + suffix).strip()
+    instr2 = truncate_keep_head(instr, max_units=avail, marker="\n...[truncated]...")
+    return (base + instr2).strip()

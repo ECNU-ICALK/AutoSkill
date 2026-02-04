@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from ..llm.base import LLM
 from ..utils.json import json_from_llm_text
+from ..utils.units import text_units, truncate_keep_head
 
 
 def _format_history(
@@ -39,10 +40,11 @@ def _format_history(
             continue
         prefix = "User: " if role == "user" else "Assistant: " if role == "assistant" else f"{role.title()}: "
         block = prefix + content
-        if used + len(block) + 1 > max_chars:
+        block_units = text_units(block)
+        if used + block_units > max_chars:
             break
         lines.append(block)
-        used += len(block) + 1
+        used += block_units
     return "\n".join(reversed(lines)).strip()
 
 
@@ -132,5 +134,9 @@ class LLMQueryRewriter:
         if not rewritten:
             return q
 
-        rewritten = rewritten[: max(1, int(self.max_query_chars))].strip()
+        rewritten = truncate_keep_head(
+            rewritten,
+            max_units=max(1, int(self.max_query_chars)),
+            marker="",
+        ).strip()
         return rewritten or q
