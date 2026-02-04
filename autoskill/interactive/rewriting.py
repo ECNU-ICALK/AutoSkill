@@ -1,0 +1,136 @@
+"""
+Query rewriting for retrieval.
+
+Goal:
+- Rewrite the current user query into a standalone, information-dense search query using a short
+  conversation history window.
+- The rewritten query is then embedded and used for skill retrieval.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
+from ..llm.base import LLM
+from ..utils.json import json_from_llm_text
+
+
+def _format_history(
+    messages: List[Dict[str, Any]],
+    *,
+    max_turns: int,
+    max_chars: int,
+    exclude_last_user: bool,
+) -> str:
+    max_msgs = max(0, int(max_turns)) * 2
+    window = messages[-max_msgs:] if max_msgs else messages
+    if exclude_last_user and window:
+        last = window[-1]
+        if str(last.get("role") or "").strip().lower() == "user":
+            window = window[:-1]
+
+    lines: List[str] = []
+    used = 0
+    for m in reversed(window):
+        role = str(m.get("role") or "").strip().lower()
+        content = str(m.get("content") or "").strip()
+        if not content:
+            continue
+        prefix = "User: " if role == "user" else "Assistant: " if role == "assistant" else f"{role.title()}: "
+        block = prefix + content
+        if used + len(block) + 1 > max_chars:
+            break
+        lines.append(block)
+        used += len(block) + 1
+    return "\n".join(reversed(lines)).strip()
+
+
+def _clean_rewritten_query(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("```"):
+        raw = raw.strip("`").strip()
+
+    # If the model returned JSON, try to extract a query-like field.
+    try:
+        obj = json_from_llm_text(raw)
+        if isinstance(obj, dict):
+            for k in ("query", "rewritten_query", "search_query", "rewrite"):
+                v = obj.get(k)
+                if isinstance(v, str) and v.strip():
+                    raw = v.strip()
+                    break
+    except Exception:
+        pass
+
+    # Remove common labels.
+    for prefix in (
+        "Rewritten search query:",
+        "Rewritten query:",
+        "Search query:",
+        "Query:",
+    ):
+        if raw.lower().startswith(prefix.lower()):
+            raw = raw[len(prefix) :].strip()
+
+    # Collapse whitespace and strip surrounding quotes.
+    raw = " ".join(raw.split())
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1].strip()
+    return raw
+
+
+@dataclass
+class LLMQueryRewriter:
+    llm: LLM
+    max_history_turns: int = 6
+    max_history_chars: int = 2000
+    max_query_chars: int = 256
+
+    def rewrite(
+        self,
+        *,
+        query: str,
+        messages: List[Dict[str, Any]],
+    ) -> str:
+        q = str(query or "").strip()
+        if not q:
+            return ""
+
+        history = _format_history(
+            messages,
+            max_turns=int(self.max_history_turns),
+            max_chars=int(self.max_history_chars),
+            exclude_last_user=True,
+        )
+
+        system = (
+            "You are AutoSkill's retrieval query rewriter.\n"
+            "Goal: rewrite the current user query into a single standalone search query that will retrieve the most relevant Skills.\n"
+            "Use the conversation context to resolve references (e.g., 'that', 'it', 'the above') and add missing keywords.\n"
+            "Do NOT invent new facts.\n"
+            "Keep it concise and information-dense.\n"
+            "Output ONLY the rewritten query text (no quotes, no bullets, no explanations).\n"
+        )
+        if history:
+            user = (
+                f"Conversation context:\n{history}\n\n"
+                f"Current user query:\n{q}\n\n"
+                "Rewritten search query:"
+            )
+        else:
+            user = f"Current user query:\n{q}\n\nRewritten search query:"
+
+        try:
+            out = self.llm.complete(system=system, user=user, temperature=0.0)
+        except Exception:
+            return q
+
+        rewritten = _clean_rewritten_query(out)
+        if not rewritten:
+            return q
+
+        rewritten = rewritten[: max(1, int(self.max_query_chars))].strip()
+        return rewritten or q
