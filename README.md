@@ -1,8 +1,8 @@
 # AutoSkill SDK
 
-AutoSkill is a "Skill Layer" SDK: it automatically extracts reusable **Skills** from conversations or
-behavior/event logs, maintains them over time (dedupe/merge/versioning), and retrieves/injects them for
-downstream tasks.
+AutoSkill is a self-evolving "Skill Layer" SDK: it automatically grows reusable, executable **Skills** from
+conversations and behavior/event logs, continuously maintains them (dedupe/merge/versioning), and
+retrieves/injects the right Skills to improve downstream task performance as you use it.
 
 Goal: similar to a "memory plugin" workflow, but the stored unit is an executable, reusable Skill rather than
 raw memory.
