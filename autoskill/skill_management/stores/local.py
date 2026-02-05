@@ -10,14 +10,14 @@ Storage layout (recommended):
   - Common/
     - <skill_dir_x>/SKILL.md (+ optional scripts/resources)
     - <optional_library_name>/<skill_dir_y>/SKILL.md
-  - .autoskill/vectors/  (persistent vector index files)
+  - vectors/  (persistent vector index files)
 
 The store can also load "legacy flat" layouts where skills live directly under `store_root/`.
 
 Notes:
 - This store avoids JSON files for persistence.
 - Only `SKILL.md` is parsed into memory; bundled resources are left on disk.
-- Vectors are cached under `store_root/.autoskill/vectors/` so external libraries do not need to be modified.
+- Vectors are cached under `store_root/vectors/` so external libraries do not need to be modified.
 """
 
 from __future__ import annotations
@@ -171,7 +171,7 @@ class LocalSkillStore(SkillStore):
         path: str,
         max_depth: int = 6,
         cache_vectors: bool = True,
-        vector_cache_dirname: str = ".autoskill/vectors",
+        vector_cache_dirname: str = "vectors",
         vector_index_name: str = "skills",
         users_dirname: str = "Users",
         libraries_dirname: str = "Common",
@@ -201,6 +201,7 @@ class LocalSkillStore(SkillStore):
 
         os.makedirs(self._root_dir, exist_ok=True)
         if self._cache_vectors:
+            self._maybe_migrate_legacy_vector_cache()
             os.makedirs(self._vector_cache_dir, exist_ok=True)
             self._index = FlatFileVectorIndex(
                 dir_path=self._vector_cache_dir, name=str(vector_index_name or "skills")
@@ -408,7 +409,8 @@ class LocalSkillStore(SkillStore):
 
         # 3) Load legacy skills stored directly under store_root/ (flat layout).
         if self._include_legacy_root and os.path.isdir(self._root_dir):
-            skip = {self._users_dirname, self._libraries_dirname, ".autoskill"}
+            # Avoid walking persistent cache directories when scanning legacy flat layouts.
+            skip = {self._users_dirname, self._libraries_dirname, ".autoskill", "vectors"}
             for dir_path, rel_key in _iter_skill_dirs(
                 self._root_dir, max_depth=self._max_depth, skip_dirnames=skip
             ):
@@ -509,6 +511,44 @@ class LocalSkillStore(SkillStore):
                 return
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(updated)
+        except Exception:
+            return
+
+    def _maybe_migrate_legacy_vector_cache(self) -> None:
+        """
+        Best-effort migration from the legacy cache path:
+          store_root/.autoskill/vectors -> store_root/vectors
+
+        This preserves existing vector indices so switching to the new default does not trigger
+        unnecessary re-embedding.
+        """
+
+        try:
+            new_dir = os.path.abspath(self._vector_cache_dir)
+            legacy_dir = os.path.join(self._root_dir, ".autoskill", "vectors")
+            legacy_dir = os.path.abspath(legacy_dir)
+            if new_dir == legacy_dir:
+                return
+            if not os.path.isdir(legacy_dir):
+                return
+            if os.path.isdir(new_dir):
+                try:
+                    if any(os.scandir(new_dir)):
+                        return
+                except Exception:
+                    return
+            os.makedirs(new_dir, exist_ok=True)
+            for name in os.listdir(legacy_dir):
+                src = os.path.join(legacy_dir, name)
+                dst = os.path.join(new_dir, name)
+                if not os.path.isfile(src):
+                    continue
+                if os.path.exists(dst):
+                    continue
+                try:
+                    shutil.copy2(src, dst)
+                except Exception:
+                    continue
         except Exception:
             return
 

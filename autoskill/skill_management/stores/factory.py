@@ -105,7 +105,7 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
         max_depth = int(config.store.get("max_depth", 6))
         cache_vectors = bool(config.store.get("cache_vectors", True))
         vector_cache_dirname = str(
-            config.store.get("vector_cache_dirname", ".autoskill/vectors")
+            config.store.get("vector_cache_dirname", "vectors")
         )
         vector_index_name = str(
             config.store.get("vector_index_name")

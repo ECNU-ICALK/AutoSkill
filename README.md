@@ -1,5 +1,7 @@
 # AutoSkill SDK
 
+English | [中文](README.zh-CN.md)
+
 AutoSkill is a self-evolving "Skill Layer" SDK: it automatically grows reusable, executable **Skills** from
 conversations and behavior/event logs, continuously maintains them (dedupe/merge/versioning), and
 retrieves/injects the right Skills to improve downstream task performance as you use it.
@@ -166,9 +168,162 @@ AutoSkill uses a pluggable architecture:
 - Embeddings: `hashing` (offline), `openai`, `dashscope` (Qwen), `glm` (BigModel embedding-3)
 - Store: `inmemory` (offline), `local` (directory-based persistence: `Users/<user_id>/...` + optional shared `Common/...`; caches vectors in a persistent on-disk index for fast retrieval)
 
-## Layout
+## Architecture
 
-The `autoskill/` package is the SDK, inspired by Mem0's "client + provider + store" layering.
+AutoSkill is organized into a few composable layers (similar to Mem0's "client + provider + store" split),
+with an additional Skill Management layer for extraction + maintenance.
+
+### Core Data Flow
+
+**Ingest (grow/maintain skills):**
+
+1) `AutoSkill.ingest(...)` receives `messages` (chat) or `events` (behavior logs)
+2) `SkillExtractor.extract(...)` produces up to 1 `SkillCandidate` (LLM-based or heuristic)
+3) `SkillMaintainer.apply(...)` decides add/merge/discard by searching similar skills, then upserts the result
+4) `SkillStore.upsert(...)` persists a skill as an Agent Skill artifact (`SKILL.md` + optional resources)
+
+**Retrieve (use skills):**
+
+1) (optional) rewrite a user query into a better retrieval query (focus on capability/need, not pasted content)
+2) embed the query via the configured embeddings provider
+3) `SkillStore.search(...)` runs vector search over stored skill embeddings and returns `SkillHit`s
+4) render selected skills into an injectable context block (`render_skills_context(...)`)
+
+### Persistence Layout (Local Store)
+
+When `store={"provider":"local","path":"Skills"}`, the recommended on-disk layout is:
+
+```text
+Skills/
+  Users/
+    <user_id>/
+      <skill-slug>/
+        SKILL.md
+        scripts/…            (optional)
+        references/…         (optional)
+        assets/…             (optional)
+  Common/
+    <skill-slug>/SKILL.md
+    <library-name>/<skill-slug>/SKILL.md
+  vectors/
+    <index>.meta.json
+    <index>.ids.txt
+    <index>.vecs.f32
+```
+
+Notes:
+- `Common/` is the shared library. `Users/<user_id>/` is user-private skills.
+- Additional read-only libraries can be added via `--library-dir` (see examples).
+- Vector caches are stored per embedding signature (provider + model + optional dimensions) to avoid mixing
+  vectors when you switch embedding models.
+
+### Interactive Flow (Retrieve + Extract)
+
+In `autoskill.interactive`, each user turn runs retrieval before generating the assistant response.
+Extraction is gated to protect quality; in `auto` mode it is evaluated only at topic boundaries or periodic
+checkpoints, and ingestion is deferred until the next user message so it can be used as feedback.
+
+## Repository Structure (Code Map)
+
+This section is a quick “what lives where” map. Paths are relative to the repo root.
+
+### Top-Level
+
+- `README.md`: overview, provider configs, usage examples, architecture map
+- `pyproject.toml`: packaging + dependencies
+- `Skills/`: default local store root (created/used at runtime)
+- `autoskill/`: SDK package (core implementation)
+- `examples/`: runnable scripts showing end-to-end flows
+
+### `autoskill/` (SDK)
+
+- `autoskill/__init__.py`: public exports (`AutoSkill`, `AutoSkillConfig`, models)
+- `autoskill/client.py`: SDK entrypoint (ingest/search/render/export/import)
+- `autoskill/config.py`: `AutoSkillConfig` (serializable config + defaults)
+- `autoskill/models.py`: core models (`Skill`, `SkillHit`, `SkillExample`, status enums)
+- `autoskill/render.py`: render selected skills into an injectable context block
+- `autoskill/py.typed`: marker for type checkers (package ships type hints)
+
+#### `autoskill/llm/` (Chat LLM Providers)
+
+- `autoskill/llm/__init__.py`: provider-layer exports (`LLM`, `build_llm`)
+- `autoskill/llm/base.py`: LLM interface (`complete(system, user, temperature)`)
+- `autoskill/llm/factory.py`: provider factory (`mock|openai|dashscope|glm|anthropic`)
+- `autoskill/llm/mock.py`: offline mock LLM (deterministic text response)
+- `autoskill/llm/openai.py`: minimal OpenAI-compatible Chat Completions client (used for OpenAI + DashScope)
+- `autoskill/llm/glm.py`: BigModel GLM-4.7 Chat Completions client (auth_mode auto/jwt/api_key)
+- `autoskill/llm/anthropic.py`: minimal Anthropic Messages client
+
+#### `autoskill/embeddings/` (Embedding Providers)
+
+- `autoskill/embeddings/__init__.py`: provider-layer exports (`EmbeddingModel`, `build_embeddings`)
+- `autoskill/embeddings/base.py`: embedding interface (`embed(texts) -> vectors`)
+- `autoskill/embeddings/factory.py`: provider factory (`hashing|openai|dashscope|glm`)
+- `autoskill/embeddings/hashing.py`: offline hashing embeddings (fast baseline; no network)
+- `autoskill/embeddings/openai.py`: minimal OpenAI-compatible embeddings client (used for OpenAI + DashScope)
+- `autoskill/embeddings/bigmodel.py`: BigModel embedding-3 client (auth_mode auto/jwt/api_key)
+
+#### `autoskill/skill_management/` (Extraction + Maintenance + Formats)
+
+- `autoskill/skill_management/__init__.py`: skill-management exports (extract/maintain/store/vector helpers)
+- `autoskill/skill_management/extraction.py`: Skill extraction (`SkillExtractor`, LLM extraction + repair + heuristic fallback)
+- `autoskill/skill_management/maintenance.py`: Skill maintenance (dedupe/merge/versioning; optional LLM decisions)
+- `autoskill/skill_management/importer.py`: import external Agent Skill directories (scan `**/SKILL.md`)
+- `autoskill/skill_management/artifacts.py`: export/write skill artifacts (`SKILL.md`, directories)
+
+##### `autoskill/skill_management/formats/`
+
+- `autoskill/skill_management/formats/__init__.py`: format exports (render/parse helpers)
+- `autoskill/skill_management/formats/agent_skill.py`: Agent Skill artifact format (`SKILL.md` frontmatter + body), rendering/parsing helpers
+
+##### `autoskill/skill_management/stores/`
+
+- `autoskill/skill_management/stores/__init__.py`: store exports (`SkillStore`, `build_store`)
+- `autoskill/skill_management/stores/base.py`: `SkillStore` interface
+- `autoskill/skill_management/stores/factory.py`: store factory (builds store + per-embedding vector index name)
+- `autoskill/skill_management/stores/inmemory.py`: in-memory store (no persistence)
+- `autoskill/skill_management/stores/local.py`: filesystem store (one-skill-per-directory; shared `Common/` + user `Users/`; vector cache)
+
+##### `autoskill/skill_management/vectors/`
+
+- `autoskill/skill_management/vectors/__init__.py`: vector-backend exports (`VectorIndex`, `FlatFileVectorIndex`)
+- `autoskill/skill_management/vectors/base.py`: vector index interface
+- `autoskill/skill_management/vectors/flat.py`: `FlatFileVectorIndex` (exact dot-product search; meta/ids/vecs on disk)
+
+#### `autoskill/interactive/` (Interactive Chat Orchestration)
+
+- `autoskill/interactive/__init__.py`: interactive exports (`InteractiveChatApp`, `InteractiveConfig`, helpers)
+- `autoskill/interactive/app.py`: interactive loop orchestration (rewrite → retrieve → respond → gate/extract)
+- `autoskill/interactive/config.py`: `InteractiveConfig` (CLI-tunable behavior: scope, thresholds, windows)
+- `autoskill/interactive/commands.py`: command parsing (`/help`, `/extract_now`, etc.)
+- `autoskill/interactive/io.py`: console IO abstraction (easy to embed in other frontends)
+- `autoskill/interactive/rewriting.py`: LLM query rewriting for better skill retrieval
+- `autoskill/interactive/selection.py`: optional LLM selector to choose which retrieved skills to inject
+- `autoskill/interactive/gating.py`: extraction gating logic (heuristic + LLM gate)
+
+#### `autoskill/utils/` (Shared Utilities)
+
+- `autoskill/utils/__init__.py`: small convenience exports (JSON parsing, redaction, timestamps)
+- `autoskill/utils/units.py`: mixed-language sizing + truncation utilities (CJK chars + ASCII words)
+- `autoskill/utils/json.py`: fault-tolerant JSON extractor for LLM outputs
+- `autoskill/utils/text.py`: keyword extraction (tags + heuristics)
+- `autoskill/utils/redact.py`: redaction helpers for source payloads (reduce secret leakage to LLM)
+- `autoskill/utils/time.py`: timestamps
+- `autoskill/utils/bigmodel_auth.py`: BigModel JWT/auth helpers (used by GLM + embedding-3)
+
+### `examples/` (Runnable Scripts)
+
+- `examples/__init__.py`: examples package entrypoints (run via `python3 -m examples.<script>`)
+- `examples/basic_ingest_search.py`: minimal ingest + search demo (offline by default)
+- `examples/interactive_chat.py`: interactive loop demo (supports `mock|glm|dashscope|openai|anthropic`)
+- `examples/personalized_email_demo.py`: scripted demo of iterative writing → skill extraction → retrieval
+- `examples/local_persistent_store.py`: local store demo (skills + vector cache on disk)
+- `examples/bigmodel_glm_persistent_store.py`: GLM + embedding-3 with local persistence
+- `examples/bigmodel_glm_embed_extract.py`: embed + extract workflow using BigModel providers
+- `examples/dashscope_qwen_chat.py`: DashScope chat (OpenAI-compatible) demo
+- `examples/dashscope_qwen_embeddings.py`: DashScope embeddings (OpenAI-compatible) demo
+- `examples/import_agent_skills.py`: import external Agent Skill directories into a local store
+- `examples/normalize_skill_ids.py`: normalize/upsert missing `id:` in `SKILL.md` under a store root
 
 ## Examples
 
