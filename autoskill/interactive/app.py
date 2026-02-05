@@ -9,6 +9,8 @@ This module owns the orchestration logic:
 
 from __future__ import annotations
 
+import queue
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -17,12 +19,6 @@ from ..llm.base import LLM
 from ..render import render_skills_context, select_skills_for_context
 from .commands import Command, parse_command
 from .config import InteractiveConfig
-from .gating import (
-    LLMExtractionGate,
-    heuristic_is_ack_feedback,
-    heuristic_should_extract,
-    heuristic_topic_changed,
-)
 from .io import ConsoleIO, IO
 from .rewriting import LLMQueryRewriter
 from .selection import LLMSkillSelector
@@ -43,7 +39,6 @@ class InteractiveChatApp:
         config: InteractiveConfig,
         io: Optional[IO] = None,
         chat_llm: Optional[LLM] = None,
-        extraction_gate: Optional[LLMExtractionGate] = None,
         query_rewriter: Optional[LLMQueryRewriter] = None,
         skill_selector: Optional[LLMSkillSelector] = None,
     ) -> None:
@@ -51,18 +46,20 @@ class InteractiveChatApp:
         self.config = config.normalize()
         self.io: IO = io or ConsoleIO()
         self.chat_llm = chat_llm
-        self.extraction_gate = extraction_gate
         self.query_rewriter = query_rewriter
         self.skill_selector = skill_selector
 
         self.messages: List[Dict[str, Any]] = []
         self._pending: Optional[_PendingExtraction] = None
         self._turns_at_last_extract_check: int = 0
+        self._bg_extract_sema = threading.BoundedSemaphore(1)
+        self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
     def run(self) -> None:
         self._print_banner()
         self._print_help()
         while True:
+            self._drain_background_events()
             try:
                 line = self.io.input("\nYou> ").strip()
             except (EOFError, KeyboardInterrupt):
@@ -87,6 +84,8 @@ class InteractiveChatApp:
         self.io.print("Store dir:", self.config.store_dir)
         self.io.print("User id:", self.config.user_id)
         self.io.print("Skill scope:", self.config.skill_scope)
+        self.io.print("Extraction mode:", self.config.extract_mode)
+        self.io.print("Extraction interval (turns):", self.config.extract_turn_limit)
         self.io.print("Mode:", online)
         self.io.print("Existing skills:", len(self.sdk.list(user_id=self.config.user_id)))
 
@@ -101,9 +100,16 @@ class InteractiveChatApp:
             "  /write <dir>\n"
             "  /rewrite auto|always|never\n"
             "  /extract auto|always|never\n"
+            "  /extract_every <n>\n"
             "  /extract_now [hint]  (alias: extract_now [hint])\n"
+            "  /paste               (multi-line input; end with /end)\n"
+            "  /file <path>         (send file content as a message)\n"
+            "  /clip                (send clipboard content as a message)\n"
             "  /scope user|common|all\n"
             "  /clear\n"
+            "\nNotes:\n"
+            "  - In /extract auto mode, extraction is attempted once every N turns (N=extract_turn_limit).\n"
+            "    Set N=1 to attempt extraction every turn. Use /extract_now to force.\n"
         )
 
     def _handle_command(self, cmd: Command) -> bool:
@@ -120,7 +126,42 @@ class InteractiveChatApp:
 
         if name == "/clear":
             self.messages = []
+            self._pending = None
+            self._turns_at_last_extract_check = 0
             self.io.print("Conversation cleared.")
+            return False
+
+        if name == "/paste":
+            text = self._read_multiline_message()
+            if text is None:
+                return False
+            if not text.strip():
+                self.io.print("(empty)")
+                return False
+            self._handle_user_message(text)
+            return False
+
+        if name == "/file":
+            if not arg:
+                self.io.print("Usage: /file <path>")
+                return False
+            text = self._read_file_message(arg)
+            if text is None:
+                return False
+            if not text.strip():
+                self.io.print("(empty)")
+                return False
+            self._handle_user_message(text)
+            return False
+
+        if name == "/clip":
+            text = self._read_clipboard_message()
+            if text is None:
+                return False
+            if not text.strip():
+                self.io.print("(empty)")
+                return False
+            self._handle_user_message(text)
             return False
 
         if name == "/extract":
@@ -130,6 +171,18 @@ class InteractiveChatApp:
                 self.io.print("Extraction mode:", self.config.extract_mode)
             else:
                 self.io.print("Usage: /extract auto|always|never")
+            return False
+
+        if name == "/extract_every":
+            raw = (arg or "").strip()
+            try:
+                n = int(raw)
+            except Exception:
+                self.io.print("Usage: /extract_every <n>")
+                return False
+            n = max(1, n)
+            self.config.extract_turn_limit = n
+            self.io.print("Extraction interval (turns):", self.config.extract_turn_limit)
             return False
 
         if name == "/extract_now":
@@ -236,13 +289,105 @@ class InteractiveChatApp:
         self.io.print("Unknown command. Use /help.")
         return False
 
+    def _read_multiline_message(self) -> Optional[str]:
+        """
+        Reads a multi-line user message from the console.
+
+        Termination:
+        - end: /end
+        - cancel: /cancel (or Ctrl-C)
+        """
+
+        self.io.print("\n[paste] Enter multi-line input. End with a single line: /end (cancel: /cancel)")
+        lines: List[str] = []
+        while True:
+            try:
+                line = self.io.input("... ").rstrip("\n")
+            except (EOFError, KeyboardInterrupt):
+                self.io.print("\n[paste] canceled")
+                return None
+
+            marker = line.strip()
+            if marker in {"/end", "／end"}:
+                break
+            if marker in {"/cancel", "／cancel"}:
+                self.io.print("[paste] canceled")
+                return None
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _read_file_message(self, raw_path: str) -> Optional[str]:
+        import os
+
+        path = str(raw_path or "").strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1].strip()
+        if not path:
+            self.io.print("Usage: /file <path>")
+            return None
+
+        abs_path = os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+        if not os.path.isfile(abs_path):
+            self.io.print("[file] not found:", abs_path)
+            return None
+
+        max_bytes = 2_000_000
+        try:
+            with open(abs_path, "rb") as f:
+                data = f.read(max_bytes + 1)
+        except Exception as e:
+            self.io.print("[file] failed:", str(e))
+            return None
+
+        truncated = len(data) > max_bytes
+        text = data[:max_bytes].decode("utf-8", errors="replace")
+        if truncated:
+            text = text.rstrip() + "\n\n...[truncated]...\n"
+        self.io.print(
+            f"[file] loaded: {abs_path} ({len(data[:max_bytes])} bytes{' truncated' if truncated else ''})"
+        )
+        return text
+
+    def _read_clipboard_message(self) -> Optional[str]:
+        import subprocess
+
+        def _try(cmd: list[str]) -> Optional[bytes]:
+            try:
+                return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+            except Exception:
+                return None
+
+        data = _try(["pbpaste"])
+        if data is None:
+            data = _try(["wl-paste", "--no-newline"])
+        if data is None:
+            data = _try(["xclip", "-o", "-selection", "clipboard"])
+        if data is None:
+            data = _try(["powershell.exe", "-NoProfile", "-Command", "Get-Clipboard -Raw"])
+        if data is None:
+            data = _try(["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"])
+
+        if data is None:
+            self.io.print("[clip] clipboard read not supported here (try /file <path>)")
+            return None
+
+        max_bytes = 2_000_000
+        truncated = len(data) > max_bytes
+        text = data[:max_bytes].decode("utf-8", errors="replace")
+        if truncated:
+            text = text.rstrip() + "\n\n...[truncated]...\n"
+        self.io.print(f"[clip] loaded ({len(data[:max_bytes])} bytes{' truncated' if truncated else ''})")
+        return text
+
     def _handle_user_message(self, text: str) -> None:
         latest_user = text.strip()
 
-        # Before processing the new user message, treat it as feedback for the previous turn.
-        # This allows us to extract only when the user confirms usefulness (or to avoid extracting
-        # when the user reports the solution did not work).
-        self._finalize_pending_extraction(user_feedback=latest_user)
+        # Drain any completed extraction results from background jobs.
+        self._drain_background_events()
+
+        # Treat the current user message as feedback for the previous turn, but run extraction
+        # asynchronously so chat latency is not impacted.
+        extract_window = self._pop_pending_extraction_window(user_feedback=latest_user)
 
         self.messages.append({"role": "user", "content": latest_user})
 
@@ -314,6 +459,9 @@ class InteractiveChatApp:
             messages=list(window),
         )
 
+        if extract_window is not None:
+            self._start_background_extraction(extract_window, trigger="auto")
+
     def _print_retrieval(self, hits: List[Any]) -> None:
         if not hits:
             self.io.print("\n[retrieve] no skills")
@@ -367,10 +515,12 @@ class InteractiveChatApp:
         if use_skills and (context or "").strip():
             system = (
                 "You are a helpful assistant.\n"
-                "You will be given a list of selected Skills retrieved for the current user query.\n"
-                "If a Skill is relevant, follow its Prompt to answer.\n"
-                "Do not mention the Skills block unless the user asks.\n\n"
-                f"{context}"
+                "You have access to a list of retrieved Skills (capabilities) below. \n"
+                "**CRITICAL:** These Skills are retrieved automatically and may be irrelevant. \n"
+                "1. **Evaluate:** Use a Skill ONLY if it directly matches the user's current intent.\n"
+                "2. **Ignore:** If the Skills are unrelated to the query, YOU MUST IGNORE THEM COMPLETELY and answer normally.\n"
+                "3. **Silence:** Do not mention the existence of these Skills.\n\n"
+                f"Skills Context:\n{context}"
             )
         else:
             system = "You are a helpful assistant.\n"
@@ -408,88 +558,100 @@ class InteractiveChatApp:
                 lines.append(f"{role.title()}: {content}")
         return "\n".join(lines).strip()
 
-    def _finalize_pending_extraction(self, *, user_feedback: str) -> None:
+    def _pop_pending_extraction_window(self, *, user_feedback: str) -> Optional[List[Dict[str, Any]]]:
         pending = self._pending
         if pending is None:
-            return
+            return None
 
         mode = (self.config.extract_mode or "auto").lower()
         if mode == "never":
             self._pending = None
-            return
+            return None
 
-        feedback = str(user_feedback or "").strip()
         total_turns_abs = sum(
             1
             for m in (self.messages or [])
             if str(m.get("role") or "").strip().lower() == "assistant"
         )
-        turn_limit = int(getattr(self.config, "extract_turn_limit", 0) or 0)
+        interval = max(1, int(getattr(self.config, "extract_turn_limit", 1) or 1))
         turns_since_check = max(0, int(total_turns_abs) - int(self._turns_at_last_extract_check or 0))
-        turn_limit_reached = bool(turn_limit > 0 and turns_since_check >= turn_limit)
-        topic_changed = (
-            heuristic_topic_changed(pending.latest_user, pending.latest_assistant, feedback)
-            if feedback
-            else False
-        )
-        feedback_is_ack = heuristic_is_ack_feedback(feedback) if feedback else False
-
-        should_extract = mode == "always"
-        if mode == "auto":
-            should_check = bool(topic_changed or feedback_is_ack or turn_limit_reached)
-            if not should_check:
-                # Not a topic boundary and not a periodic checkpoint; skip extraction evaluation for this turn.
-                self._pending = None
-                return
-
-            # Reset the checkpoint whenever we perform an extraction evaluation so periodic checks
-            # do not fire repeatedly, and the counter measures turns since the last evaluation.
-            self._turns_at_last_extract_check = int(total_turns_abs)
-
-            gating = (self.config.gating_mode or "llm").lower()
-            if gating == "llm" and self.extraction_gate is not None:
-                should_extract = self.extraction_gate.should_extract(
-                    latest_user=pending.latest_user,
-                    latest_assistant=pending.latest_assistant,
-                    user_feedback=feedback,
-                    topic_changed=topic_changed,
-                    total_turns=turns_since_check,
-                    turn_limit=turn_limit,
-                )
-            else:
-                # Heuristic gate is intentionally conservative.
-                should_extract = heuristic_should_extract(
-                    pending.latest_user,
-                    pending.latest_assistant,
-                    feedback,
-                    topic_changed=topic_changed,
-                    total_turns=turns_since_check,
-                    turn_limit=turn_limit,
-                )
-
-        if not should_extract:
+        if mode == "auto" and turns_since_check < interval:
             self._pending = None
+            return None
+
+        self._turns_at_last_extract_check = int(total_turns_abs)
+        self._pending = None
+
+        feedback = str(user_feedback or "").strip()
+        window = list(pending.messages or [])
+        if feedback:
+            window.append({"role": "user", "content": feedback})
+        return window
+
+    def _start_background_extraction(self, window: List[Dict[str, Any]], *, trigger: str) -> None:
+        if not window:
+            return
+        if not self._bg_extract_sema.acquire(blocking=False):
             return
 
+        thread = threading.Thread(
+            target=self._background_extraction_worker,
+            args=(list(window), str(trigger or "auto")),
+            daemon=True,
+        )
+        thread.start()
+
+    def _background_extraction_worker(self, window: List[Dict[str, Any]], trigger: str) -> None:
         try:
             updated = self.sdk.ingest(
                 user_id=self.config.user_id,
-                messages=pending.messages,
+                messages=window,
                 metadata={"channel": "chat"},
             )
+            self._events.put({"trigger": str(trigger), "updated": list(updated or []), "error": ""})
         except Exception as e:
-            self.io.print("\n[extract] failed:", str(e))
-            self._pending = None
-            return
+            self._events.put({"trigger": str(trigger), "updated": [], "error": str(e)})
+        finally:
+            try:
+                self._bg_extract_sema.release()
+            except Exception:
+                pass
 
-        if updated:
-            self.io.print("\n[extract] upserted:", len(updated))
+    def _drain_background_events(self) -> None:
+        """
+        Prints completed background extraction results, if any.
+
+        Note: Console input is blocking, so events that complete while the user is typing will be
+        printed before the next prompt.
+        """
+
+        while True:
+            try:
+                ev = self._events.get_nowait()
+            except queue.Empty:
+                break
+
+            trigger = str(ev.get("trigger") or "auto")
+            err = str(ev.get("error") or "").strip()
+            if err:
+                self.io.print(f"\n[extract:{trigger}] failed:", err)
+                continue
+
+            updated = ev.get("updated") or []
+            if not updated:
+                self.io.print(f"\n[extract:{trigger}] attempted: no skills extracted")
+                continue
+
+            self.io.print(f"\n[extract:{trigger}] upserted:", len(updated))
             for s in updated[:20]:
-                self.io.print(f"- {s.id} | v{s.version} | {s.name}")
+                sid = getattr(s, "id", "")
+                name = getattr(s, "name", "")
+                ver = getattr(s, "version", "")
+                self.io.print(f"- {sid} | v{ver} | {name}")
             for s in updated[:3]:
-                self._print_skill_md(s.id, label="extract")
-
-        self._pending = None
+                sid = getattr(s, "id", "")
+                if sid:
+                    self._print_skill_md(str(sid), label="extract")
 
     def _print_skill_md(self, skill_id: str, *, label: str) -> None:
         md = self.sdk.export_skill_md(str(skill_id))

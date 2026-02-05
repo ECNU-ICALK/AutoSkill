@@ -9,7 +9,7 @@ Skills should be used and which ones to include.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..llm.base import LLM
 from ..models import Skill
@@ -116,7 +116,7 @@ def _fallback_select_by_overlap(query: str, skills: List[Skill]) -> List[Skill]:
     if not q_tokens:
         return []
 
-    best: Skill | None = None
+    best: Optional[Skill] = None
     best_overlap = 0
     for s in skills:
         text = "\n".join(

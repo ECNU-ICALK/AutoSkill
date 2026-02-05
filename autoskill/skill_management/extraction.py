@@ -28,6 +28,10 @@ from ..utils.redact import redact_obj
 from ..utils.text import keywords
 
 _ACK_LINES = {
+    "thanks",
+    "thank you",
+    "thx",
+    "ty",
     "ok",
     "okay",
     "got it",
@@ -166,45 +170,48 @@ class LLMSkillExtractor:
 
         system = (
             "You are AutoSkill's Skill Extractor.\n"
-            "Task: extract reusable, executable Skills from the provided messages/events.\n"
-            "If DATA.hint is provided, treat it as an explicit user request for what to extract; use it to focus the extraction, but do not invent unsupported details.\n"
+            "Task: Extract reusable, executable Skills from the provided messages/events.\n"
+            "If DATA.hint is provided, treat it as an explicit user request for what to extract.\n"
             "\n"
-            "Skills are modular, self-contained packages that extend an agent with specialized knowledge, workflows, and tools.\n"
-            "Think of each Skill as an onboarding guide for another assistant instance.\n"
-            "Output ONLY strict JSON that can be parsed by json.loads; no Markdown, no commentary, no extra text.\n"
-            "The output schema MUST be: {\"skills\": [...]}.\n"
-            f"Return at most {max_candidates} skills.\n"
-            "Each skill fields: name, description, prompt, triggers, tags, examples, confidence.\n"
-            "Generalize and de-identify: remove/replace names, orgs, project IDs, accounts, URLs, secrets, exact dates/amounts; use placeholders like <PROJECT>, <ENV>, <TOOL>, <DATE>, <VERSION>.\n"
+            "### CRITICAL FILTER: WHEN TO EXTRACT\n"
+            "To avoid noise, you must distinguish between 'Standard LLM Capabilities' (DO NOT EXTRACT) and 'Specialized Skills' (EXTRACT).\n"
             "\n"
-            "Skill quality requirements (aligned with Agent Skills):\n"
-            "- name: concise and specific; good for retrieval. Prefer kebab-case for English names (e.g., \"release-checklist\").\n"
-            "- description: 1-2 sentences in third person; include WHEN the skill should be used (e.g., \"This skill should be used when …\").\n"
-            "- prompt: ALWAYS English. Write in imperative/infinitive form (verb-first, objective instructions), suitable for SKILL.md.\n"
-            "  - Must be standalone: include assumptions, inputs/placeholders, numbered steps, per-step checks/validation, and output format.\n"
-            "  - Keep it lean (progressive disclosure): include only essential procedure; do not paste large references.\n"
-            "  - If large reference material would help (schemas, policies, API docs), add a short \"Bundled resources (optional)\" section suggesting files under references/ (and include grep/search hints if useful), but do NOT paste the full content.\n"
-            "  - If deterministic code is repeatedly required, suggest a script under scripts/ (do NOT invent large code unless it was provided).\n"
-            "  - If reusable templates/assets are needed, suggest files under assets/.\n"
-            "  - Do not reference \"this conversation\", \"above\", or hidden context.\n"
-            "- triggers: 3-7 short, concrete triggers (prefer third person: \"This skill should be used when …\").\n"
+            "1. DO NOT EXTRACT (Output {\"skills\": []}) if:\n"
+            "   - The user asked for a standard task (e.g., 'Write a poem', 'Translate this', 'Fix this bug') AND accepted the result without modification.\n"
+            "   - The interaction is simple Q&A or a one-shot generic request.\n"
+            "   - The logic is trivial or purely based on the model's training data (Common Knowledge).\n"
+            "\n"
+            "2. EXTRACT ONLY IF:\n"
+            "   - **User Intervention:** The user corrected the output, provided a specific example, defined a style, or enforced a constraint (e.g., 'No, use JSON format', 'Make it more sarcastic'). Extract the *Preference/Constraint*.\n"
+            "   - **Complex Workflow:** The task involves a multi-step logic chain, specific reasoning order, or a defined SOP (Standard Operating Procedure), even if the user didn't correct it. (e.g., 'First analyze X, then extract Y, finally format as Z'). Extract the *Process*.\n"
+            "   - **Explicit Template:** The user provided a specific schema, data structure, or output template to follow.\n"
+            "\n"
+            "### REQUIREMENTS\n"
+            "- Output ONLY strict JSON that can be parsed by json.loads.\n"
+            "- Output schema: {\"skills\": [...]}. Return at most {max_candidates} skills.\n"
+            "- Language: name, description, prompt, triggers, tags, examples MUST MUST be written in the **same language as the user's conversational instructions**.\n"
+            "  - Example: If the user says '帮我总结这份英文文档' (Chinese instruction), the skill information must be Chinese.\n"
+            "  - Example: If the user says 'Refactor this code' (English instruction), the skill information must be English.\n"
+            "- Generalize and de-identify: Replace specific names, orgs, URLs, dates with placeholders <PROJECT>, <ENV>, <TOOL>.\n"
+            "\n"
+            "### FIELD DEFINITIONS\n"
+            "- name: Concise, specific, kebab-case (e.g., \"code-review-checklist\", \"周报生成流\").\n"
+            "- description: 1-2 sentences in third person; include WHEN to use it.\n"
+            "- prompt: Imperative form (verb-first). Must be standalone and executable. Contains: Assumptions, Inputs, Numbered Steps, Validation, Output Format. Do not reference 'this conversation'.\n"
+            "  - If external resources are implied, use: 'Bundled resources: suggest files under references/'.\n"
+            "- triggers: 3-7 short, concrete phrases starting with \"This skill should be used when …\".\n"
             "- tags: 1-6 keywords.\n"
-            "- examples: 0-3 short examples (input/output/notes). Do not include sensitive identifiers.\n"
-            "- JSON validity: escape newlines inside strings as \\n.\n"
+            "- examples: 0-3 short, de-identified input/output pairs.\n"
+            "- confidence: Number between 0.0 and 1.0. (Lower confidence if the skill is borderline generic).\n"
             "\n"
-            "User-centered necessity (be conservative):\n"
-            "- Extract ONLY if the content reflects something the user would actually want to reuse: a stable preference, constraint, workflow, checklist, template, rubric, or decision rule.\n"
-            "- Do NOT extract generic one-off outputs (e.g., a generated resume/email/doc) as a Skill. Instead, extract the reusable instructions and the user's preferences/acceptance criteria that would reliably produce the desired output.\n"
-            "- If the exchange looks like an early draft that the user will refine later (e.g., \"make it more X\", \"change the tone\", \"rewrite bullets\"), extract the underlying EDITING RULES / preferences, not the draft content.\n"
-            "- If there is not enough signal of a reusable capability (generic advice, acknowledgements, vague requests), output {\"skills\": []}.\n"
+            "### SKILL EXTRACTION MINDSET\n"
+            "- Ask: \"Is this logic specific to THIS user/business, or can any AI do it?\" -> If it's specific, extract it.\n"
+            "- Ask: \"Is this a complex sequence of steps that is hard to prompt manually?\" -> If yes, extract it.\n"
+            "- Otherwise, output {\"skills\": []}.\n"
             "\n"
-            "Language rules:\n"
-            "- name/description/triggers/tags/examples match the dominant language of the input.\n"
-            "- prompt is ALWAYS English.\n"
-            "prompt must be directly executable: steps + per-step checks + output format; do not reference 'this conversation/above'.\n"
-            "confidence must be a number between 0 and 1.\n"
-            "If no skills can be extracted, output {\"skills\": []}."
+            "JSON validity: Escape newlines as \\n. No Markdown code blocks."      
         )
+
         user = (
             f"{json.dumps(payload, ensure_ascii=False)}"
         )
@@ -599,9 +606,16 @@ def _flatten_sources(
 ) -> str:
     chunks: List[str] = []
     for m in messages or []:
+        role = str(m.get("role") or "").strip().lower()
         content = m.get("content") or ""
-        if content:
-            chunks.append(str(content))
+        if not content:
+            continue
+        c = str(content)
+        if role == "assistant":
+            c2 = c.strip()
+            if c2.startswith("Offline mode:") or c2.startswith("(LLM error:"):
+                continue
+        chunks.append(c)
     for e in events or []:
         chunks.append(json.dumps(e, ensure_ascii=False))
     return "\n".join(chunks)

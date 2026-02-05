@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-AutoSkill 是一个持续自进化的「Skill Layer」SDK：它可以从对话与行为/事件日志中自动生长出可复用、可执行的 **Skills**，并持续维护（去重/合并/版本化），在后续任务中检索并注入合适的 Skills 来提升下游任务表现。
+AutoSkill 是一个持续自进化的「Skill Layer」SDK：它把对话与行为/事件日志转化为可复用、可执行的 **Skills**，并持续维护（去重/合并/版本化），在后续任务中检索并注入合适的 Skills 来提升下游任务表现。
 
 目标：参考常见的「memory 插件」工作流，但把存储单元从“原始记忆”升级为“可执行、可复用的技能（Skill）”。
 
@@ -210,7 +210,7 @@ Skills/
 
 ### 交互式流程（Retrieve + Extract）
 
-在 `autoskill.interactive` 中，每轮用户输入会先执行检索，再生成回复。抽取会经过 gating 以控制质量；在 `auto` 模式下，抽取评估只在话题边界或周期性 checkpoint 执行，并且会延迟到下一条用户消息，把它作为“反馈信号”（是否解决/是否要继续修改）再决定是否 ingest。
+在 `autoskill.interactive` 中，每轮用户输入会先执行检索，再生成回复。抽取按固定频率尝试：在 `auto` 模式下每 N 轮尝试一次（`extract_turn_limit`，默认 `1`）。是否真正生成 Skill 由抽取器决定（当没有足够可复用信号时输出 `{"skills": []}`），抽取在下一条用户消息时执行（因此可以把这条消息作为轻量反馈上下文）。
 
 ## 仓库结构（代码地图）
 
@@ -220,6 +220,7 @@ Skills/
 - `README.zh-CN.md`：中文文档与架构说明
 - `pyproject.toml`：打包与依赖
 - `Skills/`：默认本地 store 根目录（运行时创建/使用）
+- `web/`：本地 Web UI 的静态资源（`examples/web_ui.py`）
 - `autoskill/`：SDK 源码
 - `examples/`：端到端示例脚本
 
@@ -281,13 +282,13 @@ Skills/
 #### `autoskill/interactive/`（交互式编排）
 
 - `autoskill/interactive/__init__.py`：交互模块导出（`InteractiveChatApp`、`InteractiveConfig` 等）
-- `autoskill/interactive/app.py`：交互编排（rewrite → retrieve → respond → gate/extract）
+- `autoskill/interactive/app.py`：交互编排（rewrite → retrieve → respond → extract）
 - `autoskill/interactive/config.py`：交互配置（scope/阈值/窗口等）
 - `autoskill/interactive/commands.py`：命令解析（`/help`、`/extract_now` 等）
 - `autoskill/interactive/io.py`：IO 抽象（便于嵌入其他前端）
 - `autoskill/interactive/rewriting.py`：检索 query 重写
 - `autoskill/interactive/selection.py`：可选 LLM selector（决定是否注入检索到的 skills）
-- `autoskill/interactive/gating.py`：抽取 gating（启发式 + LLM gate）
+- `autoskill/interactive/gating.py`：抽取时机相关的启发式（目前交互默认按固定间隔抽取；这些启发式可用于扩展策略）
 
 #### `autoskill/utils/`（通用工具）
 
@@ -304,6 +305,7 @@ Skills/
 - `examples/__init__.py`：示例脚本入口（`python3 -m examples.<script>`）
 - `examples/basic_ingest_search.py`：最小 ingest + search 演示
 - `examples/interactive_chat.py`：交互式演示（`mock|glm|dashscope|openai|anthropic`）
+- `examples/web_ui.py`：本地 Web UI（对话 + 检索/抽取面板）
 - `examples/personalized_email_demo.py`：迭代写作 → 抽取 → 检索的脚本化 demo
 - `examples/local_persistent_store.py`：本地持久化 store demo
 - `examples/bigmodel_glm_persistent_store.py`：GLM + embedding-3 + 本地持久化 demo
@@ -313,3 +315,18 @@ Skills/
 - `examples/import_agent_skills.py`：导入外部 Agent Skills 到本地 store
 - `examples/normalize_skill_ids.py`：为 store 根目录下缺失 `id:` 的 `SKILL.md` 做规范化
 
+## 示例运行
+
+交互式（每轮检索 + 可选抽取/维护）：
+
+```bash
+python3 -m examples.interactive_chat --llm-provider glm
+```
+
+Web UI（本地）：
+
+```bash
+python3 -m examples.web_ui --llm-provider glm
+```
+
+然后打开 `http://127.0.0.1:8000`（默认）。Ctrl/Cmd+Enter 发送；Enter 换行。

@@ -2,9 +2,9 @@
 
 English | [中文](README.zh-CN.md)
 
-AutoSkill is a self-evolving "Skill Layer" SDK: it automatically grows reusable, executable **Skills** from
-conversations and behavior/event logs, continuously maintains them (dedupe/merge/versioning), and
-retrieves/injects the right Skills to improve downstream task performance as you use it.
+AutoSkill is a self-evolving “Skill Layer” SDK that turns conversations and behavior/event logs into reusable,
+executable **Skills**, continuously maintains them (dedupe/merge/versioning), and retrieves/injects the right
+Skills to improve downstream task performance over time.
 
 Goal: similar to a "memory plugin" workflow, but the stored unit is an executable, reusable Skill rather than
 raw memory.
@@ -220,8 +220,9 @@ Notes:
 ### Interactive Flow (Retrieve + Extract)
 
 In `autoskill.interactive`, each user turn runs retrieval before generating the assistant response.
-Extraction is gated to protect quality; in `auto` mode it is evaluated only at topic boundaries or periodic
-checkpoints, and ingestion is deferred until the next user message so it can be used as feedback.
+Extraction is attempted on a fixed schedule; in `auto` mode it runs once every N turns (`extract_turn_limit`, default `1`).
+The extractor itself decides whether to emit a Skill (by returning `{"skills": []}` when there is not enough
+reusable signal), and ingestion runs on the next user message (so it can include that message as light feedback context).
 
 ## Repository Structure (Code Map)
 
@@ -232,6 +233,7 @@ This section is a quick “what lives where” map. Paths are relative to the re
 - `README.md`: overview, provider configs, usage examples, architecture map
 - `pyproject.toml`: packaging + dependencies
 - `Skills/`: default local store root (created/used at runtime)
+- `web/`: static assets for the local Web UI (`examples/web_ui.py`)
 - `autoskill/`: SDK package (core implementation)
 - `examples/`: runnable scripts showing end-to-end flows
 
@@ -293,13 +295,13 @@ This section is a quick “what lives where” map. Paths are relative to the re
 #### `autoskill/interactive/` (Interactive Chat Orchestration)
 
 - `autoskill/interactive/__init__.py`: interactive exports (`InteractiveChatApp`, `InteractiveConfig`, helpers)
-- `autoskill/interactive/app.py`: interactive loop orchestration (rewrite → retrieve → respond → gate/extract)
+- `autoskill/interactive/app.py`: interactive loop orchestration (rewrite → retrieve → respond → extract)
 - `autoskill/interactive/config.py`: `InteractiveConfig` (CLI-tunable behavior: scope, thresholds, windows)
 - `autoskill/interactive/commands.py`: command parsing (`/help`, `/extract_now`, etc.)
 - `autoskill/interactive/io.py`: console IO abstraction (easy to embed in other frontends)
 - `autoskill/interactive/rewriting.py`: LLM query rewriting for better skill retrieval
 - `autoskill/interactive/selection.py`: optional LLM selector to choose which retrieved skills to inject
-- `autoskill/interactive/gating.py`: extraction gating logic (heuristic + LLM gate)
+- `autoskill/interactive/gating.py`: extraction timing signals (ack/topic-boundary heuristics for when to attempt extraction)
 
 #### `autoskill/utils/` (Shared Utilities)
 
@@ -316,6 +318,7 @@ This section is a quick “what lives where” map. Paths are relative to the re
 - `examples/__init__.py`: examples package entrypoints (run via `python3 -m examples.<script>`)
 - `examples/basic_ingest_search.py`: minimal ingest + search demo (offline by default)
 - `examples/interactive_chat.py`: interactive loop demo (supports `mock|glm|dashscope|openai|anthropic`)
+- `examples/web_ui.py`: local web UI (chat + retrieval/extraction panels)
 - `examples/personalized_email_demo.py`: scripted demo of iterative writing → skill extraction → retrieval
 - `examples/local_persistent_store.py`: local store demo (skills + vector cache on disk)
 - `examples/bigmodel_glm_persistent_store.py`: GLM + embedding-3 with local persistence
@@ -340,6 +343,14 @@ Interactive chat (retrieve each turn + optional extract/maintain):
 ```bash
 python3 -m examples.interactive_chat --llm-provider glm
 ```
+
+Web UI (local) for interactive chat + retrieval/extraction panels:
+
+```bash
+python3 -m examples.web_ui --llm-provider glm
+```
+
+Then open `http://127.0.0.1:8000` (default). Use Ctrl/Cmd+Enter to send; Enter inserts newline.
 
 Offline personalized email Skill demo (scripted interactive session; no network):
 
@@ -388,6 +399,6 @@ python3 -m examples.interactive_chat --llm-provider mock --store-dir Skills --li
 
 In the interactive loop:
 - Retrieval runs every user turn before answering (vector search over stored skills).
-- Extraction is gated to protect quality; when enabled, extraction is deferred until the next user message so it can be used as feedback (worked/didn't work) before ingesting a new Skill.
+- Extraction is attempted every N turns in `auto` mode; the extractor decides whether to emit a Skill (or return an empty list) and runs on the next user message so it can include that message as light feedback context.
 
 See `autoskill/interactive/app.py` and `autoskill/interactive/gating.py`.

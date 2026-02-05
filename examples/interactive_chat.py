@@ -20,7 +20,6 @@ from autoskill.interactive import (
     LLMQueryRewriter,
     LLMSkillSelector,
 )
-from autoskill.interactive.gating import LLMExtractionGate
 from autoskill.llm.factory import build_llm
 
 
@@ -252,11 +251,15 @@ def main() -> None:
     parser.add_argument(
         "--extract-turn-limit",
         type=int,
-        default=int(_env("AUTOSKILL_EXTRACT_TURN_LIMIT", "10")),
-        help="Long conversation hint for extraction gating (in turns).",
+        default=int(_env("AUTOSKILL_EXTRACT_TURN_LIMIT", "1")),
+        help="In auto mode, attempt extraction once every N turns (N=extract_turn_limit).",
     )
     parser.add_argument("--extract-mode", default=_env("AUTOSKILL_EXTRACT_MODE", "auto"), help="auto|always|never")
-    parser.add_argument("--gating-mode", default=_env("AUTOSKILL_GATING_MODE", "llm"), help="llm|heuristic")
+    parser.add_argument(
+        "--gating-mode",
+        default=_env("AUTOSKILL_GATING_MODE", "llm"),
+        help="Deprecated (extraction gating is integrated into the extractor).",
+    )
     parser.add_argument(
         "--assistant-temperature",
         type=float,
@@ -278,7 +281,6 @@ def main() -> None:
         ingest_window=int(args.ingest_window),
         extract_turn_limit=int(args.extract_turn_limit),
         extract_mode=str(args.extract_mode),
-        gating_mode=str(args.gating_mode),
         assistant_temperature=float(args.assistant_temperature),
     ).normalize()
 
@@ -309,11 +311,6 @@ def main() -> None:
     )
 
     chat_llm = None if llm_provider == "mock" else build_llm(llm_cfg)
-    extraction_gate = None
-    if interactive_cfg.gating_mode == "llm" and llm_provider != "mock":
-        gate_cfg = dict(llm_cfg)
-        gate_cfg.setdefault("max_tokens", 4096)
-        extraction_gate = LLMExtractionGate(build_llm(gate_cfg))
 
     query_rewriter = None
     if llm_provider != "mock":
@@ -347,7 +344,6 @@ def main() -> None:
         config=interactive_cfg,
         io=ConsoleIO(),
         chat_llm=chat_llm,
-        extraction_gate=extraction_gate,
         query_rewriter=query_rewriter,
         skill_selector=skill_selector,
     )

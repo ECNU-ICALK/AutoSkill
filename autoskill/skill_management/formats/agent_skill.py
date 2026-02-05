@@ -68,6 +68,29 @@ def upsert_skill_md_id(md: str, *, skill_id: str) -> str:
     return _upsert_frontmatter_scalar(md, key="id", value=str(skill_id))
 
 
+def upsert_skill_md_metadata(
+    md: str,
+    *,
+    skill_id: str,
+    name: str,
+    description: str,
+    version: str,
+) -> str:
+    """
+    Ensures SKILL.md YAML frontmatter contains required metadata fields.
+
+    This function preserves the original markdown body while enforcing a stable `id` and keeping
+    `name`, `description`, and `version` synchronized with the structured Skill fields.
+    """
+
+    # Insert in reverse order because the underlying helper inserts new keys at the top.
+    md2 = _upsert_frontmatter_scalar(md, key="version", value=str(version or "0.1.0"))
+    md2 = _upsert_frontmatter_scalar(md2, key="description", value=str(description))
+    md2 = _upsert_frontmatter_scalar(md2, key="name", value=str(name))
+    md2 = _upsert_frontmatter_scalar(md2, key="id", value=str(skill_id))
+    return md2
+
+
 def _upsert_frontmatter_scalar(md: str, *, key: str, value: str) -> str:
     import re
 

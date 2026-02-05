@@ -41,12 +41,11 @@ class InteractiveConfig:
     ingest_window: int = 6
 
     # Extraction timing signals:
-    # - topic changes (new topic starts) are treated as a weak "topic boundary" signal for extraction gating
-    # - long conversations can trigger a more aggressive extraction evaluation to avoid missing reusable skills
-    extract_turn_limit: int = 10
+    # In "auto" mode, attempt extraction once every N turns (N=extract_turn_limit).
+    # Set N=1 to attempt extraction every turn.
+    extract_turn_limit: int = 1
 
     extract_mode: str = "auto"  # auto|always|never
-    gating_mode: str = "llm"  # llm|heuristic
 
     assistant_temperature: float = 0.2
 
@@ -75,12 +74,8 @@ class InteractiveConfig:
         if self.extract_mode not in {"auto", "always", "never"}:
             self.extract_mode = "auto"
 
-        self.gating_mode = (self.gating_mode or "llm").strip().lower()
-        if self.gating_mode not in {"llm", "heuristic"}:
-            self.gating_mode = "llm"
-
         self.top_k = max(0, int(self.top_k))
         self.history_turns = max(0, int(self.history_turns))
         self.ingest_window = max(2, int(self.ingest_window))
-        self.extract_turn_limit = max(0, int(self.extract_turn_limit))
+        self.extract_turn_limit = max(1, int(self.extract_turn_limit))
         return self
