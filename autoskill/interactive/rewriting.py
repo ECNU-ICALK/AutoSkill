@@ -110,11 +110,26 @@ class LLMQueryRewriter:
 
         system = (
             "You are AutoSkill's retrieval query rewriter.\n"
-            "Goal: rewrite the current user query into a single standalone search query that will retrieve the most relevant Skills.\n"
-            "Use the conversation context to resolve references (e.g., 'that', 'it', 'the above') and add missing keywords.\n"
-            "Do NOT invent new facts.\n"
-            "Keep it concise and information-dense.\n"
-            "Output ONLY the rewritten query text (no quotes, no bullets, no explanations).\n"
+            "Goal: rewrite the current user query into a single, standalone search query that retrieves the most relevant Skills (capabilities).\n"
+            "\n"
+            "Rewrite strategy:\n"
+            "- Focus on the capability/need and constraints, not the specific pasted content.\n"
+            "- Capture: operation (e.g., polish/rewrite/debug/plan), domain, format/tools (e.g., LaTeX/SQL/Python), and style/quality constraints.\n"
+            "- If the user includes a long pasted passage (text/code/stacktrace), do NOT copy it verbatim.\n"
+            "  - Replace it with a placeholder like <PASTED_TEXT> and describe what to do to it.\n"
+            "- Use the conversation context to resolve references (e.g., 'that', 'it', 'the above') and to add missing keywords.\n"
+            "- Do NOT invent new facts.\n"
+            "\n"
+            "Language:\n"
+            "- Write the rewritten query in the language of the user's instruction/request.\n"
+            "- If the user's instruction is mixed-language, follow the instruction language rather than the pasted content language.\n"
+            "\n"
+            "Output requirements:\n"
+            "- Output ONLY the rewritten query text (one line; no quotes, no bullets, no explanations).\n"
+            "\n"
+            "Examples:\n"
+            "- Input: \"Polish the following paragraph: <PASTED_TEXT with LaTeX \\\\cite{...}>\" -> \"polish academic English paragraph in LaTeX; improve clarity and tone; preserve \\\\cite{} citation format\"\n"
+            "- Input: \"Fix this error: <PASTED_STACKTRACE>\" -> \"debug Python error stacktrace, identify root cause and propose fix\"\n"
         )
         if history:
             user = (

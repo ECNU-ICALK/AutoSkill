@@ -39,7 +39,7 @@ for h in hits:
     print(h.skill.name, h.score)
 ```
 
-## Provider Config Examples (OpenAI / Anthropic)
+## Provider Config Examples
 
 OpenAI:
 
@@ -53,6 +53,32 @@ sdk = AutoSkill(
             "provider": "openai",
             "model": "text-embedding-3-small",
             "api_key": "YOUR_KEY",
+        },
+        store={"provider": "inmemory"},
+        maintenance_strategy="llm",
+    )
+)
+```
+
+DashScope Qwen (OpenAI-compatible mode):
+
+```python
+from autoskill import AutoSkill, AutoSkillConfig
+
+sdk = AutoSkill(
+    AutoSkillConfig(
+        llm={
+            "provider": "dashscope",
+            "model": "qwen-plus",
+            "api_key": "YOUR_DASHSCOPE_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
+        },
+        embeddings={
+            "provider": "dashscope",
+            "model": "text-embedding-v4",
+            "api_key": "YOUR_DASHSCOPE_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
+            "extra_body": {"dimensions": 1024, "encoding_format": "float"},
         },
         store={"provider": "inmemory"},
         maintenance_strategy="llm",
@@ -136,8 +162,8 @@ storage/interface flexible for extensions.
 
 AutoSkill uses a pluggable architecture:
 
-- LLM: `mock` (offline), `openai`, `anthropic`, `glm` (BigModel GLM-4.7)
-- Embeddings: `hashing` (offline), `openai`, `glm` (BigModel embedding-3)
+- LLM: `mock` (offline), `openai`, `dashscope` (Qwen), `anthropic`, `glm` (BigModel GLM-4.7)
+- Embeddings: `hashing` (offline), `openai`, `dashscope` (Qwen), `glm` (BigModel embedding-3)
 - Store: `inmemory` (offline), `local` (directory-based persistence: `Users/<user_id>/...` + optional shared `Common/...`; caches vectors in a persistent on-disk index for fast retrieval)
 
 ## Layout

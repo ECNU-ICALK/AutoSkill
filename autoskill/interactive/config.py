@@ -69,7 +69,7 @@ class InteractiveConfig:
         try:
             self.min_score = float(self.min_score)
         except Exception:
-            self.min_score = 0.34
+            self.min_score = 0.4
 
         self.extract_mode = (self.extract_mode or "auto").strip().lower()
         if self.extract_mode not in {"auto", "always", "never"}:

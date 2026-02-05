@@ -172,6 +172,7 @@ class LocalSkillStore(SkillStore):
         max_depth: int = 6,
         cache_vectors: bool = True,
         vector_cache_dirname: str = ".autoskill/vectors",
+        vector_index_name: str = "skills",
         users_dirname: str = "Users",
         libraries_dirname: str = "Common",
         library_dirs: Optional[List[Tuple[str, str]]] = None,
@@ -201,7 +202,9 @@ class LocalSkillStore(SkillStore):
         os.makedirs(self._root_dir, exist_ok=True)
         if self._cache_vectors:
             os.makedirs(self._vector_cache_dir, exist_ok=True)
-            self._index = FlatFileVectorIndex(dir_path=self._vector_cache_dir, name="skills")
+            self._index = FlatFileVectorIndex(
+                dir_path=self._vector_cache_dir, name=str(vector_index_name or "skills")
+            )
         else:
             self._index = None
 

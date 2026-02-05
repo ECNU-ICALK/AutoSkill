@@ -101,7 +101,7 @@ class InteractiveChatApp:
             "  /write <dir>\n"
             "  /rewrite auto|always|never\n"
             "  /extract auto|always|never\n"
-            "  /extract_now [hint]\n"
+            "  /extract_now [hint]  (alias: extract_now [hint])\n"
             "  /scope user|common|all\n"
             "  /clear\n"
         )
@@ -256,12 +256,16 @@ class InteractiveChatApp:
                     self.io.print(f"\n[retrieve] rewritten query: {rewritten}")
                 if rewrite_mode in {"auto", "always"}:
                     search_query = rewritten.strip()
-        hits = self.sdk.search(
-            search_query,
-            user_id=self.config.user_id,
-            limit=self.config.top_k,
-            filters={"scope": self.config.skill_scope},
-        )
+        try:
+            hits = self.sdk.search(
+                search_query,
+                user_id=self.config.user_id,
+                limit=self.config.top_k,
+                filters={"scope": self.config.skill_scope},
+            )
+        except Exception as e:
+            self.io.print("\n[retrieve] failed:", str(e))
+            hits = []
         min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
         if hits and min_score > 0:
             hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]

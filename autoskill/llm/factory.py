@@ -7,6 +7,7 @@ providers may read environment variables internally.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
 from .anthropic import AnthropicLLM
@@ -28,6 +29,19 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             model=str(config.get("model", "gpt-4o-mini")),
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.openai.com")),
+            timeout_s=int(config.get("timeout_s", 60)),
+            max_input_chars=int(config.get("max_input_chars", 10000)),
+            max_tokens=int(config.get("max_tokens", 4096)),
+        )
+
+    if provider in {"dashscope", "qwen"}:
+        # DashScope's "compatible-mode" is OpenAI Chat Completions compatible.
+        return OpenAIChatLLM(
+            model=str(config.get("model", "qwen-plus")),
+            api_key=(config.get("api_key") or os.getenv("DASHSCOPE_API_KEY")),
+            base_url=str(
+                config.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode")
+            ),
             timeout_s=int(config.get("timeout_s", 60)),
             max_input_chars=int(config.get("max_input_chars", 10000)),
             max_tokens=int(config.get("max_tokens", 4096)),

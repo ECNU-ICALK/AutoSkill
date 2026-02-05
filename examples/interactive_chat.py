@@ -47,6 +47,8 @@ def _env_json(name: str) -> Optional[Dict[str, Any]]:
 def _pick_default_provider() -> str:
     if os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY"):
         return "glm"
+    if os.getenv("DASHSCOPE_API_KEY"):
+        return "dashscope"
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -74,6 +76,18 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
         return {"provider": "mock"}
 
     timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
+
+    if provider in {"dashscope", "qwen"}:
+        return {
+            "provider": "dashscope",
+            "model": model or _env("DASHSCOPE_MODEL", "qwen-plus"),
+            "api_key": _require_key("DASHSCOPE_API_KEY"),
+            "base_url": _env(
+                "DASHSCOPE_BASE_URL",
+                "https://dashscope.aliyuncs.com/compatible-mode",
+            ),
+            "timeout_s": timeout_s,
+        }
 
     if provider == "openai":
         return {
@@ -114,6 +128,8 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
     if not provider:
         if llm_provider in {"glm", "bigmodel", "zhipu"}:
             provider = "glm"
+        elif llm_provider in {"dashscope", "qwen"}:
+            provider = "dashscope"
         elif llm_provider == "openai":
             provider = "openai"
         elif llm_provider == "anthropic":
@@ -133,6 +149,21 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
             "api_key": _require_key("OPENAI_API_KEY"),
             "base_url": _env("OPENAI_BASE_URL", "https://api.openai.com"),
             "timeout_s": timeout_s,
+            "extra_body": _env_json("OPENAI_EMB_EXTRA_BODY"),
+        }
+
+    if provider in {"dashscope", "qwen"}:
+        return {
+            "provider": "dashscope",
+            "model": model or _env("DASHSCOPE_EMBED_MODEL", "text-embedding-v4"),
+            "api_key": _require_key("DASHSCOPE_API_KEY"),
+            "base_url": _env(
+                "DASHSCOPE_BASE_URL",
+                "https://dashscope.aliyuncs.com/compatible-mode",
+            ),
+            "timeout_s": timeout_s,
+            "max_text_chars": int(_env("DASHSCOPE_EMB_MAX_TEXT_CHARS", "10000")),
+            "extra_body": _env_json("DASHSCOPE_EMB_EXTRA_BODY"),
         }
 
     if provider in {"glm", "bigmodel", "zhipu"}:
@@ -154,9 +185,17 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="AutoSkill interactive chat")
-    parser.add_argument("--llm-provider", default=_pick_default_provider(), help="mock|glm|openai|anthropic")
+    parser.add_argument(
+        "--llm-provider",
+        default=_pick_default_provider(),
+        help="mock|glm|dashscope|openai|anthropic",
+    )
     parser.add_argument("--llm-model", default=None)
-    parser.add_argument("--embeddings-provider", default="", help="hashing|glm|openai (default depends on llm)")
+    parser.add_argument(
+        "--embeddings-provider",
+        default="",
+        help="hashing|glm|dashscope|openai (default depends on llm)",
+    )
     parser.add_argument("--embeddings-model", default=None)
     default_store_dir = _env("AUTOSKILL_STORE_DIR", _env("AUTOSKILL_STORE_PATH", "Skills"))
     parser.add_argument("--store-dir", dest="store_dir", default=default_store_dir)
@@ -207,7 +246,7 @@ def main() -> None:
         default=[],
         help="Additional read-only library root (can be passed multiple times).",
     )
-    parser.add_argument("--top-k", type=int, default=int(_env("AUTOSKILL_TOP_K", "2")))
+    parser.add_argument("--top-k", type=int, default=int(_env("AUTOSKILL_TOP_K", "1")))
     parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "10")))
     parser.add_argument("--ingest-window", type=int, default=int(_env("AUTOSKILL_INGEST_WINDOW", "6")))
     parser.add_argument(

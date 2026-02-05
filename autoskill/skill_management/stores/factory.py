@@ -4,7 +4,10 @@ Store factory: build a SkillStore from config.store/provider.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 from typing import List, Tuple
 
 from ...config import AutoSkillConfig
@@ -12,6 +15,75 @@ from ...embeddings.factory import build_embeddings
 from .base import SkillStore
 from .inmemory import InMemorySkillStore
 from .local import LocalSkillStore
+
+
+_SAFE_NAME_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(value: str, *, max_len: int = 32) -> str:
+    s = str(value or "").strip().lower()
+    s = _SAFE_NAME_RE.sub("-", s).strip("-")
+    if not s:
+        return "model"
+    return s[: max(1, int(max_len))]
+
+
+def _embedding_signature(config: AutoSkillConfig) -> dict:
+    emb = dict(config.embeddings or {})
+    provider = str(emb.get("provider") or "hashing").strip().lower()
+    if provider in {"bigmodel", "zhipu"}:
+        provider = "glm"
+    if provider == "qwen":
+        provider = "dashscope"
+
+    model = str(emb.get("model") or "").strip()
+    if not model:
+        if provider == "openai":
+            model = "text-embedding-3-small"
+        elif provider == "glm":
+            model = "embedding-3"
+        elif provider == "dashscope":
+            model = "text-embedding-v4"
+        else:
+            model = "default"
+
+    dimensions = None
+    if provider == "hashing":
+        try:
+            dimensions = int(emb.get("dims", 256))
+        except Exception:
+            dimensions = 256
+    else:
+        extra = emb.get("extra_body") or emb.get("extra_payload") or {}
+        if isinstance(extra, dict):
+            dimensions = extra.get("dimensions")
+        if dimensions is None:
+            dimensions = emb.get("dimensions")
+        try:
+            dimensions = int(dimensions) if dimensions is not None else None
+        except Exception:
+            dimensions = None
+
+    sig = {"provider": provider, "model": model}
+    if dimensions is not None:
+        sig["dimensions"] = int(dimensions)
+    return sig
+
+
+def _vector_index_name_from_embeddings(config: AutoSkillConfig) -> str:
+    sig = _embedding_signature(config)
+    provider = str(sig.get("provider") or "emb")
+    model = str(sig.get("model") or "model")
+    dims = sig.get("dimensions")
+
+    payload = json.dumps(sig, sort_keys=True, ensure_ascii=False)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+    parts = ["skills", _slug(provider, max_len=16), _slug(model, max_len=28)]
+    if isinstance(dims, int) and dims > 0:
+        parts.append(f"d{dims}")
+    parts.append(digest)
+    return "-".join([p for p in parts if p])
 
 
 def build_store(config: AutoSkillConfig) -> SkillStore:
@@ -34,6 +106,11 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
         cache_vectors = bool(config.store.get("cache_vectors", True))
         vector_cache_dirname = str(
             config.store.get("vector_cache_dirname", ".autoskill/vectors")
+        )
+        vector_index_name = str(
+            config.store.get("vector_index_name")
+            or config.store.get("vector_index")
+            or _vector_index_name_from_embeddings(config)
         )
 
         users_dirname = str(
@@ -81,6 +158,7 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
             max_depth=max_depth,
             cache_vectors=cache_vectors,
             vector_cache_dirname=vector_cache_dirname,
+            vector_index_name=vector_index_name,
             users_dirname=users_dirname,
             libraries_dirname=libraries_dirname,
             library_dirs=library_dirs or None,

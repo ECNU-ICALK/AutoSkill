@@ -4,6 +4,7 @@ Embedding factory: build a concrete provider from a config dict.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
 from .base import EmbeddingModel
@@ -25,6 +26,27 @@ def build_embeddings(config: Dict[str, Any]) -> EmbeddingModel:
             base_url=str(config.get("base_url", "https://api.openai.com")),
             timeout_s=int(config.get("timeout_s", 60)),
             max_text_chars=int(config.get("max_text_chars", 10000)),
+            min_text_chars=int(config.get("min_text_chars", 512)),
+            max_batch_size=int(config.get("max_batch_size", 256)),
+            extra_body=(config.get("extra_body") or config.get("extra_payload")),
+        )
+
+    if provider in {"dashscope", "qwen"}:
+        extra = config.get("extra_body") or config.get("extra_payload") or {}
+        extra_dict = dict(extra) if isinstance(extra, dict) else {}
+        extra_dict.setdefault("dimensions", 1024)
+        extra_dict.setdefault("encoding_format", "float")
+        return OpenAIEmbedding(
+            model=str(config.get("model", "text-embedding-v4")),
+            api_key=(config.get("api_key") or os.getenv("DASHSCOPE_API_KEY")),
+            base_url=str(
+                config.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode")
+            ),
+            timeout_s=int(config.get("timeout_s", 60)),
+            max_text_chars=int(config.get("max_text_chars", 10000)),
+            min_text_chars=int(config.get("min_text_chars", 512)),
+            max_batch_size=int(config.get("max_batch_size", 1)),
+            extra_body=extra_dict,
         )
 
     if provider in {"glm", "bigmodel", "zhipu"}:
