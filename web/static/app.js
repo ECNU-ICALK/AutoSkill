@@ -31,30 +31,45 @@ function escapeHtml(s) {
 
 function renderChat() {
   const log = el("chatLog");
+  const shouldStick =
+    log.scrollTop + log.clientHeight >= log.scrollHeight - 140;
   const parts = [];
   for (const m of state.messages) {
     const role = (m.role || "system").toLowerCase();
-    const cls =
-      role === "user"
-        ? "msg msg--user"
-        : role === "assistant"
-        ? "msg msg--assistant"
-        : "msg msg--system";
     const pending = !!m.pending;
-    const cls2 = pending ? `${cls} msg--pending` : cls;
-    const roleLabel =
-      role === "user" ? "You" : role === "assistant" ? "Assistant" : "System";
     const contentHtml = pending
       ? `<span class="typing" aria-label="thinking"><span></span><span></span><span></span></span>`
       : escapeHtml(m.content || "");
+
+    if (role === "assistant") {
+      const bubbleCls = pending
+        ? "chatbubble chatbubble--assistant chatbubble--pending"
+        : "chatbubble chatbubble--assistant";
+      parts.push(
+        `<div class="chatitem chatitem--assistant"><div class="chatavatar" aria-hidden="true">AS</div><div class="${bubbleCls}">${contentHtml}</div></div>`
+      );
+      continue;
+    }
+
+    if (role === "user") {
+      const bubbleCls = pending
+        ? "chatbubble chatbubble--user chatbubble--pending"
+        : "chatbubble chatbubble--user";
+      parts.push(
+        `<div class="chatitem chatitem--user"><div class="${bubbleCls}">${contentHtml}</div></div>`
+      );
+      continue;
+    }
+
+    const bubbleCls = pending
+      ? "chatbubble chatbubble--system chatbubble--pending"
+      : "chatbubble chatbubble--system";
     parts.push(
-      `<div class="${cls2}"><div class="msg__role">${escapeHtml(
-        roleLabel
-      )}</div><div class="msg__content">${contentHtml}</div></div>`
+      `<div class="chatitem chatitem--system"><div class="${bubbleCls}">${contentHtml}</div></div>`
     );
   }
   log.innerHTML = parts.join("");
-  log.scrollTop = log.scrollHeight;
+  if (shouldStick) log.scrollTop = log.scrollHeight;
 }
 
 function formatHit(hit) {
@@ -232,8 +247,13 @@ async function sendText(text) {
 
   const sendBtn = el("sendBtn");
   const input = el("chatInput");
+  const extractBtn = el("extractBtn");
+  const helpBtn = el("helpBtn");
+  const clearBtn = el("clearBtn");
   sendBtn.disabled = true;
-  input.disabled = true;
+  if (extractBtn) extractBtn.disabled = true;
+  if (helpBtn) helpBtn.disabled = true;
+  if (clearBtn) clearBtn.disabled = true;
 
   // Optimistic UI: show the user message immediately + a typing indicator.
   state.messages.push({ role: "user", content: text });
@@ -286,55 +306,67 @@ async function sendText(text) {
   } finally {
     state.inFlight = false;
     sendBtn.disabled = false;
-    input.disabled = false;
+    if (extractBtn) extractBtn.disabled = false;
+    if (helpBtn) helpBtn.disabled = false;
+    if (clearBtn) clearBtn.disabled = false;
     input.focus();
   }
 }
 
+function autoGrowTextarea(textarea) {
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  const maxPx = 180;
+  const next = Math.min(textarea.scrollHeight, maxPx);
+  textarea.style.height = `${next}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxPx ? "auto" : "hidden";
+}
+
 function bind() {
-  el("sendBtn").addEventListener("click", async () => {
-    const t = el("chatInput").value;
+  const triggerSend = async (text) => {
+    if (state.inFlight) return;
+    const t = String(text || "");
     if (!t.trim()) return;
-    el("chatInput").value = "";
     try {
       await sendText(t);
     } catch (e) {
       setStatus(false, String(e?.message || e));
     }
+  };
+
+  el("sendBtn").addEventListener("click", async () => {
+    const t = el("chatInput").value;
+    if (!t.trim()) return;
+    el("chatInput").value = "";
+    autoGrowTextarea(el("chatInput"));
+    await triggerSend(t);
   });
 
   el("chatInput").addEventListener("keydown", async (ev) => {
     if (ev.key !== "Enter") return;
     if (ev.shiftKey) return; // newline
     ev.preventDefault();
+    if (state.inFlight) return;
     el("sendBtn").click();
   });
 
+  el("chatInput").addEventListener("input", () => {
+    autoGrowTextarea(el("chatInput"));
+  });
+
   el("helpBtn").addEventListener("click", async () => {
-    try {
-      await sendText("/help");
-    } catch (e) {
-      setStatus(false, String(e?.message || e));
-    }
+    await triggerSend("/help");
   });
 
   el("clearBtn").addEventListener("click", async () => {
-    try {
-      await sendText("/clear");
-    } catch (e) {
-      setStatus(false, String(e?.message || e));
-    }
+    await triggerSend("/clear");
   });
 
   el("extractBtn").addEventListener("click", async () => {
     const hint = el("extractHintInput")?.value || "";
     const cmd = hint && hint.trim() ? `extract_now ${hint.trim()}` : "extract_now";
-    try {
-      await sendText(cmd);
-      if (el("extractHintInput")) el("extractHintInput").value = "";
-    } catch (e) {
-      setStatus(false, String(e?.message || e));
-    }
+    await triggerSend(cmd);
+    if (el("extractHintInput")) el("extractHintInput").value = "";
   });
 
   if (el("extractHintInput")) {
@@ -464,6 +496,7 @@ window.addEventListener("load", async () => {
   try {
     await ensureSession();
     startPolling();
+    autoGrowTextarea(el("chatInput"));
   } catch (e) {
     setStatus(false, String(e?.message || e));
   }

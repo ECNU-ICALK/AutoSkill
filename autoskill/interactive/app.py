@@ -30,6 +30,12 @@ class _PendingExtraction:
     latest_assistant: str
     messages: List[Dict[str, Any]]
 
+@dataclass
+class _BgExtractJob:
+    window: List[Dict[str, Any]]
+    trigger: str
+    epoch: int
+
 
 class InteractiveChatApp:
     def __init__(
@@ -52,7 +58,10 @@ class InteractiveChatApp:
         self.messages: List[Dict[str, Any]] = []
         self._pending: Optional[_PendingExtraction] = None
         self._turns_at_last_extract_check: int = 0
+        self._epoch: int = 0
         self._bg_extract_sema = threading.BoundedSemaphore(1)
+        self._bg_lock = threading.Lock()
+        self._queued_extract: Optional[_BgExtractJob] = None
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
     def run(self) -> None:
@@ -128,6 +137,10 @@ class InteractiveChatApp:
             self.messages = []
             self._pending = None
             self._turns_at_last_extract_check = 0
+            self._epoch += 1
+            self._events = queue.Queue()
+            with self._bg_lock:
+                self._queued_extract = None
             self.io.print("Conversation cleared.")
             return False
 
@@ -591,26 +604,54 @@ class InteractiveChatApp:
     def _start_background_extraction(self, window: List[Dict[str, Any]], *, trigger: str) -> None:
         if not window:
             return
-        if not self._bg_extract_sema.acquire(blocking=False):
-            return
-
-        thread = threading.Thread(
-            target=self._background_extraction_worker,
-            args=(list(window), str(trigger or "auto")),
-            daemon=True,
+        job = _BgExtractJob(
+            window=list(window),
+            trigger=str(trigger or "auto"),
+            epoch=int(self._epoch),
         )
-        thread.start()
 
-    def _background_extraction_worker(self, window: List[Dict[str, Any]], trigger: str) -> None:
+        with self._bg_lock:
+            if self._bg_extract_sema.acquire(blocking=False):
+                thread = threading.Thread(
+                    target=self._background_extraction_worker,
+                    args=(job,),
+                    daemon=True,
+                )
+                thread.start()
+                return
+            # A background extraction is already running: keep only the latest scheduled job.
+            self._queued_extract = job
+
+    def _background_extraction_worker(self, job: _BgExtractJob) -> None:
         try:
-            updated = self.sdk.ingest(
-                user_id=self.config.user_id,
-                messages=window,
-                metadata={"channel": "chat"},
-            )
-            self._events.put({"trigger": str(trigger), "updated": list(updated or []), "error": ""})
-        except Exception as e:
-            self._events.put({"trigger": str(trigger), "updated": [], "error": str(e)})
+            current = job
+            while True:
+                epoch = int(getattr(current, "epoch", 0) or 0)
+                if epoch != int(self._epoch):
+                    break
+
+                try:
+                    updated = self.sdk.ingest(
+                        user_id=self.config.user_id,
+                        messages=list(current.window or []),
+                        metadata={"channel": "chat"},
+                    )
+                    if epoch == int(self._epoch):
+                        self._events.put(
+                            {"trigger": str(current.trigger), "updated": list(updated or []), "error": ""}
+                        )
+                except Exception as e:
+                    if epoch == int(self._epoch):
+                        self._events.put(
+                            {"trigger": str(current.trigger), "updated": [], "error": str(e)}
+                        )
+
+                with self._bg_lock:
+                    next_job = self._queued_extract
+                    self._queued_extract = None
+                if next_job is None:
+                    break
+                current = next_job
         finally:
             try:
                 self._bg_extract_sema.release()

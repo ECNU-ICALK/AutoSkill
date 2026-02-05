@@ -3,122 +3,171 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AutoSkill Web UI</title>
+    <title>AutoSkill Studio</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <header class="header">
-      <div class="header__title">AutoSkill Web UI</div>
-      <div class="header__meta">
-        <span id="sessionBadge" class="badge">session: -</span>
-        <span id="statusBadge" class="badge badge--ok">connected</span>
-      </div>
-    </header>
-
-    <main class="layout">
-      <section class="chat">
-        <div id="chatLog" class="chat__log"></div>
-
-        <div class="chat__input">
-          <textarea
-            id="chatInput"
-            class="chat__textarea"
-            rows="4"
-            placeholder="Type a message or command (e.g., /help). Enter sends • Shift+Enter newline"
-          ></textarea>
-          <div class="chat__actions">
-            <button id="sendBtn" class="btn btn--primary">Send</button>
-            <button id="clearBtn" class="btn">/clear</button>
-            <button id="helpBtn" class="btn">/help</button>
-            <div class="chat__extract">
-              <input
-                id="extractHintInput"
-                class="input input--grow"
-                type="text"
-                placeholder="Extract hint (optional)"
-              />
-              <button id="extractBtn" class="btn">Extract now</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <aside class="side">
-        <div class="panel">
-          <div class="panel__title">Config</div>
-          <div class="panel__body">
-            <div class="row">
-              <label class="label">Skill scope</label>
-              <select id="scopeSelect" class="select">
-                <option value="all">all</option>
-                <option value="user">user</option>
-                <option value="library">common</option>
-              </select>
-            </div>
-            <div class="row">
-              <label class="label">Rewrite</label>
-              <select id="rewriteSelect" class="select">
-                <option value="always">always</option>
-                <option value="auto">auto</option>
-                <option value="never">never</option>
-              </select>
-            </div>
-            <div class="row">
-              <label class="label">Extract</label>
-              <select id="extractSelect" class="select">
-                <option value="auto">auto</option>
-                <option value="always">always</option>
-                <option value="never">never</option>
-              </select>
-            </div>
-            <div class="row">
-              <label class="label">Extract every</label>
-              <input id="extractEveryInput" class="input" type="number" min="1" step="1" value="1" />
-            </div>
-            <div class="row row--small">
-              <div class="kv"><span class="kv__k">min_score</span><span id="minScore" class="kv__v">-</span></div>
-              <div class="kv"><span class="kv__k">top_k</span><span id="topK" class="kv__v">-</span></div>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">AS</div>
+          <div class="brand__text">
+            <div class="brand__title">AutoSkill Studio</div>
+            <div class="brand__sub">
+              <span class="dot dot--ok" aria-hidden="true"></span>
+              <span class="brand__status">Web UI • Local server</span>
             </div>
           </div>
         </div>
 
-        <div class="panel">
-          <div class="panel__title">Retrieval</div>
-          <div class="panel__body">
-            <div class="kv"><span class="kv__k">original</span><span id="origQuery" class="kv__v kv__v--wrap"></span></div>
-            <div class="kv"><span class="kv__k">rewritten</span><span id="rewrittenQuery" class="kv__v kv__v--wrap"></span></div>
-            <div class="kv"><span class="kv__k">search</span><span id="searchQuery" class="kv__v kv__v--wrap"></span></div>
-            <div class="kv"><span class="kv__k">selected</span><span id="selectedSkills" class="kv__v kv__v--wrap"></span></div>
-            <div class="kv"><span class="kv__k">injected</span><span id="contextInjected" class="kv__v"></span></div>
-            <div id="retrievalError" class="error"></div>
-            <div id="hits" class="hits"></div>
-          </div>
+        <div class="topbar__meta">
+          <span id="sessionBadge" class="badge">session: -</span>
+          <span id="statusBadge" class="badge badge--ok">connected</span>
+          <button id="helpBtn" class="btn btn--ghost" type="button">/help</button>
+          <button id="clearBtn" class="btn btn--ghost" type="button">/clear</button>
         </div>
+      </header>
 
-        <div class="panel">
-          <div class="panel__title">Extraction</div>
-          <div class="panel__body">
-            <div class="kv"><span class="kv__k">trigger</span><span id="extractTrigger" class="kv__v"></span></div>
-            <div id="extractionError" class="error"></div>
-            <div id="upserted" class="upserted"></div>
-            <div class="kv">
-              <span class="kv__k">editing</span><span id="editingSkill" class="kv__v kv__v--wrap"></span>
+      <main class="main">
+        <section class="chat">
+          <div id="chatLog" class="chat__log"></div>
+
+          <div class="composer">
+            <div class="composer__box">
+              <textarea
+                id="chatInput"
+                class="composer__textarea"
+                rows="1"
+                placeholder="Type a message or command (e.g., /help). Enter sends • Shift+Enter newline"
+              ></textarea>
+
+              <div class="composer__footer">
+                <div class="composer__hint">Extraction runs in the background and will appear on the right when ready.</div>
+                <div class="composer__actions">
+                  <input
+                    id="extractHintInput"
+                    class="input input--hint"
+                    type="text"
+                    placeholder="extract_now hint (optional)"
+                  />
+                  <button id="extractBtn" class="btn btn--ghost" type="button">Extract now</button>
+                  <button id="sendBtn" class="btn btn--primary" type="button">Send</button>
+                </div>
+              </div>
             </div>
-            <div class="row row--small">
-              <button id="saveSkillBtn" class="btn btn--primary" disabled>Save SKILL.md</button>
-              <button id="deleteSkillBtn" class="btn btn--danger" disabled>Delete</button>
-              <span id="saveSkillStatus" class="muted"></span>
+            <div class="composer__note">
+              Generated content may be inaccurate. Verify important information.
             </div>
-            <textarea
-              id="skillMdEditor"
-              class="textarea textarea--mono"
-              rows="14"
-              placeholder="Extract a skill to edit it here..."
-            ></textarea>
           </div>
-        </div>
-      </aside>
-    </main>
+        </section>
+
+        <aside class="side">
+          <div class="side__header">
+            <div class="side__title">CONFIGURATION & LOGS</div>
+            <div class="lights" aria-hidden="true">
+              <span class="light light--red"></span>
+              <span class="light light--yellow"></span>
+              <span class="light light--green"></span>
+            </div>
+          </div>
+
+          <div class="side__body">
+            <div class="card">
+              <div class="card__title">Model Config</div>
+              <div class="card__body">
+                <div class="row">
+                  <label class="label">Skill scope</label>
+                  <select id="scopeSelect" class="select">
+                    <option value="all">all</option>
+                    <option value="user">user</option>
+                    <option value="library">common</option>
+                  </select>
+                </div>
+                <div class="row">
+                  <label class="label">Rewrite</label>
+                  <select id="rewriteSelect" class="select">
+                    <option value="always">always</option>
+                    <option value="auto">auto</option>
+                    <option value="never">never</option>
+                  </select>
+                </div>
+                <div class="row">
+                  <label class="label">Extract</label>
+                  <select id="extractSelect" class="select">
+                    <option value="auto">auto</option>
+                    <option value="always">always</option>
+                    <option value="never">never</option>
+                  </select>
+                </div>
+                <div class="row">
+                  <label class="label">Extract every</label>
+                  <input id="extractEveryInput" class="input" type="number" min="1" step="1" value="1" />
+                </div>
+
+                <div class="stats">
+                  <div class="stat">
+                    <div class="stat__k">min_score</div>
+                    <div id="minScore" class="stat__v stat__v--ok">-</div>
+                  </div>
+                  <div class="stat">
+                    <div class="stat__k">top_k</div>
+                    <div id="topK" class="stat__v stat__v--accent">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__title">Retrieval</div>
+              <div class="card__body">
+                <div class="kv">
+                  <span class="kv__k">original</span><span id="origQuery" class="kv__v kv__v--wrap"></span>
+                </div>
+                <div class="kv">
+                  <span class="kv__k">rewritten</span><span id="rewrittenQuery" class="kv__v kv__v--wrap"></span>
+                </div>
+                <div class="kv">
+                  <span class="kv__k">search</span><span id="searchQuery" class="kv__v kv__v--wrap"></span>
+                </div>
+                <div class="kv">
+                  <span class="kv__k">selected</span><span id="selectedSkills" class="kv__v kv__v--wrap"></span>
+                </div>
+                <div class="kv">
+                  <span class="kv__k">injected</span><span id="contextInjected" class="kv__v"></span>
+                </div>
+                <div id="retrievalError" class="error"></div>
+                <div id="hits" class="hits"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__title">Extraction</div>
+              <div class="card__body">
+                <div class="kv">
+                  <span class="kv__k">trigger</span><span id="extractTrigger" class="kv__v"></span>
+                </div>
+                <div id="extractionError" class="error"></div>
+                <div id="upserted" class="upserted"></div>
+                <div class="kv">
+                  <span class="kv__k">editing</span><span id="editingSkill" class="kv__v kv__v--wrap"></span>
+                </div>
+                <div class="row row--small">
+                  <button id="saveSkillBtn" class="btn btn--primary" disabled type="button">Save SKILL.md</button>
+                  <button id="deleteSkillBtn" class="btn btn--danger" disabled type="button">Delete</button>
+                  <span id="saveSkillStatus" class="muted"></span>
+                </div>
+                <textarea
+                  id="skillMdEditor"
+                  class="textarea textarea--mono"
+                  rows="14"
+                  placeholder="Extract a skill to edit it here..."
+                ></textarea>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
 
     <script src="/static/app.js"></script>
   </body>
