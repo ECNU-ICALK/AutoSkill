@@ -1,4 +1,4 @@
-# AutoSkill: 基于技能自进化的经验驱动终身学习
+# AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution
 
 English | [中文](README.zh-CN.md)
 
