@@ -10,6 +10,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+import os
+
+
+def _default_store_path() -> str:
+    try:
+        here = os.path.abspath(os.path.dirname(__file__))
+        root = os.path.abspath(os.path.join(here, os.pardir))
+        return os.path.join(root, "Skills")
+    except Exception:
+        return "Skills"
+
+
+def _default_store() -> Dict[str, Any]:
+    return {"provider": "local", "path": _default_store_path()}
 
 
 @dataclass(frozen=True)
@@ -24,11 +38,12 @@ class AutoSkillConfig:
     embeddings: Dict[str, Any] = field(
         default_factory=lambda: {"provider": "hashing", "dims": 256}
     )
-    store: Dict[str, Any] = field(default_factory=lambda: {"provider": "inmemory"})
+    # Default to local filesystem store (SKILL.md under repo_root/Skills).
+    store: Dict[str, Any] = field(default_factory=_default_store)
 
     namespace: str = "default"
 
-    maintenance_strategy: str = "heuristic"  # "heuristic" | "llm"
+    maintenance_strategy: str = "llm"  # "heuristic" | "llm"
     dedupe_similarity_threshold: float = 0.86
     max_candidates_per_ingest: int = 1
     max_similar_skills_to_consider: int = 5
@@ -68,9 +83,9 @@ class AutoSkillConfig:
         return cls(
             llm=dict(data.get("llm") or {"provider": "mock"}),
             embeddings=dict(data.get("embeddings") or {"provider": "hashing", "dims": 256}),
-            store=dict(data.get("store") or {"provider": "inmemory"}),
+            store=dict(data.get("store") or _default_store()),
             namespace=str(data.get("namespace") or "default"),
-            maintenance_strategy=str(data.get("maintenance_strategy") or "heuristic"),
+            maintenance_strategy=str(data.get("maintenance_strategy") or "llm"),
             dedupe_similarity_threshold=float(data.get("dedupe_similarity_threshold", 0.86)),
             max_candidates_per_ingest=int(data.get("max_candidates_per_ingest", 1)),
             max_similar_skills_to_consider=int(data.get("max_similar_skills_to_consider", 5)),

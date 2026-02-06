@@ -15,6 +15,7 @@ import re
 import threading
 import uuid
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Dict, List, Optional, Tuple
 
 from ..config import AutoSkillConfig
@@ -111,6 +112,17 @@ def _hit_for_llm(hit) -> Dict:
     }
 
 
+def _ensure_skill_in_hits(hits: List, skill: Optional[Skill], score: float = 0.0) -> List:
+    if skill is None:
+        return list(hits or [])
+    for h in hits or []:
+        s = getattr(h, "skill", None)
+        if s is not None and str(getattr(s, "id", "")) == str(skill.id):
+            return list(hits or [])
+    injected = SimpleNamespace(skill=skill, score=float(score or 0.0))
+    return [injected] + list(hits or [])
+
+
 class SkillMaintainer:
     def __init__(
         self, config: AutoSkillConfig, store: SkillStore, extractor: SkillExtractor
@@ -189,6 +201,8 @@ class SkillMaintainer:
                 "previous_skill_similarity_threshold", self._config.dedupe_similarity_threshold
             )
         )
+        prev_hits: List = []
+        prev_score = 0.0
         if previous_skill is not None and prev_threshold > 0:
             prev_hits = self._store.search(
                 user_id=user_id,
@@ -197,7 +211,7 @@ class SkillMaintainer:
                 filters={"scope": "user", "ids": [previous_skill.id]},
             )
             prev_score = float(prev_hits[0].score) if prev_hits else 0.0
-            if prev_score >= prev_threshold:
+            if prev_score >= prev_threshold and self._llm is None:
                 merged = (
                     _merge_with_llm(self._llm, previous_skill, cand)
                     if self._llm is not None
@@ -220,10 +234,20 @@ class SkillMaintainer:
             limit=self._config.max_similar_skills_to_consider,
             filters={"scope": "all"},
         )
+        similar_for_llm = (
+            _ensure_skill_in_hits(similar, previous_skill, prev_score)
+            if self._llm is not None
+            else similar
+        )
 
         best_any = similar[0] if similar else None
         best_user = next((h for h in similar if not _is_library_skill(h.skill)), None)
         best_library = next((h for h in similar if _is_library_skill(h.skill)), None)
+        best_user_for_llm = (
+            next((h for h in similar_for_llm if not _is_library_skill(h.skill)), None)
+            if self._llm is not None
+            else best_user
+        )
 
         def _create_new() -> Skill:
             created = Skill(
@@ -251,7 +275,7 @@ class SkillMaintainer:
                 action, target_skill_id, _reason = _decide_candidate_action_with_llm(
                     self._llm,
                     cand,
-                    similar,
+                    similar_for_llm,
                     user_id=user_id,
                     dedupe_threshold=float(self._config.dedupe_similarity_threshold),
                 )
@@ -269,15 +293,15 @@ class SkillMaintainer:
                     target_id = str(target_skill_id).strip()
                     allowed_user_ids = {
                         str(h.skill.id)
-                        for h in (similar or [])
+                        for h in (similar_for_llm or [])
                         if getattr(h, "skill", None) is not None and not _is_library_skill(h.skill)
                     }
                     if target_id and target_id in allowed_user_ids:
                         target = self._store.get(target_id)
                         if target is not None and _is_library_skill(target):
                             target = None
-                if target is None and best_user is not None:
-                    target = best_user.skill
+                if target is None and best_user_for_llm is not None:
+                    target = best_user_for_llm.skill
                 if target is not None:
                     merged = _merge_with_llm(self._llm, target, cand)
                     merged.updated_at = now_iso()
@@ -348,6 +372,7 @@ def _decide_candidate_action_with_llm(
         "- Prefer discard if the candidate is generic/obvious, low-signal, or not clearly reusable.\n"
         "- Prefer discard if a shared library skill already covers the capability and the candidate adds no stable, user-specific value.\n"
         "- Prefer merge if the candidate is an incremental improvement to an existing user skill (same intent, clearer prompt, better checks, better metadata).\n"
+        "- Prefer add if the candidate changes the core content type, channel, or audience (e.g., 'government report' vs 'public account article'), even if the structure is similar.\n"
         "- Prefer add only if the candidate is a distinct reusable capability not covered by existing skills.\n"
         "- Use similarity scores as hints, not absolute truth.\n"
         "\n"
@@ -439,38 +464,35 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
     try:
         system = (
             "You are AutoSkill's Skill Maintainer.\n"
-            "Task: merge existing_skill and candidate_skill into a better single Skill.\n"
-            "Output ONLY strict JSON (parsable by json.loads); no Markdown, no commentary, no extra text.\n"
+            "Task: Update the `existing_skill` using new insights from `candidate_skill`.\n"
+            "Output ONLY strict JSON (parsable by json.loads); no Markdown, no commentary.\n"
             "\n"
-            "Skills are modular capability packages (SKILL.md + optional resources) used to onboard another assistant instance.\n"
-            "Keep the merged skill high-signal, reusable, and easy to retrieve.\n"
+            "### CRITICAL STRATEGY: INCREMENTAL PATCHING\n"
+            "Treat `existing_skill` as the **Master Copy** and `candidate_skill` as a **Patch/Update**.\n"
+            "Your goal is to **INJECT** new rules into the Master Copy without rewriting the parts that work.\n"
             "\n"
-            "Diff-aware merge process (internal):\n"
-            "1) Identify the shared intent (what capability the skill provides).\n"
-            "2) Identify what candidate_skill adds vs existing_skill (new constraints, clearer steps, better validation, better output format, better triggers/tags).\n"
-            "3) Merge by keeping all high-signal, non-conflicting improvements.\n"
-            "4) Avoid regressions: do not remove important constraints/checks from existing_skill unless they are clearly incorrect or overly specific.\n"
-            "5) If the candidate adds no durable value, keep existing_skill mostly unchanged.\n"
-            "Rules (align with extraction requirements):\n"
-            "1) Keep only reusable capabilities and generalize/de-identify: remove names, orgs, project IDs, accounts, URLs, secrets, exact dates/amounts; use placeholders like <PROJECT>, <ENV>, <TOOL>, <DATE>, <VERSION>.\n"
-            "2) Language consistency (CRITICAL): keep all fields in the dominant language of existing_skill (or candidate_skill if existing is empty). Do not mix languages across fields.\n"
-            "3) Keep existing_skill.name stable; only replace it if the new name is clearly more specific and improves retrieval. For English, prefer kebab-case. Use domain terminology.\n"
-            "4) description: 1-2 sentences in third person; include WHEN the skill should be used.\n"
-            "5) prompt: Use Markdown with required sections:\n"
-            "   - # Goal (Required)\n"
-            "   - # Constraints & Style (Required; include explicit do/don'ts and negative constraints)\n"
-            "   - # Workflow (Optional; include ONLY if either skill explicitly defined a multi-step process. If neither does, OMIT this section.)\n"
-            "   Content rules:\n"
-            "   - Focus on constraints over content; capture the HOW, not the topic.\n"
-            "   - Do not invent steps, standards, or details not present in either skill.\n"
-            "   - If resources are implied, add a short \"Bundled resources (optional)\" section suggesting scripts/references/assets; do not paste large content.\n"
-            "   - Do not reference 'this conversation/above'.\n"
-            "6) Merge all non-conflicting, high-signal differences from both skills (constraints, checks, output expectations, triggers/tags); avoid regressions.\n"
-            "7) triggers: 3-5 short, concrete intent phrases; dedupe.\n"
-            "8) tags: 1-6 keywords; dedupe.\n"
-            "9) examples: keep 0-3 representative, de-identified inputs.\n"
-            "10) JSON validity: escape newlines inside strings as \\n.\n"
+            "1. **Anchor on Existing:** Start with the structure and content of `existing_skill`.\n"
+            "2. **Identify Deltas:** Look for NEW constraints, NEW triggers, or NEW style requirements in `candidate_skill` that are missing from `existing_skill`.\n"
+            "3. **Append (Don't Invent):** Add these new items to the existing lists. Do not rewrite valid existing rules.\n"
+            "4. **No Phantom Workflows:** \n"
+            "   - If `existing_skill` has no workflow AND `candidate_skill` has no workflow -> **KEEP IT EMPTY.**\n"
+            "   - Do NOT synthesize a workflow from constraints. (e.g., 'Don't use passive voice' is a Constraint, NOT a Workflow step).\n"
+            "\n"
+            "### MERGE RULES\n"
+            "- **Name:** Keep `existing_skill.name` (unless it was empty/generic and candidate is specific).\n"
+            "- **Language:** CRITICAL. The output MUST use the **dominant language of the `existing_skill`**. If `candidate` is in a different language, translate the *new logic* to match the `existing` language before merging.\n"
+            "- **Prompt Composition (Markdown):**\n"
+            "  - **# Goal:** Use `existing` goal. Refine only if `candidate` makes it clearer.\n"
+            "  - **# Constraints & Style:** **(This is where 90% of updates happen)**. Combine lists from both. Deduplicate. Keep negative constraints (e.g., 'No hallucinations').\n"
+            "  - **# Workflow:** \n"
+            "    * If `existing` has one, keep it. Update steps only if `candidate` explicitly corrects a step.\n"
+            "    * If `existing` is empty, ADOPT `candidate`'s workflow ONLY IF it is explicitly defined.\n"
+            "    * **OTHERWISE: OMIT THIS SECTION.**\n"
+            "- **Triggers/Tags:** Union of both lists. Deduplicate.\n"
+            "\n"
+            "### OUTPUT FORMAT\n"
             "Return JSON fields: {name, description, prompt, triggers, tags, examples}\n"
+            "JSON validity: Escape newlines inside strings as \\n."
         )
         user = (
             "existing_skill:\n"
@@ -478,6 +500,7 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "candidate_skill:\n"
             f"{_candidate_to_raw(cand)}\n"
         )
+        print(user)
         text = llm.complete(system=system, user=user, temperature=0.0)
         obj = json_from_llm_text(text)
         if not isinstance(obj, dict):
