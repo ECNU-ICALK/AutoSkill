@@ -84,6 +84,15 @@ class InMemorySkillStore(SkillStore):
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
         filters = filters or {}
+        want_ids_raw = filters.get("ids")
+        if want_ids_raw is None:
+            want_id_set = None
+        else:
+            if isinstance(want_ids_raw, (list, tuple, set)):
+                want_ids = list(want_ids_raw)
+            else:
+                want_ids = [want_ids_raw]
+            want_id_set = {str(x).strip() for x in want_ids if str(x).strip()} or None
         qvec = self._embeddings.embed([query])[0]
         with self._lock:
             candidates: List[Tuple[float, Skill]] = []
@@ -92,6 +101,8 @@ class InMemorySkillStore(SkillStore):
                 if skill.user_id != user_id:
                     continue
                 if skill.status == SkillStatus.ARCHIVED:
+                    continue
+                if want_id_set is not None and skill.id not in want_id_set:
                     continue
 
                 if not _passes_filters(skill, filters):

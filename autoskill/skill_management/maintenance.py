@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
@@ -122,6 +123,37 @@ class SkillMaintainer:
             if (config.maintenance_strategy or "").lower() == "llm"
             else None
         )
+        self._last_lock = threading.Lock()
+        self._last_upserted_skill_id_by_user: Dict[str, str] = {}
+
+    def _pop_previous_skill_id(self, metadata: Optional[Dict]) -> Tuple[Optional[str], Dict]:
+        md = dict(metadata or {})
+        prev = None
+        for k in ("previous_skill_id", "prev_skill_id", "last_skill_id"):
+            v = md.pop(k, None)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                prev = s
+                break
+        return prev, md
+
+    def _get_last_upserted_skill_id(self, *, user_id: str) -> Optional[str]:
+        uid = str(user_id or "").strip()
+        if not uid:
+            return None
+        with self._last_lock:
+            sid = self._last_upserted_skill_id_by_user.get(uid)
+        return str(sid).strip() if sid and str(sid).strip() else None
+
+    def _record_last_upserted_skill_id(self, *, user_id: str, skill_id: str) -> None:
+        uid = str(user_id or "").strip()
+        sid = str(skill_id or "").strip()
+        if not uid or not sid:
+            return
+        with self._last_lock:
+            self._last_upserted_skill_id_by_user[uid] = sid
 
     def apply(
         self,
@@ -140,6 +172,46 @@ class SkillMaintainer:
     def _upsert_candidate(
         self, cand: SkillCandidate, *, user_id: str, metadata: Optional[Dict]
     ) -> Optional[Skill]:
+        previous_id, metadata_clean = self._pop_previous_skill_id(metadata)
+        previous_id = previous_id or self._get_last_upserted_skill_id(user_id=user_id)
+
+        previous_skill = None
+        if previous_id:
+            try:
+                s = self._store.get(str(previous_id))
+            except Exception:
+                s = None
+            if s is not None and not _is_library_skill(s) and str(getattr(s, "user_id", "")) == str(user_id):
+                previous_skill = s
+
+        prev_threshold = float(
+            (self._config.extra or {}).get(
+                "previous_skill_similarity_threshold", self._config.dedupe_similarity_threshold
+            )
+        )
+        if previous_skill is not None and prev_threshold > 0:
+            prev_hits = self._store.search(
+                user_id=user_id,
+                query=_candidate_to_query(cand),
+                limit=1,
+                filters={"scope": "user", "ids": [previous_skill.id]},
+            )
+            prev_score = float(prev_hits[0].score) if prev_hits else 0.0
+            if prev_score >= prev_threshold:
+                merged = (
+                    _merge_with_llm(self._llm, previous_skill, cand)
+                    if self._llm is not None
+                    else _merge(previous_skill, cand)
+                )
+                merged.updated_at = now_iso()
+                merged.metadata = _merge_metadata(previous_skill.metadata, metadata_clean, cand)
+                if self._config.store_sources and cand.source:
+                    merged.source = cand.source
+                merged.files = _merge_files(previous_skill.files, build_agent_skill_files(merged))
+                self._store.upsert(merged, raw=_skill_to_raw(merged))
+                self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
+                return merged
+
         # Search for similar skills using the candidate text to avoid duplicates.
         # Include both user skills and shared library skills as references.
         similar = self._store.search(
@@ -164,13 +236,14 @@ class SkillMaintainer:
                 tags=[t.strip() for t in cand.tags if t and t.strip()],
                 examples=list(cand.examples or []),
                 version="0.1.0",
-                metadata=_merge_metadata({}, metadata, cand),
+                metadata=_merge_metadata({}, metadata_clean, cand),
                 source=cand.source if self._config.store_sources else None,
                 created_at=now_iso(),
                 updated_at=now_iso(),
             )
             created.files = build_agent_skill_files(created)
             self._store.upsert(created, raw=_skill_to_raw(created))
+            self._record_last_upserted_skill_id(user_id=user_id, skill_id=created.id)
             return created
 
         if self._llm is not None:
@@ -208,11 +281,12 @@ class SkillMaintainer:
                 if target is not None:
                     merged = _merge_with_llm(self._llm, target, cand)
                     merged.updated_at = now_iso()
-                    merged.metadata = _merge_metadata(target.metadata, metadata, cand)
+                    merged.metadata = _merge_metadata(target.metadata, metadata_clean, cand)
                     if self._config.store_sources and cand.source:
                         merged.source = cand.source
                     merged.files = _merge_files(target.files, build_agent_skill_files(merged))
                     self._store.upsert(merged, raw=_skill_to_raw(merged))
+                    self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
                     return merged
 
                 return _create_new()
@@ -224,11 +298,12 @@ class SkillMaintainer:
         if best_user and best_user.score >= self._config.dedupe_similarity_threshold:
             merged = _merge(best_user.skill, cand)
             merged.updated_at = now_iso()
-            merged.metadata = _merge_metadata(best_user.skill.metadata, metadata, cand)
+            merged.metadata = _merge_metadata(best_user.skill.metadata, metadata_clean, cand)
             if self._config.store_sources and cand.source:
                 merged.source = cand.source
             merged.files = _merge_files(best_user.skill.files, build_agent_skill_files(merged))
             self._store.upsert(merged, raw=_skill_to_raw(merged))
+            self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
             return merged
 
         if best_any and best_library and best_library.score >= self._config.dedupe_similarity_threshold:
@@ -309,9 +384,39 @@ def _candidate_to_query(cand: SkillCandidate) -> str:
 
 
 def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
-    instructions = existing.instructions
-    if len(cand.instructions.strip()) > len(existing.instructions.strip()) * 1.1:
-        instructions = cand.instructions.strip()
+    def _instruction_quality_score(text: str) -> int:
+        s = str(text or "").strip()
+        if not s:
+            return 0
+        low = s.lower()
+        score = 0
+        if re.search(r"(?m)^\s*\d+[\.\)]\s+", s):
+            score += 4
+        if "output format" in low:
+            score += 2
+        if "validation" in low or "check" in low:
+            score += 2
+        if "assumption" in low:
+            score += 1
+        if "rollback" in low or "fallback" in low:
+            score += 1
+        if "bundled resources" in low:
+            score += 1
+        if "<" in s and ">" in s:
+            score += 1
+        score += min(len(s) // 500, 3)
+        return int(score)
+
+    existing_instr = str(existing.instructions or "").strip()
+    cand_instr = str(cand.instructions or "").strip()
+    instructions = existing_instr or cand_instr
+    if existing_instr and cand_instr:
+        s_old = _instruction_quality_score(existing_instr)
+        s_new = _instruction_quality_score(cand_instr)
+        if s_new > s_old + 1:
+            instructions = cand_instr
+        elif s_new == s_old and len(cand_instr) > len(existing_instr) * 1.1:
+            instructions = cand_instr
 
     description = existing.description
     if len(cand.description.strip()) > len(existing.description.strip()) * 1.1:
@@ -339,14 +444,32 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "\n"
             "Skills are modular capability packages (SKILL.md + optional resources) used to onboard another assistant instance.\n"
             "Keep the merged skill high-signal, reusable, and easy to retrieve.\n"
-            "Rules:\n"
+            "\n"
+            "Diff-aware merge process (internal):\n"
+            "1) Identify the shared intent (what capability the skill provides).\n"
+            "2) Identify what candidate_skill adds vs existing_skill (new constraints, clearer steps, better validation, better output format, better triggers/tags).\n"
+            "3) Merge by keeping all high-signal, non-conflicting improvements.\n"
+            "4) Avoid regressions: do not remove important constraints/checks from existing_skill unless they are clearly incorrect or overly specific.\n"
+            "5) If the candidate adds no durable value, keep existing_skill mostly unchanged.\n"
+            "Rules (align with extraction requirements):\n"
             "1) Keep only reusable capabilities and generalize/de-identify: remove names, orgs, project IDs, accounts, URLs, secrets, exact dates/amounts; use placeholders like <PROJECT>, <ENV>, <TOOL>, <DATE>, <VERSION>.\n"
-            "2) Keep existing_skill.name stable; only replace it if the new name is clearly more specific and improves retrieval.\n"
-            "3) description: 1-2 sentences in third person; include WHEN the skill should be used.\n"
-            "4) prompt: ALWAYS English; imperative/infinitive form; must be executable (numbered steps + per-step checks + output format); do not reference 'this conversation/above'.\n"
-            "5) prompt may include a short \"Bundled resources (optional)\" section suggesting scripts/references/assets; do not paste large content.\n"
-            "6) Deduplicate triggers/tags/examples; keep 0-3 representative examples.\n"
-            "7) JSON validity: escape newlines inside strings as \\n.\n"
+            "2) Language consistency (CRITICAL): keep all fields in the dominant language of existing_skill (or candidate_skill if existing is empty). Do not mix languages across fields.\n"
+            "3) Keep existing_skill.name stable; only replace it if the new name is clearly more specific and improves retrieval. For English, prefer kebab-case. Use domain terminology.\n"
+            "4) description: 1-2 sentences in third person; include WHEN the skill should be used.\n"
+            "5) prompt: Use Markdown with required sections:\n"
+            "   - # Goal (Required)\n"
+            "   - # Constraints & Style (Required; include explicit do/don'ts and negative constraints)\n"
+            "   - # Workflow (Optional; include ONLY if either skill explicitly defined a multi-step process. If neither does, OMIT this section.)\n"
+            "   Content rules:\n"
+            "   - Focus on constraints over content; capture the HOW, not the topic.\n"
+            "   - Do not invent steps, standards, or details not present in either skill.\n"
+            "   - If resources are implied, add a short \"Bundled resources (optional)\" section suggesting scripts/references/assets; do not paste large content.\n"
+            "   - Do not reference 'this conversation/above'.\n"
+            "6) Merge all non-conflicting, high-signal differences from both skills (constraints, checks, output expectations, triggers/tags); avoid regressions.\n"
+            "7) triggers: 3-5 short, concrete intent phrases; dedupe.\n"
+            "8) tags: 1-6 keywords; dedupe.\n"
+            "9) examples: keep 0-3 representative, de-identified inputs.\n"
+            "10) JSON validity: escape newlines inside strings as \\n.\n"
             "Return JSON fields: {name, description, prompt, triggers, tags, examples}\n"
         )
         user = (

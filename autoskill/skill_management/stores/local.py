@@ -292,6 +292,15 @@ class LocalSkillStore(SkillStore):
         scope = str(filters.get("scope") or "").strip().lower()  # user|library|all
         if scope in {"common", "shared"}:
             scope = "library"
+        want_ids_raw = filters.get("ids")
+        if want_ids_raw is None:
+            want_id_set = None
+        else:
+            if isinstance(want_ids_raw, (list, tuple, set)):
+                want_ids = list(want_ids_raw)
+            else:
+                want_ids = [want_ids_raw]
+            want_id_set = {str(x).strip() for x in want_ids if str(x).strip()} or None
         uid = str(user_id or "").strip()
         qvec = self._embeddings.embed([query])[0]
         qdims = len(qvec or [])
@@ -300,6 +309,8 @@ class LocalSkillStore(SkillStore):
             candidate_records: List[_Record] = []
             for rec in self._records.values():
                 if rec.skill.status == SkillStatus.ARCHIVED:
+                    continue
+                if want_id_set is not None and rec.skill.id not in want_id_set:
                     continue
                 if scope == "user":
                     if rec.scope != "user" or rec.owner != uid:

@@ -213,7 +213,7 @@ body {
 }
 
 .chatbubble {
-  max-width: 720px;
+  max-width: 72%;
   border-radius: 18px;
   border: 1px solid rgba(51, 65, 85, 0.7);
   background: rgba(2, 6, 23, 0.35);
@@ -237,7 +237,7 @@ body {
 }
 
 .chatbubble--system {
-  max-width: 860px;
+  max-width: 86%;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.55;
