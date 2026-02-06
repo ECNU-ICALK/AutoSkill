@@ -1,4 +1,4 @@
-# AutoSkill SDK（中文）
+# AutoSkill: 基于技能自进化的经验驱动终身学习
 
 中文 | [English](README.md)
 
