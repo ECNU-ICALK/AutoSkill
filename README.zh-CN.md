@@ -29,7 +29,39 @@ python3 -m examples.web_ui \
 
 启动后打开 `http://127.0.0.1:8000`。
 
-## 1.1 技能生命周期示例（四个方面）
+## 1.1 OpenAI 兼容反向代理（标准 API）
+
+AutoSkill 也可以作为反向代理部署，对外暴露 OpenAI 兼容接口，并在内部自动执行：
+- 每次对话请求的技能检索与注入
+- 回答后的异步技能抽取与维护
+
+```bash
+python3 -m pip install -e .
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.openai_proxy \
+  --host 127.0.0.1 \
+  --port 9000 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --store-dir Skills \
+  --user-id u1 \
+  --skill-scope all \
+  --rewrite-mode always \
+  --min-score 0.4 \
+  --top-k 1
+```
+
+支持接口：
+- `POST /v1/chat/completions`（支持 `stream=true`）
+- `POST /v1/embeddings`
+- `GET /v1/models`
+- `GET /health`
+
+按请求隔离用户：
+- 请求体字段 `user`（推荐）
+- 或请求头 `X-AutoSkill-User`
+
+## 1.2 技能生命周期示例（四个方面）
 
 ### A) 自动判断：通用一次性任务不抽取
 
@@ -64,6 +96,7 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - **反馈门控抽取**：通用一次性任务默认不抽取；出现稳定反馈（如“不要幻觉”）才触发抽取/更新。
 - **通用技能格式**：使用 Agent Skill 形态（`SKILL.md`），已有技能可导入，抽取技能可迁移到其他系统。
 - **用户域 + 共享域协同**：支持用户私有技能 `Users/<user_id>` 与共享技能库 `Common/` 联合检索。
+- **标准接口服务化**：通过 OpenAI 兼容代理，可在不改业务调用形态的情况下接入 AutoSkill。
 
 ## 3. 系统工作流
 
@@ -103,6 +136,20 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - 对“仅完成一次通用任务且无用户纠偏”的场景（如一次性写报告），应返回不抽取。
 - 当用户反馈形成稳定可复用约束（如“不要幻觉”）时，触发抽取或更新。
 - 若已有相似用户技能，优先合并更新，而非新建重复技能。
+
+### 3.4 代理服务流程
+
+```text
+客户端（OpenAI 兼容请求）
+  -> AutoSkill Proxy (/v1/chat/completions)
+  -> Query 重写 + 技能检索 + 上下文注入
+  -> 上游模型生成
+  -> 返回响应给客户端
+  -> 异步技能抽取/维护（后台）
+```
+
+- 响应时延重点在检索与生成。
+- 技能进化异步执行，避免阻塞客户端响应。
 
 ## 4. 核心概念
 
@@ -147,6 +194,7 @@ Skills/
 
 - `autoskill/`：SDK 核心实现。
 - `examples/`：可直接运行的示例入口。
+- `autoskill/proxy/`：OpenAI 兼容反向代理运行时。
 - `web/`：本地 Web UI 静态资源。
 - `Skills/`：默认本地技能存储根目录。
 - `imgs/`：README 示例图片。
@@ -181,6 +229,7 @@ Skills/
 - `examples/import_agent_skills.py`：导入已有技能。
 - `examples/normalize_skill_ids.py`：补齐/规范化技能 ID。
 - `examples/local_persistent_store.py`：离线本地持久化示例。
+- `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
 
 ## 7. SDK 最小使用示例
 
@@ -270,6 +319,53 @@ python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope commo
 
 ```bash
 python3 -m examples.normalize_skill_ids --store-dir Skills
+```
+
+### 9.5 OpenAI 兼容代理 API
+
+```bash
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.openai_proxy --llm-provider dashscope --embeddings-provider dashscope
+```
+
+对话补全（标准调用形态）：
+
+```bash
+curl http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "YOUR_MODEL_NAME",
+    "user": "u1",
+    "messages": [
+      {"role": "user", "content": "写一个简洁的发布检查清单。"}
+    ]
+  }'
+```
+
+流式：
+
+```bash
+curl http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "YOUR_MODEL_NAME",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "把这个方案总结成5条。"}
+    ]
+  }'
+```
+
+向量：
+
+```bash
+curl http://127.0.0.1:9000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "text-embedding-v4",
+    "input": ["alpha", "beta"]
+  }'
 ```
 
 ## 10. 项目价值与意义

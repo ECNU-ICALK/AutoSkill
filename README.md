@@ -31,7 +31,39 @@ python3 -m examples.web_ui \
 
 Open `http://127.0.0.1:8000`.
 
-## 1.1 Skill Lifecycle Example (4 Aspects)
+## 1.1 OpenAI-Compatible Proxy (Standard API)
+
+AutoSkill can also be deployed as a reverse proxy that exposes OpenAI-compatible endpoints while transparently applying:
+- skill retrieval/injection for each chat request
+- asynchronous skill extraction/maintenance after responses
+
+```bash
+python3 -m pip install -e .
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.openai_proxy \
+  --host 127.0.0.1 \
+  --port 9000 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --store-dir Skills \
+  --user-id u1 \
+  --skill-scope all \
+  --rewrite-mode always \
+  --min-score 0.4 \
+  --top-k 1
+```
+
+Endpoints:
+- `POST /v1/chat/completions` (supports `stream=true`)
+- `POST /v1/embeddings`
+- `GET /v1/models`
+- `GET /health`
+
+Per-request user isolation:
+- request body field `user` (recommended)
+- or header `X-AutoSkill-User`
+
+## 1.2 Skill Lifecycle Example (4 Aspects)
 
 ### A) Auto Decision: No Extraction for Generic One-shot Tasks
 
@@ -66,6 +98,7 @@ to generate outputs aligned with user expectations.
 - **Feedback-gated extraction**: generic one-shot tasks are filtered out; stable user feedback (e.g., "no hallucination") triggers extraction/update.
 - **Portable skill artifact**: stores skills in Agent Skill format (`SKILL.md`), so existing skills can be imported and extracted skills can be migrated.
 - **Personal + shared knowledge planes**: supports both user-private skills (`Users/<user_id>`) and shared libraries (`Common/`) in one retrieval flow.
+- **Standards-compatible serving**: OpenAI-compatible proxy API lets existing clients use AutoSkill with no business-logic changes.
 
 ## 3. System Workflow
 
@@ -105,6 +138,20 @@ User Query (+ recent history)
 - Generic requests without user correction (for example, one-time report writing) should return no skill extraction.
 - User feedback that encodes durable preferences/constraints (for example, "do not hallucinate") should trigger extraction or update.
 - If a similar user skill already exists, prefer merge/update over creating a duplicate skill.
+
+### 3.4 Proxy Serving Flow
+
+```text
+Client (OpenAI-compatible request)
+  -> AutoSkill Proxy (/v1/chat/completions)
+  -> Query rewrite + skill retrieval + context injection
+  -> Upstream model generation
+  -> Return response to client
+  -> Async skill extraction/maintenance (background)
+```
+
+- Response latency focuses on retrieval + generation.
+- Skill evolution runs asynchronously to avoid blocking the client.
 
 ## 4. Key Concepts
 
@@ -149,6 +196,7 @@ Notes:
 
 - `autoskill/`: SDK core.
 - `examples/`: runnable demos and entry scripts.
+- `autoskill/proxy/`: OpenAI-compatible reverse proxy runtime.
 - `web/`: static frontend assets for local Web UI.
 - `Skills/`: default local storage root.
 - `imgs/`: README demo images.
@@ -183,6 +231,7 @@ Notes:
 - `examples/import_agent_skills.py`: bulk import existing skills.
 - `examples/normalize_skill_ids.py`: normalize missing IDs in `SKILL.md`.
 - `examples/local_persistent_store.py`: offline local persistence demo.
+- `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 
 ## 7. Quick SDK Usage
 
@@ -272,6 +321,53 @@ python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope commo
 
 ```bash
 python3 -m examples.normalize_skill_ids --store-dir Skills
+```
+
+### 9.5 OpenAI-Compatible Proxy API
+
+```bash
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.openai_proxy --llm-provider dashscope --embeddings-provider dashscope
+```
+
+Chat completion (standard shape):
+
+```bash
+curl http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "YOUR_MODEL_NAME",
+    "user": "u1",
+    "messages": [
+      {"role": "user", "content": "Write a concise release checklist."}
+    ]
+  }'
+```
+
+Streaming:
+
+```bash
+curl http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "YOUR_MODEL_NAME",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "Summarize this plan in 5 bullets."}
+    ]
+  }'
+```
+
+Embeddings:
+
+```bash
+curl http://127.0.0.1:9000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "text-embedding-v4",
+    "input": ["alpha", "beta"]
+  }'
 ```
 
 ## 10. Why This Matters
