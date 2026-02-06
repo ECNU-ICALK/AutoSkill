@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-AutoSkill is a practical implementation of **Experience-driven Lifelong Learning (ExDLL)**.
+AutoSkill is a practical implementation of **Experience-driven Lifelong Learning (ELL)**.
 It learns from real interaction experience (dialogue + behavior/events), automatically creates reusable Skills,
 and continuously evolves existing Skills through merge + version updates.
 

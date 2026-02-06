@@ -270,7 +270,7 @@ class InteractiveChatApp:
                 arg,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
             )
             if not hits:
                 self.io.print("(no hits)")
@@ -401,9 +401,10 @@ class InteractiveChatApp:
 
         Stages:
         1) drain background extraction result
-        2) rewrite query + retrieve/select skills
-        3) stream assistant response
-        4) stage/schedule extraction in background
+        2) schedule extraction as soon as user input arrives (parallel with chat)
+        3) rewrite query + retrieve/select skills
+        4) stream assistant response
+        5) stage latest window for next-turn feedback
         """
 
         latest_user = text.strip()
@@ -416,6 +417,25 @@ class InteractiveChatApp:
         extract_window = self._pop_pending_extraction_window(user_feedback=latest_user)
 
         self.messages.append({"role": "user", "content": latest_user})
+
+        # Schedule extraction immediately on user input so extraction can run in parallel with
+        # response generation. Prefer pending feedback window; otherwise use current context.
+        early_window = (
+            list(extract_window)
+            if extract_window is not None
+            else list(self.messages[-self.config.ingest_window :])
+        )
+        has_assistant_in_window = any(
+            str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
+        )
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            self._start_background_extraction(early_window, trigger="auto")
 
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         search_query = latest_user
@@ -432,7 +452,7 @@ class InteractiveChatApp:
                 search_query,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
             )
         except Exception as e:
             self.io.print("\n[retrieve] failed:", str(e))
@@ -492,17 +512,6 @@ class InteractiveChatApp:
             latest_assistant=latest_assistant,
             messages=list(window),
         )
-
-        if self._should_trigger_auto_extraction():
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            scheduled_window = list(extract_window) if extract_window is not None else list(window)
-            if scheduled_window:
-                self._start_background_extraction(scheduled_window, trigger="auto")
 
     def _print_retrieval(self, hits: List[Any]) -> None:
         """Renders retrieval hits to console with score and source info."""

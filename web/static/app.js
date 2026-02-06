@@ -16,6 +16,7 @@ const state = {
   extractionFinishedAtMs: null,
   extractionRunningTimer: null,
   extractionElapsedTimer: null,
+  retrievalPulseTimer: null,
 };
 
 function el(id) {
@@ -106,6 +107,8 @@ function renderRetrieval(retrieval) {
   el("origQuery").textContent = retrieval?.original_query || "";
   el("rewrittenQuery").textContent = retrieval?.rewritten_query || "";
   el("searchQuery").textContent = retrieval?.search_query || "";
+  const t = retrieval?.event_time ? _fmtTime(_toMs(retrieval.event_time)) : "";
+  el("retrievalAt").textContent = t;
 
   const hits = Array.isArray(retrieval?.hits) ? retrieval.hits : [];
   const selectedIds = Array.isArray(retrieval?.selected_for_context_ids)
@@ -123,6 +126,24 @@ function renderRetrieval(retrieval) {
   el("retrievalError").textContent = err;
 
   el("hits").innerHTML = hits.map(formatHit).join("");
+}
+
+function pulseRetrievalCard() {
+  const card = el("retrievalCard");
+  if (!card) return;
+  card.classList.remove("card--pulse");
+  // Force a reflow to restart the animation when retrieval updates rapidly.
+  // eslint-disable-next-line no-unused-expressions
+  card.offsetWidth;
+  card.classList.add("card--pulse");
+  if (state.retrievalPulseTimer) {
+    window.clearTimeout(state.retrievalPulseTimer);
+    state.retrievalPulseTimer = null;
+  }
+  state.retrievalPulseTimer = window.setTimeout(() => {
+    card.classList.remove("card--pulse");
+    state.retrievalPulseTimer = null;
+  }, 900);
 }
 
 function _toMs(raw) {
@@ -399,7 +420,6 @@ async function ensureSession() {
 
 async function pollSession() {
   if (!state.sessionId) return;
-  if (state.inFlight) return;
   try {
     const out = await api("/api/session/poll", { session_id: state.sessionId });
     const events = out?.events?.extraction;
@@ -559,6 +579,17 @@ async function sendText(text) {
             ensureAssistantBubble();
             state.messages[streamAssistantIndex].content += delta;
             renderChat();
+            return;
+          }
+          if (t === "retrieval") {
+            const payload = ev?.retrieval || null;
+            renderRetrieval(payload);
+            pulseRetrievalCard();
+            return;
+          }
+          if (t === "extraction") {
+            const payload = ev?.extraction || null;
+            renderExtraction(payload);
             return;
           }
           if (t === "result") {

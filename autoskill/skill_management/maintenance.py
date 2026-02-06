@@ -28,6 +28,187 @@ from ..utils.json import json_from_llm_text
 from ..utils.time import now_iso
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
+_NAME_TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+")
+
+
+def _name_similarity(a: str, b: str) -> float:
+    a_tokens = {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(a or "").lower())}
+    b_tokens = {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(b or "").lower())}
+    if not a_tokens or not b_tokens:
+        return 0.0
+    inter = len(a_tokens & b_tokens)
+    union = len(a_tokens | b_tokens)
+    if union <= 0:
+        return 0.0
+    return float(inter) / float(union)
+
+
+def _token_set(text: str) -> set[str]:
+    return {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(text or "").lower())}
+
+
+def _overlap_ratio(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    if union <= 0:
+        return 0.0
+    return float(inter) / float(union)
+
+
+def _signal_overlap(existing: Skill, candidate: SkillCandidate) -> float:
+    existing_signal = "\n".join(
+        [
+            str(existing.name or ""),
+            str(existing.description or ""),
+            " ".join([str(t or "") for t in (existing.tags or [])]),
+            "\n".join([str(t or "") for t in (existing.triggers or [])]),
+        ]
+    )
+    candidate_signal = "\n".join(
+        [
+            str(candidate.name or ""),
+            str(candidate.description or ""),
+            " ".join([str(t or "") for t in (candidate.tags or [])]),
+            "\n".join([str(t or "") for t in (candidate.triggers or [])]),
+        ]
+    )
+    return _overlap_ratio(_token_set(existing_signal), _token_set(candidate_signal))
+
+
+def _clip01(x: float) -> float:
+    v = float(x)
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        return 1.0
+    return v
+
+
+def _merge_confidence_by_code(
+    *,
+    existing: Skill,
+    candidate: SkillCandidate,
+    similarity: float,
+    threshold: float,
+) -> float:
+    """
+    Generic, provider-agnostic merge confidence from semantic + lexical signals.
+
+    This intentionally avoids domain/channel keyword rules and only uses:
+    - vector similarity from retrieval
+    - name overlap
+    - intent-signal overlap (name/description/tags/triggers)
+    """
+
+    similarity_f = _clip01(float(similarity or 0.0))
+    threshold_f = _clip01(float(threshold or 0.0))
+    # Normalize semantic confidence around threshold; allow a margin for noisy embeddings.
+    semantic_floor = max(0.0, threshold_f - 0.15)
+    semantic_norm = _clip01((similarity_f - semantic_floor) / max(1e-6, 1.0 - semantic_floor))
+
+    name_sim = _name_similarity(existing.name, candidate.name)
+    signal_sim = _signal_overlap(existing, candidate)
+    # Weighted blend: semantic signal dominates, lexical signal stabilizes near threshold.
+    return _clip01(0.70 * semantic_norm + 0.18 * signal_sim + 0.12 * name_sim)
+
+
+def _judge_merge_with_llm(
+    llm,
+    *,
+    existing: Skill,
+    candidate: SkillCandidate,
+    similarity: float,
+    threshold: float,
+) -> Tuple[bool, float, str]:
+    """
+    LLM semantic judge for same-capability check.
+
+    Returns:
+    - same_capability: bool
+    - confidence: [0,1]
+    - reason: short text
+    """
+
+    if llm is None:
+        return False, 0.0, "no_llm"
+    system = (
+        "You are AutoSkill's capability identity judge.\n"
+        "Task: decide whether candidate_skill should UPDATE/MERGE an existing_skill or be a NEW skill.\n"
+        "Output ONLY strict JSON, no markdown, no extra text.\n"
+        "\n"
+        "Decision principle:\n"
+        "- same_capability=true if both skills solve the same job-to-be-done and candidate is mainly an iteration/refinement.\n"
+        "- same_capability=false if they differ in deliverable objective, target audience, or evaluation criteria.\n"
+        "- Do NOT treat renaming, wording changes, or different examples as a new capability.\n"
+        "\n"
+        "Return schema:\n"
+        "{\n"
+        '  "same_capability": true|false,\n'
+        '  "confidence": 0.0-1.0,\n'
+        '  "reason": "short reason"\n'
+        "}\n"
+    )
+    data = {
+        "similarity": float(similarity or 0.0),
+        "dedupe_threshold": float(threshold or 0.0),
+        "existing_skill": _skill_for_llm(existing),
+        "candidate_skill": _candidate_to_raw(candidate),
+    }
+    user = json.dumps(data, ensure_ascii=False)
+    try:
+        out = llm.complete(system=system, user=user, temperature=0.0)
+        obj = json_from_llm_text(out)
+        same = bool(obj.get("same_capability"))
+        conf = _clip01(float(obj.get("confidence", 0.0) or 0.0))
+        reason = str(obj.get("reason") or "").strip()
+        return same, conf, reason
+    except Exception as e:
+        return False, 0.0, f"judge_error:{e}"
+
+
+def _should_merge(
+    *,
+    llm,
+    existing: Skill,
+    candidate: SkillCandidate,
+    similarity: float,
+    threshold: float,
+) -> bool:
+    """
+    Unified merge gate:
+    1) fast path by code confidence (very high / very low)
+    2) ambiguous band resolved by LLM judge when available
+    3) fallback to code confidence
+    """
+
+    score = _merge_confidence_by_code(
+        existing=existing,
+        candidate=candidate,
+        similarity=similarity,
+        threshold=threshold,
+    )
+
+    if score >= 0.80:
+        return True
+    if score <= 0.22:
+        return False
+
+    if llm is not None:
+        same, conf, _reason = _judge_merge_with_llm(
+            llm,
+            existing=existing,
+            candidate=candidate,
+            similarity=similarity,
+            threshold=threshold,
+        )
+        if conf >= 0.66:
+            return bool(same)
+        # Low-confidence LLM output: rely on deterministic score.
+        return bool(score >= 0.45)
+
+    return bool(score >= 0.45)
 
 
 def _json_from_llm_decision(text: str) -> Dict:
@@ -208,13 +389,45 @@ class SkillMaintainer:
         Core maintenance decision pipeline for one candidate.
 
         Priority:
-        1) optionally merge into previous skill when strongly similar
-        2) search similar user/library skills
-        3) llm decision (add/merge/discard) or heuristic fallback
+        1) build candidate context (previous skill hint + similar skill retrieval)
+        2) llm decision (add/merge/discard) when available
+        3) heuristic fallback when llm is unavailable
         """
 
         previous_id, metadata_clean = self._pop_previous_skill_id(metadata)
         previous_id = previous_id or self._get_last_upserted_skill_id(user_id=user_id)
+        merge_gate_cache: Dict[str, bool] = {}
+
+        def _persist_merged(target: Skill) -> Skill:
+            merged = (
+                _merge_with_llm(self._llm, target, cand)
+                if self._llm is not None
+                else _merge(target, cand)
+            )
+            merged.updated_at = now_iso()
+            merged.metadata = _merge_metadata(target.metadata, metadata_clean, cand)
+            if self._config.store_sources and cand.source:
+                merged.source = cand.source
+            merged.files = _merge_files(target.files, build_agent_skill_files(merged))
+            self._store.upsert(merged, raw=_skill_to_raw(merged))
+            self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
+            return merged
+
+        def _can_merge_to(target: Skill, score: float, *, threshold: float) -> bool:
+            sid = str(getattr(target, "id", "") or "")
+            cache_key = f"{sid}|{round(float(score or 0.0), 6)}|{round(float(threshold or 0.0), 6)}"
+            cached = merge_gate_cache.get(cache_key)
+            if cached is not None:
+                return bool(cached)
+            decision = _should_merge(
+                llm=self._llm,
+                existing=target,
+                candidate=cand,
+                similarity=float(score or 0.0),
+                threshold=float(threshold or 0.0),
+            )
+            merge_gate_cache[cache_key] = bool(decision)
+            return bool(decision)
 
         previous_skill = None
         if previous_id:
@@ -240,20 +453,19 @@ class SkillMaintainer:
                 filters={"scope": "user", "ids": [previous_skill.id]},
             )
             prev_score = float(prev_hits[0].score) if prev_hits else 0.0
-            if prev_score >= prev_threshold and self._llm is None:
-                merged = (
-                    _merge_with_llm(self._llm, previous_skill, cand)
-                    if self._llm is not None
-                    else _merge(previous_skill, cand)
+            if self._llm is None:
+                prev_force_merge_threshold = float(
+                    (self._config.extra or {}).get(
+                        "previous_skill_force_merge_threshold",
+                        max(prev_threshold + 0.18, 0.72),
+                    )
                 )
-                merged.updated_at = now_iso()
-                merged.metadata = _merge_metadata(previous_skill.metadata, metadata_clean, cand)
-                if self._config.store_sources and cand.source:
-                    merged.source = cand.source
-                merged.files = _merge_files(previous_skill.files, build_agent_skill_files(merged))
-                self._store.upsert(merged, raw=_skill_to_raw(merged))
-                self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
-                return merged
+                if prev_score >= prev_force_merge_threshold:
+                    if _can_merge_to(previous_skill, prev_score, threshold=prev_threshold):
+                        return _persist_merged(previous_skill)
+                if prev_score >= prev_threshold:
+                    if _can_merge_to(previous_skill, prev_score, threshold=prev_threshold):
+                        return _persist_merged(previous_skill)
 
         # Search for similar skills using the candidate text to avoid duplicates.
         # Include both user skills and shared library skills as references.
@@ -272,11 +484,6 @@ class SkillMaintainer:
         best_any = similar[0] if similar else None
         best_user = next((h for h in similar if not _is_library_skill(h.skill)), None)
         best_library = next((h for h in similar if _is_library_skill(h.skill)), None)
-        best_user_for_llm = (
-            next((h for h in similar_for_llm if not _is_library_skill(h.skill)), None)
-            if self._llm is not None
-            else best_user
-        )
 
         def _create_new() -> Skill:
             created = Skill(
@@ -309,7 +516,7 @@ class SkillMaintainer:
                     dedupe_threshold=float(self._config.dedupe_similarity_threshold),
                 )
             except Exception:
-                action, target_skill_id = "", None
+                action, target_skill_id = "add", None
 
             if action == "discard":
                 return None
@@ -320,47 +527,39 @@ class SkillMaintainer:
                 target = None
                 if target_skill_id:
                     target_id = str(target_skill_id).strip()
-                    allowed_user_ids = {
-                        str(h.skill.id)
-                        for h in (similar_for_llm or [])
-                        if getattr(h, "skill", None) is not None and not _is_library_skill(h.skill)
-                    }
-                    if target_id and target_id in allowed_user_ids:
+                    if target_id:
                         target = self._store.get(target_id)
-                        if target is not None and _is_library_skill(target):
-                            target = None
-                if target is None and best_user_for_llm is not None:
-                    target = best_user_for_llm.skill
+                        if target is not None:
+                            owner = str(getattr(target, "user_id", "") or "").strip()
+                            if _is_library_skill(target) or owner != str(user_id):
+                                target = None
                 if target is not None:
-                    merged = _merge_with_llm(self._llm, target, cand)
-                    merged.updated_at = now_iso()
-                    merged.metadata = _merge_metadata(target.metadata, metadata_clean, cand)
-                    if self._config.store_sources and cand.source:
-                        merged.source = cand.source
-                    merged.files = _merge_files(target.files, build_agent_skill_files(merged))
-                    self._store.upsert(merged, raw=_skill_to_raw(merged))
-                    self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
-                    return merged
+                    return _persist_merged(target)
 
                 return _create_new()
+
+            return _create_new()
 
         # Fallback / heuristic maintenance:
         # - merge into the best user-owned skill when clearly similar
         # - otherwise, if a shared library skill is clearly similar, discard the candidate to avoid duplication
         # - otherwise, add a new user skill
         if best_user and best_user.score >= self._config.dedupe_similarity_threshold:
-            merged = _merge(best_user.skill, cand)
-            merged.updated_at = now_iso()
-            merged.metadata = _merge_metadata(best_user.skill.metadata, metadata_clean, cand)
-            if self._config.store_sources and cand.source:
-                merged.source = cand.source
-            merged.files = _merge_files(best_user.skill.files, build_agent_skill_files(merged))
-            self._store.upsert(merged, raw=_skill_to_raw(merged))
-            self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
-            return merged
+            if _can_merge_to(
+                best_user.skill,
+                float(best_user.score),
+                threshold=float(self._config.dedupe_similarity_threshold),
+            ):
+                return _persist_merged(best_user.skill)
 
         if best_any and best_library and best_library.score >= self._config.dedupe_similarity_threshold:
-            return None
+            # Discard only when the shared skill is safely considered the same capability.
+            if _can_merge_to(
+                best_library.skill,
+                float(best_library.score),
+                threshold=float(self._config.dedupe_similarity_threshold),
+            ):
+                return None
 
         return _create_new()
 
@@ -391,23 +590,37 @@ def _decide_candidate_action_with_llm(
         "- Skills are modular capability packages (SKILL.md + optional resources) that onboard another assistant instance.\n"
         "- Maintain a high-signal, non-redundant skill set.\n"
         "- Favor progressive disclosure: store concise metadata + an executable prompt; avoid storing long reference dumps.\n"
+        "- Decision objective: maximize long-term capability quality while minimizing skill fragmentation.\n"
         "\n"
         "You must choose one action:\n"
         "- add: store the candidate as a new user skill\n"
         "- merge: merge the candidate into ONE existing USER skill (pick target_skill_id)\n"
         "- discard: do not store the candidate\n"
         "\n"
-        "Quality rules (be conservative):\n"
-        "- Prefer discard if the candidate is generic/obvious, low-signal, or not clearly reusable.\n"
-        "- Prefer discard if a shared library skill already covers the capability and the candidate adds no stable, user-specific value.\n"
-        "- Prefer merge if the candidate is an incremental improvement to an existing user skill (same intent, clearer prompt, better checks, better metadata).\n"
-        "- Prefer add if the candidate changes the core content type, channel, or audience (e.g., 'government report' vs 'public account article'), even if the structure is similar.\n"
-        "- Prefer add only if the candidate is a distinct reusable capability not covered by existing skills.\n"
-        "- Use similarity scores as hints, not absolute truth.\n"
+        "Decision procedure (follow in order):\n"
+        "1) Discard gate:\n"
+        "- Choose discard if candidate is generic, low-signal, not clearly reusable, or adds no durable user-specific value.\n"
+        "- Choose discard if a shared library skill already covers it and candidate has no stable improvement.\n"
+        "2) Capability identity test against USER skills:\n"
+        "- Compare candidate vs each user skill on four axes:\n"
+        "  a) core job-to-be-done,\n"
+        "  b) output contract/deliverable type,\n"
+        "  c) hard constraints and success criteria,\n"
+        "  d) required context/tools/workflow.\n"
+        "- Treat as SAME capability if at least 3/4 axes match, or if one user skill clearly subsumes candidate.\n"
+        "3) Merge vs add:\n"
+        "- If SAME capability with any user skill: choose merge to the best matching target_skill_id.\n"
+        "- If candidate is mostly an iteration (clearer prompt, stronger checks, extra constraints, better metadata), choose merge.\n"
+        "- Choose add only if candidate introduces a durable non-overlapping capability that cannot be represented as an update of any user skill.\n"
+        "4) Tie-breakers:\n"
+        "- On uncertainty between add and merge, choose merge (anti-fragmentation).\n"
+        "- Never choose add only due renaming, wording/style change, or example replacement.\n"
+        "- Similarity scores are hints, not the sole criterion.\n"
         "\n"
         "Constraints:\n"
         "- If action is merge, target_skill_id MUST refer to a skill with scope == 'user' in the provided similar list.\n"
         "- Do not propose deleting any existing skills.\n"
+        "- Keep reason short and concrete (<= 30 words).\n"
         "\n"
         "Return schema:\n"
         "{\n"

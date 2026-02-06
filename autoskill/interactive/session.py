@@ -338,7 +338,7 @@ class InteractiveSession:
                 q,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
             )
             min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
             if hits and min_score > 0:
@@ -438,9 +438,10 @@ class InteractiveSession:
 
         Stages:
         1) drain background extraction result
-        2) rewrite query + retrieve/select skills
-        3) generate assistant response
-        4) stage/schedule extraction in background
+        2) (auto mode) schedule extraction as soon as user input arrives
+        3) rewrite query + retrieve/select skills
+        4) generate assistant response
+        5) stage latest window for the next-turn extraction
         """
 
         latest_user = str(text or "").strip()
@@ -453,6 +454,35 @@ class InteractiveSession:
         extract_window = self._pop_pending_extraction_window(user_feedback=latest_user)
 
         self.messages.append({"role": "user", "content": latest_user})
+
+        # Schedule extraction immediately on user input so extraction can run in parallel with
+        # response generation. Prefer the pending feedback window; otherwise use the current
+        # recent context if it already contains assistant turns.
+        early_window = (
+            list(extract_window)
+            if extract_window is not None
+            else list(self.messages[-self.config.ingest_window :])
+        )
+        has_assistant_in_window = any(
+            str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
+        )
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            job_id = self._start_background_extraction(early_window, trigger="auto")
+            extraction_scheduled = {
+                "trigger": "auto",
+                "job_id": str(job_id or ""),
+                "event_time": _now_ms(),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+                "skill_mds": [],
+            }
 
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         original_query = latest_user
@@ -472,7 +502,7 @@ class InteractiveSession:
                 search_query,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
             )
         except Exception as e:
             hits = []
@@ -520,26 +550,6 @@ class InteractiveSession:
             messages=list(window),
         )
 
-        if self._should_trigger_auto_extraction():
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            scheduled_window = list(extract_window) if extract_window is not None else list(window)
-            if scheduled_window:
-                job_id = self._start_background_extraction(scheduled_window, trigger="auto")
-                extraction_scheduled = {
-                    "trigger": "auto",
-                    "job_id": str(job_id or ""),
-                    "event_time": _now_ms(),
-                    "status": "scheduled",
-                    "error": "",
-                    "upserted": [],
-                    "skill_mds": [],
-                }
-
         retrieval = self._build_retrieval_info(
             original_query=original_query,
             rewritten_query=rewritten_query,
@@ -582,6 +592,42 @@ class InteractiveSession:
 
         self.messages.append({"role": "user", "content": latest_user})
 
+        # Schedule extraction immediately on user input so extraction can run in parallel with
+        # response generation. Prefer the pending feedback window; otherwise use the current
+        # recent context if it already contains assistant turns.
+        early_window = (
+            list(extract_window)
+            if extract_window is not None
+            else list(self.messages[-self.config.ingest_window :])
+        )
+        has_assistant_in_window = any(
+            str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
+        )
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            job_id = self._start_background_extraction(early_window, trigger="auto")
+            extraction_scheduled = {
+                "trigger": "auto",
+                "job_id": str(job_id or ""),
+                "event_time": _now_ms(),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+                "skill_mds": [],
+            }
+
+        # Emit extraction updates early so Web UI progress can update without waiting for
+        # full assistant generation to finish.
+        if extraction_event is not None:
+            yield {"type": "extraction", "extraction": extraction_event}
+        if extraction_scheduled is not None:
+            yield {"type": "extraction", "extraction": extraction_scheduled}
+
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         original_query = latest_user
         search_query = latest_user
@@ -600,7 +646,7 @@ class InteractiveSession:
                 search_query,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
             )
         except Exception as e:
             hits = []
@@ -636,6 +682,19 @@ class InteractiveSession:
             else ""
         )
 
+        retrieval = self._build_retrieval_info(
+            original_query=original_query,
+            rewritten_query=rewritten_query,
+            search_query=search_query,
+            hits=hits,
+            selected_for_use=selected_for_use,
+            selected_for_context=selected_for_context,
+            context_injected=use_skills,
+            error=retrieval_error or None,
+        )
+        # Emit retrieval diagnostics as soon as retrieval is complete.
+        yield {"type": "retrieval", "retrieval": retrieval}
+
         # 2) Generate assistant response (streaming).
         assistant_parts: List[str] = []
         for part in self._generate_assistant_response_stream(context=context, use_skills=use_skills):
@@ -655,37 +714,6 @@ class InteractiveSession:
             latest_user=latest_user,
             latest_assistant=assistant,
             messages=list(window),
-        )
-
-        if self._should_trigger_auto_extraction():
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            scheduled_window = list(extract_window) if extract_window is not None else list(window)
-            if scheduled_window:
-                job_id = self._start_background_extraction(scheduled_window, trigger="auto")
-                extraction_scheduled = {
-                    "trigger": "auto",
-                    "job_id": str(job_id or ""),
-                    "event_time": _now_ms(),
-                    "status": "scheduled",
-                    "error": "",
-                    "upserted": [],
-                    "skill_mds": [],
-                }
-
-        retrieval = self._build_retrieval_info(
-            original_query=original_query,
-            rewritten_query=rewritten_query,
-            search_query=search_query,
-            hits=hits,
-            selected_for_use=selected_for_use,
-            selected_for_context=selected_for_context,
-            context_injected=use_skills,
-            error=retrieval_error or None,
         )
 
         chat_append = [
@@ -739,6 +767,7 @@ class InteractiveSession:
             "original_query": str(original_query or ""),
             "rewritten_query": (str(rewritten_query) if rewritten_query else None),
             "search_query": str(search_query or ""),
+            "event_time": _now_ms(),
             "scope": str(self.config.skill_scope),
             "top_k": int(self.config.top_k),
             "min_score": float(self.config.min_score),
@@ -983,6 +1012,18 @@ class InteractiveSession:
                     break
 
                 try:
+                    if epoch == int(self._epoch):
+                        self._events.put(
+                            {
+                                "trigger": str(current.trigger),
+                                "job_id": str(current.job_id),
+                                "event_time": _now_ms(),
+                                "status": "running",
+                                "error": "",
+                                "upserted": [],
+                                "skill_mds": [],
+                            }
+                        )
                     updated = self.sdk.ingest(
                         user_id=self.config.user_id,
                         messages=list(current.window or []),
