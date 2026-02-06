@@ -8,12 +8,14 @@ The interactive loop is intentionally configurable via a single object so it can
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from ..config import default_store_path
 
 
 @dataclass
 class InteractiveConfig:
-    store_dir: str = "Skills"
+    store_dir: str = field(default_factory=default_store_path)
     user_id: str = "u1"
 
     # Which Skills to use during retrieval:
@@ -50,7 +52,7 @@ class InteractiveConfig:
     assistant_temperature: float = 0.2
 
     def normalize(self) -> "InteractiveConfig":
-        self.store_dir = str(self.store_dir or "Skills").strip() or "Skills"
+        self.store_dir = str(self.store_dir or default_store_path()).strip() or default_store_path()
 
         self.skill_scope = (self.skill_scope or "all").strip().lower()
         if self.skill_scope == "common":

@@ -127,6 +127,14 @@ class SkillMaintainer:
     def __init__(
         self, config: AutoSkillConfig, store: SkillStore, extractor: SkillExtractor
     ) -> None:
+        """
+        Maintainer owns add/merge/discard decisions after extraction.
+
+        It can run in:
+        - heuristic mode
+        - llm mode (decision + merge synthesis)
+        """
+
         self._config = config
         self._store = store
         self._extractor = extractor
@@ -139,6 +147,8 @@ class SkillMaintainer:
         self._last_upserted_skill_id_by_user: Dict[str, str] = {}
 
     def _pop_previous_skill_id(self, metadata: Optional[Dict]) -> Tuple[Optional[str], Dict]:
+        """Extracts and removes previous-skill hints from metadata."""
+
         md = dict(metadata or {})
         prev = None
         for k in ("previous_skill_id", "prev_skill_id", "last_skill_id"):
@@ -152,6 +162,8 @@ class SkillMaintainer:
         return prev, md
 
     def _get_last_upserted_skill_id(self, *, user_id: str) -> Optional[str]:
+        """Returns in-memory last upserted skill id for a user in this process."""
+
         uid = str(user_id or "").strip()
         if not uid:
             return None
@@ -160,6 +172,8 @@ class SkillMaintainer:
         return str(sid).strip() if sid and str(sid).strip() else None
 
     def _record_last_upserted_skill_id(self, *, user_id: str, skill_id: str) -> None:
+        """Records last upserted skill id for follow-up merge preference."""
+
         uid = str(user_id or "").strip()
         sid = str(skill_id or "").strip()
         if not uid or not sid:
@@ -174,6 +188,12 @@ class SkillMaintainer:
         user_id: str,
         metadata: Optional[Dict] = None,
     ) -> List[Skill]:
+        """
+        Applies maintenance for each candidate and returns upserted skills.
+
+        Candidates that resolve to `discard` are omitted from the returned list.
+        """
+
         out: List[Skill] = []
         for cand in candidates:
             skill = self._upsert_candidate(cand, user_id=user_id, metadata=metadata)
@@ -184,6 +204,15 @@ class SkillMaintainer:
     def _upsert_candidate(
         self, cand: SkillCandidate, *, user_id: str, metadata: Optional[Dict]
     ) -> Optional[Skill]:
+        """
+        Core maintenance decision pipeline for one candidate.
+
+        Priority:
+        1) optionally merge into previous skill when strongly similar
+        2) search similar user/library skills
+        3) llm decision (add/merge/discard) or heuristic fallback
+        """
+
         previous_id, metadata_clean = self._pop_previous_skill_id(metadata)
         previous_id = previous_id or self._get_last_upserted_skill_id(user_id=user_id)
 
@@ -405,10 +434,18 @@ def _decide_candidate_action_with_llm(
 
 
 def _candidate_to_query(cand: SkillCandidate) -> str:
+    """Builds a retrieval query string from candidate fields."""
+
     return f"{cand.name}\n{cand.description}\n{cand.instructions}"
 
 
 def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
+    """
+    Heuristic merge strategy (deterministic, no LLM).
+
+    Keeps existing stable identity and increments patch version.
+    """
+
     def _instruction_quality_score(text: str) -> int:
         s = str(text or "").strip()
         if not s:
@@ -464,6 +501,12 @@ def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
 
 
 def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
+    """
+    LLM-assisted merge that preserves extractor schema.
+
+    Falls back to heuristic `_merge` on any parsing/runtime error.
+    """
+
     try:
         system = (
             "You are AutoSkill's Skill Merger.\n"
@@ -599,6 +642,8 @@ def _bump_patch(version: str) -> str:
 
 
 def _merge_metadata(old: Dict, extra: Optional[Dict], cand: SkillCandidate) -> Dict:
+    """Merges metadata and keeps the max observed confidence."""
+
     out = dict(old or {})
     if extra:
         out.update(extra)
@@ -612,6 +657,8 @@ def _merge_metadata(old: Dict, extra: Optional[Dict], cand: SkillCandidate) -> D
 
 
 def _candidate_to_raw(cand: SkillCandidate) -> Dict:
+    """Serializes a candidate for logging/LLM decision payloads."""
+
     return {
         "name": cand.name,
         "description": cand.description,
@@ -627,6 +674,8 @@ def _candidate_to_raw(cand: SkillCandidate) -> Dict:
 
 
 def _skill_to_raw(skill: Skill) -> Dict:
+    """Serializes a persisted skill record."""
+
     return {
         "id": skill.id,
         "user_id": skill.user_id,
@@ -650,6 +699,8 @@ def _skill_to_raw(skill: Skill) -> Dict:
 
 
 def _skill_for_llm(skill: Skill) -> Dict:
+    """Serializes only LLM-relevant fields used in merge prompts."""
+
     return {
         "name": skill.name,
         "description": skill.description,
@@ -665,6 +716,8 @@ def _skill_for_llm(skill: Skill) -> Dict:
 
 
 def _merge_files(existing: Dict[str, str], updates: Dict[str, str]) -> Dict[str, str]:
+    """Overlay merge for skill artifact files, preserving existing resources by default."""
+
     merged = dict(existing or {})
     for path, content in (updates or {}).items():
         if path and content is not None:

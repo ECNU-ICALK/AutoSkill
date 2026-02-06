@@ -19,11 +19,22 @@ def _default_store_path() -> str:
         root = os.path.abspath(os.path.join(here, os.pardir))
         return os.path.join(root, "Skills")
     except Exception:
-        return "Skills"
+        return os.path.abspath("Skills")
+
+
+def default_store_path() -> str:
+    """
+    Returns the canonical default local store path.
+
+    Target location:
+    - <repo_root>/Skills
+    """
+
+    return _default_store_path()
 
 
 def _default_store() -> Dict[str, Any]:
-    return {"provider": "local", "path": _default_store_path()}
+    return {"provider": "local", "path": default_store_path()}
 
 
 @dataclass(frozen=True)

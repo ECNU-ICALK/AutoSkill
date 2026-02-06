@@ -50,6 +50,14 @@ class AutoSkill:
         store: Optional[SkillStore] = None,
         extractor: Optional[SkillExtractor] = None,
     ) -> None:
+        """
+        Builds an SDK instance with pluggable store and extractor implementations.
+
+        Defaults:
+        - store: built from `config.store`
+        - extractor: built from `config.llm`
+        """
+
         self.config = config or AutoSkillConfig()
         self.store = store or build_store(self.config)
         self.extractor = extractor or build_default_extractor(self.config)
@@ -57,6 +65,8 @@ class AutoSkill:
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "AutoSkill":
+        """Constructs `AutoSkill` from a plain dict config."""
+
         return cls(AutoSkillConfig.from_dict(config))
 
     def ingest(
@@ -68,6 +78,15 @@ class AutoSkill:
         metadata: Optional[Dict[str, Any]] = None,
         hint: Optional[str] = None,
     ) -> List[Skill]:
+        """
+        End-to-end learning entrypoint.
+
+        Flow:
+        1) extract candidate skills from messages/events
+        2) maintain skill set (add/merge/discard + versioning)
+        3) persist via configured store
+        """
+
         if not messages and not events:
             raise ValueError("ingest requires either messages or events")
 
@@ -93,6 +112,8 @@ class AutoSkill:
         metadata: Optional[Dict[str, Any]] = None,
         hint: Optional[str] = None,
     ) -> List[Skill]:
+        """Alias of `ingest` kept for ergonomic compatibility."""
+
         return self.ingest(
             messages=messages,
             events=events,
@@ -110,6 +131,15 @@ class AutoSkill:
         scope: Optional[str] = None,  # user|common|library|all
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
+        """
+        Retrieves relevant skills for a query.
+
+        Scope behavior:
+        - user: only current user's skills
+        - library/common: shared skills
+        - all: union of user + shared
+        """
+
         merged = dict(filters or {})
         if scope is not None and str(scope).strip():
             merged["scope"] = str(scope).strip()
@@ -121,15 +151,23 @@ class AutoSkill:
         )
 
     def get(self, skill_id: str) -> Optional[Skill]:
+        """Returns a single skill by id, or `None` if not found."""
+
         return self.store.get(skill_id)
 
     def get_all(self, *, user_id: str) -> List[Skill]:
+        """Legacy alias of `list`."""
+
         return self.list(user_id=user_id)
 
     def list(self, *, user_id: str) -> List[Skill]:
+        """Lists active user-owned skills."""
+
         return self.store.list(user_id=user_id)
 
     def delete(self, skill_id: str) -> bool:
+        """Deletes a user-owned skill by id."""
+
         return self.store.delete(skill_id)
 
     def upsert(
@@ -146,6 +184,12 @@ class AutoSkill:
         source: Optional[Dict[str, Any]] = None,
         skill_id: Optional[str] = None,
     ) -> Skill:
+        """
+        Manual upsert API used by UI/editor flows.
+
+        Unlike `ingest`, this expects already-structured fields and writes the skill directly.
+        """
+
         skill = Skill(
             id=skill_id or str(uuid.uuid4()),
             user_id=user_id,
@@ -177,15 +221,23 @@ class AutoSkill:
         return skill
 
     def export_skill_md(self, skill_id: str) -> Optional[str]:
+        """Exports a skill as a single `SKILL.md` string."""
+
         return _export_skill_md(self.store, skill_id)
 
     def export_skill_dir(self, skill_id: str) -> Optional[Dict[str, str]]:
+        """Exports a skill artifact as `{relative_path: file_content}`."""
+
         return _export_skill_dir(self.store, skill_id)
 
     def write_skill_dir(self, skill_id: str, *, root_dir: str) -> Optional[str]:
+        """Writes one skill artifact to disk and returns the output directory path."""
+
         return _write_skill_dir(self.store, skill_id, root_dir=root_dir)
 
     def write_skill_dirs(self, *, user_id: str, root_dir: str) -> List[str]:
+        """Writes all user skills to disk as Agent Skill directories."""
+
         return _write_skill_dirs(self.store, user_id=user_id, root_dir=root_dir)
 
     def import_agent_skill_dirs(

@@ -9,7 +9,7 @@ What it does:
 
 Environment variables:
 - `ZHIPUAI_API_KEY` / `BIGMODEL_API_KEY`: "id.secret"
-- `AUTOSKILL_STORE_DIR`: default Skills
+- `AUTOSKILL_STORE_DIR`: default <repo_root>/Skills
 - `BIGMODEL_AUTH_MODE`: auto/jwt/api_key (default: auto)
 - `BIGMODEL_TOKEN_TIME_UNIT`: ms/s (default: ms)
 - `BIGMODEL_BASE_URL`: default https://open.bigmodel.cn/api/paas/v4
@@ -27,6 +27,7 @@ import os
 from typing import Any, Dict, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.config import default_store_path
 from autoskill.embeddings.factory import build_embeddings
 
 
@@ -83,7 +84,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--store-dir",
-        default=_env("AUTOSKILL_STORE_DIR", _env("AUTOSKILL_STORE_PATH", "Skills")),
+        default=_env(
+            "AUTOSKILL_STORE_DIR",
+            _env("AUTOSKILL_STORE_PATH", default_store_path()),
+        ),
     )
     parser.add_argument(
         "--strict",

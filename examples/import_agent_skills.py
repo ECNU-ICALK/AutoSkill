@@ -20,6 +20,7 @@ import shutil
 import uuid
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.config import default_store_path
 from autoskill.skill_management.formats.agent_skill import upsert_skill_md_id
 
 
@@ -87,7 +88,7 @@ def main() -> None:
     default_store_dir = (
         os.getenv("AUTOSKILL_STORE_DIR")
         or os.getenv("AUTOSKILL_STORE_PATH")
-        or "Skills"
+        or default_store_path()
     )
     parser.add_argument(
         "--store-dir",

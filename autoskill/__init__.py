@@ -6,6 +6,11 @@ Main exports:
 - `AutoSkillConfig`: unified config (LLM / embeddings / store / maintenance strategy)
 """
 
+import sys
+
+# Avoid writing .pyc files during local development runs.
+sys.dont_write_bytecode = True
+
 from .client import AutoSkill
 from .config import AutoSkillConfig
 from .models import Skill, SkillHit, SkillStatus

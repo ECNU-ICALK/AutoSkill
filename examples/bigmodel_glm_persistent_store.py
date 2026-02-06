@@ -9,7 +9,7 @@ What it does:
 
 Environment variables:
 - `ZHIPUAI_API_KEY` / `BIGMODEL_API_KEY`: "id.secret"
-- `AUTOSKILL_STORE_DIR`: default Skills
+- `AUTOSKILL_STORE_DIR`: default <repo_root>/Skills
 - `BIGMODEL_AUTH_MODE`: auto/jwt/api_key (default: auto)
 - `BIGMODEL_TOKEN_TIME_UNIT`: ms/s (default: ms)
 - `BIGMODEL_BASE_URL`: default https://open.bigmodel.cn/api/paas/v4
@@ -25,6 +25,7 @@ import json
 import os
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.config import default_store_path
 
 
 def _env(name: str, default: str) -> str:
@@ -54,7 +55,10 @@ def _env_json(name: str):
 def main() -> None:
     api_key = _require_api_key()
 
-    store_dir = _env("AUTOSKILL_STORE_DIR", _env("AUTOSKILL_STORE_PATH", "Skills"))
+    store_dir = _env(
+        "AUTOSKILL_STORE_DIR",
+        _env("AUTOSKILL_STORE_PATH", default_store_path()),
+    )
     timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
     base_url = _env("BIGMODEL_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     auth_mode = _env("BIGMODEL_AUTH_MODE", "auto")

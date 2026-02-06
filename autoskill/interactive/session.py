@@ -29,12 +29,14 @@ from .selection import LLMSkillSelector
 
 @dataclass
 class _PendingExtraction:
+    # Snapshot of the latest assistant turn waiting for user feedback.
     latest_user: str
     latest_assistant: str
     messages: List[Dict[str, Any]]
 
 @dataclass
 class _BgExtractJob:
+    # One asynchronous extraction task. `epoch` guards against stale jobs after /clear.
     job_id: str
     window: List[Dict[str, Any]]
     trigger: str
@@ -43,6 +45,8 @@ class _BgExtractJob:
 
 
 def _skill_source_label(skill: Skill) -> str:
+    """Returns a compact source label used by retrieval diagnostics."""
+
     owner = str(getattr(skill, "user_id", "") or "").strip()
     if owner.startswith("library:"):
         return owner
@@ -52,6 +56,8 @@ def _skill_source_label(skill: Skill) -> str:
 
 
 def _format_hit(hit: SkillHit, *, rank: int) -> Dict[str, Any]:
+    """Normalizes a `SkillHit` into a stable JSON-ready dict."""
+
     skill = getattr(hit, "skill", None)
     score = float(getattr(hit, "score", 0.0) or 0.0)
     if skill is None:
@@ -69,6 +75,8 @@ def _format_hit(hit: SkillHit, *, rank: int) -> Dict[str, Any]:
 
 
 def _truncate_text(text: str, *, max_chars: int) -> str:
+    """UI-safe truncation helper for large markdown payloads."""
+
     s = str(text or "")
     if max_chars <= 0 or len(s) <= max_chars:
         return s
@@ -114,6 +122,8 @@ class InteractiveSession:
         self._schedule_vector_prewarm()
 
     def state(self) -> Dict[str, Any]:
+        """Returns lightweight session state for web clients."""
+
         return {
             "config": asdict(self.config),
             "messages": list(self.messages),
@@ -134,6 +144,13 @@ class InteractiveSession:
         return {"events": {"extraction": events}}
 
     def handle_input(self, text: str) -> Dict[str, Any]:
+        """
+        Handles one input frame in non-stream mode.
+
+        Command parsing is intentionally limited to single-line input to avoid surprises when users
+        paste multi-line content.
+        """
+
         raw = str(text or "")
         if not raw.strip():
             return {"kind": "noop", "chat_append": [], "config": asdict(self.config)}
@@ -147,6 +164,12 @@ class InteractiveSession:
         return self._handle_user_message(raw)
 
     def handle_input_stream(self, text: str) -> Iterator[Dict[str, Any]]:
+        """
+        Handles one input frame in stream mode.
+
+        Emits assistant deltas first, then a final `result` event with retrieval/extraction metadata.
+        """
+
         raw = str(text or "")
         if not raw.strip():
             yield {"type": "result", "result": {"kind": "noop", "chat_append": [], "config": asdict(self.config)}}
@@ -164,6 +187,12 @@ class InteractiveSession:
             yield ev
 
     def _drain_latest_event(self, *, kind: str) -> Optional[Dict[str, Any]]:
+        """
+        Drains and returns only the latest queued event of a given kind.
+
+        Current use-case is extraction event coalescing for responsive UIs.
+        """
+
         if kind != "extraction":
             return None
         latest: Optional[Dict[str, Any]] = None
@@ -404,6 +433,16 @@ class InteractiveSession:
         }
 
     def _handle_user_message(self, text: str) -> Dict[str, Any]:
+        """
+        Main non-stream turn pipeline.
+
+        Stages:
+        1) drain background extraction result
+        2) rewrite query + retrieve/select skills
+        3) generate assistant response
+        4) stage/schedule extraction in background
+        """
+
         latest_user = str(text or "").strip()
 
         extraction_event = self._drain_latest_event(kind="extraction")
@@ -526,6 +565,12 @@ class InteractiveSession:
         }
 
     def _handle_user_message_stream(self, text: str) -> Iterator[Dict[str, Any]]:
+        """
+        Streaming variant of `_handle_user_message`.
+
+        Retrieval and extraction scheduling are identical; only response emission differs.
+        """
+
         latest_user = str(text or "").strip()
 
         extraction_event = self._drain_latest_event(kind="extraction")
@@ -687,6 +732,8 @@ class InteractiveSession:
         context_injected: bool,
         error: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Builds a retrieval diagnostics payload consumed by CLI/Web views."""
+
         hits_out = [_format_hit(h, rank=i) for i, h in enumerate(hits or [], start=1)]
         return {
             "original_query": str(original_query or ""),
@@ -711,6 +758,8 @@ class InteractiveSession:
         trigger: str,
         max_md_chars: int = 8000,
     ) -> Dict[str, Any]:
+        """Builds extraction completion payload including optional SKILL.md previews."""
+
         skills = list(updated or [])
         summaries = [{"id": s.id, "name": s.name, "version": s.version, "owner": s.user_id} for s in skills]
         md_items: List[Dict[str, Any]] = []
@@ -728,6 +777,12 @@ class InteractiveSession:
         }
 
     def _build_assistant_inputs(self, *, context: str, use_skills: bool) -> Tuple[str, str]:
+        """
+        Assembles prompts for the chat model.
+
+        When skills are injected, prompt explicitly requires ignoring unrelated retrieved skills.
+        """
+
         if use_skills and (context or "").strip():
             system = (
                 "You are a helpful assistant.\n"
@@ -745,6 +800,8 @@ class InteractiveSession:
         return system, user
 
     def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
+        """Blocking assistant generation with defensive error handling."""
+
         if self.chat_llm is None:
             return "Offline mode: no chat LLM configured."
 
@@ -767,6 +824,8 @@ class InteractiveSession:
         context: str,
         use_skills: bool,
     ) -> Iterator[str]:
+        """Streaming assistant generation with chunk passthrough."""
+
         if self.chat_llm is None:
             yield "Offline mode: no chat LLM configured."
             return
@@ -787,6 +846,8 @@ class InteractiveSession:
             yield f"(LLM error: {msg})"
 
     def _format_history(self, *, max_turns: int) -> str:
+        """Formats recent turns into plain text history for LLM input."""
+
         if not self.messages:
             return ""
         max_msgs = max(0, int(max_turns)) * 2
@@ -806,6 +867,8 @@ class InteractiveSession:
         return "\n".join(lines).strip()
 
     def _finalize_pending_extraction(self, *, user_feedback: str) -> Optional[Dict[str, Any]]:
+        """Deprecated synchronous path kept for compatibility; extraction is now async."""
+
         # Kept for backward compatibility; extraction now runs in a background thread.
         extract_window = self._pop_pending_extraction_window(user_feedback=user_feedback)
         if extract_window is None:
@@ -822,6 +885,13 @@ class InteractiveSession:
         return None
 
     def _pop_pending_extraction_window(self, *, user_feedback: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Converts pending turn snapshot into an extraction window.
+
+        The current user message is appended as feedback so extractor/maintainer can decide whether
+        the previous response should become or update a reusable skill.
+        """
+
         pending = self._pending
         if pending is None:
             return None
@@ -835,6 +905,15 @@ class InteractiveSession:
         return window
 
     def _should_trigger_auto_extraction(self) -> bool:
+        """
+        Returns whether this turn should schedule extraction in auto mode.
+
+        Policy:
+        - never: disabled
+        - always: every turn
+        - auto: once every `extract_turn_limit` assistant turns
+        """
+
         mode = (self.config.extract_mode or "auto").lower()
         if mode == "never":
             return False
@@ -856,6 +935,14 @@ class InteractiveSession:
         trigger: str,
         hint: Optional[str] = None,
     ) -> Optional[str]:
+        """
+        Schedules asynchronous extraction work.
+
+        Concurrency strategy:
+        - at most one running extraction worker
+        - while busy, only the latest queued job is retained (coalescing)
+        """
+
         if not window:
             return None
         job_id = str(uuid.uuid4())
@@ -881,6 +968,13 @@ class InteractiveSession:
             return job_id
 
     def _background_extraction_worker(self, job: _BgExtractJob) -> None:
+        """
+        Worker loop for extraction tasks.
+
+        Processes the current job and then one latest queued job at a time; stale epochs are
+        discarded so `/clear` can safely reset session state.
+        """
+
         try:
             current = job
             while True:
@@ -942,6 +1036,10 @@ class InteractiveSession:
                 pass
 
     def _schedule_vector_prewarm(self) -> None:
+        """
+        Best-effort call into store prewarm API to reduce first-query retrieval latency.
+        """
+
         store = getattr(self.sdk, "store", None)
         fn = getattr(store, "schedule_vector_prewarm", None)
         if not callable(fn):

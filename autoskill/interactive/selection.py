@@ -25,6 +25,8 @@ def _format_history(
     max_chars: int,
     exclude_last_user: bool,
 ) -> str:
+    """Builds bounded history text for skill-selection prompts."""
+
     max_msgs = max(0, int(max_turns)) * 2
     window = messages[-max_msgs:] if max_msgs else messages
     if exclude_last_user and window:
@@ -56,6 +58,8 @@ def _format_history(
 
 
 def _skill_brief(skill: Skill, *, max_prompt_chars: int) -> Dict[str, Any]:
+    """Converts a full `Skill` into compact selector metadata."""
+
     prompt = (skill.instructions or "").strip()
     preview = (
         truncate_keep_head(prompt, max_units=max(0, int(max_prompt_chars)), marker="").strip()
@@ -74,6 +78,8 @@ def _skill_brief(skill: Skill, *, max_prompt_chars: int) -> Dict[str, Any]:
 
 
 def _parse_selected_ids(obj: Any) -> List[str]:
+    """Parses selected ids from flexible JSON shapes returned by different providers."""
+
     if isinstance(obj, dict):
         ids = obj.get("selected_skill_ids") or obj.get("skill_ids") or obj.get("ids") or []
         if isinstance(ids, list):
@@ -139,6 +145,8 @@ def _fallback_select_by_overlap(query: str, skills: List[Skill]) -> List[Skill]:
 
 
 def _clean_selector_output(text: str) -> str:
+    """Strips common wrappers so JSON parsing is more robust."""
+
     raw = str(text or "").strip()
     if not raw:
         return ""

@@ -13,6 +13,7 @@ import os
 from typing import Any, Dict, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.config import default_store_path
 from autoskill.interactive import (
     ConsoleIO,
     InteractiveChatApp,
@@ -196,7 +197,10 @@ def main() -> None:
         help="hashing|glm|dashscope|openai (default depends on llm)",
     )
     parser.add_argument("--embeddings-model", default=None)
-    default_store_dir = _env("AUTOSKILL_STORE_DIR", _env("AUTOSKILL_STORE_PATH", "Skills"))
+    default_store_dir = _env(
+        "AUTOSKILL_STORE_DIR",
+        _env("AUTOSKILL_STORE_PATH", default_store_path()),
+    )
     parser.add_argument("--store-dir", dest="store_dir", default=default_store_dir)
     parser.add_argument(
         "--store-path",

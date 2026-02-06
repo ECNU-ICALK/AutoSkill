@@ -10,7 +10,7 @@ import os
 import re
 from typing import List, Tuple
 
-from ...config import AutoSkillConfig
+from ...config import AutoSkillConfig, default_store_path
 from ...embeddings.factory import build_embeddings
 from .base import SkillStore
 from .inmemory import InMemorySkillStore
@@ -95,7 +95,7 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
 
     if provider in {"local", "dir", "skill_dir", "skills", "filesystem"}:
         # Filesystem store: one skill per directory (SKILL.md + optional resources).
-        default_dir = "Skills"
+        default_dir = default_store_path()
         path = str(
             config.store.get("path")
             or config.store.get("root_dir")

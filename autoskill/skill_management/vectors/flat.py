@@ -30,6 +30,8 @@ def _dot(q: Sequence[float], vecs: array, *, offset: int, dims: int) -> float:
 
 class FlatFileVectorIndex(VectorIndex):
     def __init__(self, *, dir_path: str, name: str = "skills") -> None:
+        """Initializes index paths and loads existing on-disk data if present."""
+
         self._dir = os.path.abspath(os.path.expanduser(str(dir_path)))
         self._name = str(name or "skills").strip() or "skills"
 
@@ -48,9 +50,13 @@ class FlatFileVectorIndex(VectorIndex):
 
     @property
     def dims(self) -> Optional[int]:
+        """Returns current embedding dimension, or None for empty index."""
+
         return self._dims
 
     def has(self, key: str) -> bool:
+        """Checks whether a vector exists for the given key."""
+
         k = str(key or "").strip()
         if not k:
             return False
@@ -58,6 +64,8 @@ class FlatFileVectorIndex(VectorIndex):
             return k in self._id_to_pos
 
     def get(self, key: str) -> Optional[List[float]]:
+        """Returns one vector by key, or None when key/dims are missing."""
+
         k = str(key or "").strip()
         if not k:
             return None
@@ -70,6 +78,8 @@ class FlatFileVectorIndex(VectorIndex):
             return [float(x) for x in self._vecs[start : start + d]]
 
     def upsert(self, key: str, vector: Sequence[float]) -> None:
+        """Upserts one vector row; auto-resets index when dims change."""
+
         k = str(key or "").strip()
         if not k:
             return
@@ -96,6 +106,8 @@ class FlatFileVectorIndex(VectorIndex):
             self._vecs[start : start + d] = arr
 
     def delete(self, key: str) -> bool:
+        """Deletes one key using swap-with-last for O(1) compaction."""
+
         k = str(key or "").strip()
         if not k:
             return False
@@ -129,6 +141,12 @@ class FlatFileVectorIndex(VectorIndex):
         keys: Optional[Iterable[str]] = None,
         top_k: int = 5,
     ) -> List[Tuple[str, float]]:
+        """
+        Exact dot-product search.
+
+        When `keys` is provided, search is restricted to that subset.
+        """
+
         k = max(0, int(top_k))
         if k == 0:
             return []
@@ -174,6 +192,8 @@ class FlatFileVectorIndex(VectorIndex):
             return [(sid, float(score)) for score, sid in heap]
 
     def reset(self, *, dims: Optional[int] = None) -> None:
+        """Clears all vectors and optionally pins a new target dimension."""
+
         with self._lock:
             self._dims = int(dims) if dims is not None else None
             self._ids = []
@@ -181,6 +201,8 @@ class FlatFileVectorIndex(VectorIndex):
             self._vecs = array("f")
 
     def load(self) -> None:
+        """Loads index files from disk; silently keeps empty state on corruption."""
+
         with self._lock:
             if not os.path.isfile(self._meta_path) or not os.path.isfile(self._ids_path) or not os.path.isfile(self._vecs_path):
                 return
@@ -208,6 +230,8 @@ class FlatFileVectorIndex(VectorIndex):
                 return
 
     def save(self) -> None:
+        """Atomically persists meta/ids/vectors files to disk."""
+
         with self._lock:
             if self._dims is None:
                 return
@@ -221,6 +245,8 @@ class FlatFileVectorIndex(VectorIndex):
             _atomic_write_vecs(self._vecs_path, self._vecs)
 
     def _ensure_dims(self, dims: int) -> None:
+        """Ensures index dimension consistency, resetting when model dims changed."""
+
         d = int(dims)
         if d <= 0:
             return

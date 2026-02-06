@@ -24,6 +24,8 @@ def _format_history(
     max_chars: int,
     exclude_last_user: bool,
 ) -> str:
+    """Builds bounded history text for query rewriting prompts."""
+
     max_msgs = max(0, int(max_turns)) * 2
     window = messages[-max_msgs:] if max_msgs else messages
     if exclude_last_user and window:
@@ -49,6 +51,8 @@ def _format_history(
 
 
 def _clean_rewritten_query(text: str) -> str:
+    """Normalizes raw LLM output into a single-line retrieval query."""
+
     raw = str(text or "").strip()
     if not raw:
         return ""
@@ -97,6 +101,12 @@ class LLMQueryRewriter:
         query: str,
         messages: List[Dict[str, Any]],
     ) -> str:
+        """
+        Rewrites current query into a retrieval-oriented query string.
+
+        On any provider/parsing failure, returns the original query.
+        """
+
         q = str(query or "").strip()
         if not q:
             return ""

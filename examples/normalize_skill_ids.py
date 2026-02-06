@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from autoskill.config import default_store_path
 from autoskill.skill_management.formats.agent_skill import load_agent_skill_dir
 
 
@@ -108,7 +109,11 @@ def _normalize_dir(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Normalize missing `id:` in SKILL.md files")
-    default_store_dir = os.getenv("AUTOSKILL_STORE_DIR") or os.getenv("AUTOSKILL_STORE_PATH") or "Skills"
+    default_store_dir = (
+        os.getenv("AUTOSKILL_STORE_DIR")
+        or os.getenv("AUTOSKILL_STORE_PATH")
+        or default_store_path()
+    )
     parser.add_argument("--store-dir", default=default_store_dir)
     parser.add_argument(
         "--scope",

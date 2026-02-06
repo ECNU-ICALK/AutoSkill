@@ -14,10 +14,15 @@ from __future__ import annotations
 import os
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.config import default_store_path
 
 
 def main() -> None:
-    store_dir = os.getenv("AUTOSKILL_STORE_DIR") or os.getenv("AUTOSKILL_STORE_PATH") or "Skills"
+    store_dir = (
+        os.getenv("AUTOSKILL_STORE_DIR")
+        or os.getenv("AUTOSKILL_STORE_PATH")
+        or default_store_path()
+    )
 
     sdk = AutoSkill(
         AutoSkillConfig(

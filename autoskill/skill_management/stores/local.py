@@ -180,6 +180,15 @@ class LocalSkillStore(SkillStore):
         include_libraries: bool = True,
         include_legacy_root: bool = False,
     ) -> None:
+        """
+        Creates a filesystem-backed skill store with optional persistent vector cache.
+
+        Directory model:
+        - user skills: `<root>/Users/<user_id>/<skill_dir>/SKILL.md`
+        - shared skills: `<root>/Common/.../SKILL.md`
+        - vectors: `<root>/vectors/*`
+        """
+
         self._embeddings = embeddings
         self._root_dir = os.path.abspath(os.path.expanduser(str(path)))
         self._max_depth = max(0, int(max_depth))
@@ -218,9 +227,19 @@ class LocalSkillStore(SkillStore):
 
     @property
     def path(self) -> str:
+        """Returns the normalized store root path."""
+
         return self._root_dir
 
     def upsert(self, skill: Skill, *, raw: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Upserts one user-owned skill.
+
+        Side effects:
+        - writes/updates skill directory files on disk
+        - updates vector index (or in-memory vector cache)
+        """
+
         user_id = str(skill.user_id or "").strip() or "default"
         user_root = os.path.join(self._users_root, user_id)
         os.makedirs(user_root, exist_ok=True)
@@ -249,11 +268,15 @@ class LocalSkillStore(SkillStore):
             )
 
     def get(self, skill_id: str) -> Optional[Skill]:
+        """Returns a skill by id if loaded in memory."""
+
         with self._lock:
             rec = self._records.get(skill_id)
             return rec.skill if rec else None
 
     def delete(self, skill_id: str) -> bool:
+        """Deletes one user-owned skill directory and associated vector record."""
+
         with self._lock:
             rec = self._records.get(skill_id)
             if rec is None:
@@ -275,6 +298,8 @@ class LocalSkillStore(SkillStore):
             return True
 
     def list(self, *, user_id: str) -> List[Skill]:
+        """Lists active skills for a given user id."""
+
         uid = str(user_id or "").strip()
         with self._lock:
             return [
@@ -293,6 +318,15 @@ class LocalSkillStore(SkillStore):
         limit: int,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
+        """
+        Searches relevant skills by vector similarity.
+
+        Behavior notes:
+        - supports `scope` filters (`user` / `library` / `all`)
+        - supports `allow_partial_vectors` for low-latency first query
+        - auto-resets vector index when embedding dimensions change
+        """
+
         filters = filters or {}
         allow_partial_vectors = bool(filters.get("allow_partial_vectors", False))
         scope = str(filters.get("scope") or "").strip().lower()  # user|library|all
@@ -417,6 +451,16 @@ class LocalSkillStore(SkillStore):
         return self._schedule_embed_records(records)
 
     def _load_existing(self) -> None:
+        """
+        Loads all discoverable skills into memory at startup.
+
+        Loading order:
+        1) shared skills under `<root>/Common`
+        2) external read-only libraries configured by `library_dirs`
+        3) optional legacy flat layout under `<root>`
+        4) user skills under `<root>/Users/<user_id>`
+        """
+
         loaded: Dict[str, _Record] = {}
 
         # 1) Load shared common skills under store_root/Common/... (read-only).
@@ -522,6 +566,8 @@ class LocalSkillStore(SkillStore):
     def _load_library_root(
         self, loaded: Dict[str, _Record], *, library_name: str, library_root: str
     ) -> None:
+        """Loads one library root into memory as read-only records."""
+
         lib_name = str(library_name or "library").strip() or "library"
         root = os.path.abspath(os.path.expanduser(str(library_root)))
         for dir_path, rel_key in _iter_skill_dirs(root, max_depth=self._max_depth):
@@ -610,6 +656,12 @@ class LocalSkillStore(SkillStore):
             return
 
     def _allocate_dir(self, *, skill: Skill, base_dir: str) -> str:
+        """
+        Allocates a stable skill directory path under a user root.
+
+        If slug collision happens, appends an id-based suffix.
+        """
+
         from ..formats.agent_skill import skill_dir_name
 
         base = skill_dir_name(skill) or "skill"
@@ -627,6 +679,12 @@ class LocalSkillStore(SkillStore):
         return os.path.join(base_dir, f"{base}-{suffix}")
 
     def _write_skill_files(self, *, skill: Skill, dir_path: str) -> None:
+        """
+        Writes all artifact files for one skill.
+
+        `SKILL.md` is always ensured; additional files are written as relative safe paths.
+        """
+
         from ..formats.agent_skill import build_agent_skill_files
 
         files = dict(skill.files or {})
@@ -643,9 +701,13 @@ class LocalSkillStore(SkillStore):
                 f.write(str(content or ""))
 
     def _embed_skill(self, skill: Skill) -> List[float]:
+        """Embeds one skill record into its retrieval text representation."""
+
         return self._embeddings.embed([_skill_to_text(skill)])[0]
 
     def _embed_missing_records(self, records: List[_Record]) -> None:
+        """Batch-embeds missing vectors and writes results to cache/index."""
+
         batch_size = 32
         skills = [r.skill for r in records]
         texts = [_skill_to_text(s) for s in skills]
@@ -686,6 +748,8 @@ class LocalSkillStore(SkillStore):
         return queued
 
     def _ensure_bg_embed_worker_locked(self) -> None:
+        """Starts background embedding worker if no worker is currently alive."""
+
         t = self._bg_embed_thread
         if t is not None and t.is_alive():
             return
@@ -694,6 +758,12 @@ class LocalSkillStore(SkillStore):
         t2.start()
 
     def _background_embed_worker(self) -> None:
+        """
+        Background embedding loop.
+
+        Pulls queued ids, skips already-embedded records, and persists newly produced vectors.
+        """
+
         batch_size = 32
         while True:
             with self._bg_embed_lock:
@@ -750,6 +820,8 @@ class LocalSkillStore(SkillStore):
             self._mark_embed_done(batch_ids)
 
     def _mark_embed_done(self, ids: List[str]) -> None:
+        """Marks queued ids as completed so they can be rescheduled if needed later."""
+
         with self._bg_embed_lock:
             for sid in ids or []:
                 sid_s = str(sid or "").strip()

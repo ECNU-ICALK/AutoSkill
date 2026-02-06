@@ -26,12 +26,14 @@ from .selection import LLMSkillSelector
 
 @dataclass
 class _PendingExtraction:
+    # Snapshot of the latest assistant turn waiting for user feedback.
     latest_user: str
     latest_assistant: str
     messages: List[Dict[str, Any]]
 
 @dataclass
 class _BgExtractJob:
+    # One asynchronous extraction task. `epoch` guards against stale jobs after /clear.
     window: List[Dict[str, Any]]
     trigger: str
     hint: Optional[str]
@@ -49,6 +51,8 @@ class InteractiveChatApp:
         query_rewriter: Optional[LLMQueryRewriter] = None,
         skill_selector: Optional[LLMSkillSelector] = None,
     ) -> None:
+        """Creates a console chat app that orchestrates retrieval + response + async extraction."""
+
         self.sdk = sdk
         self.config = config.normalize()
         self.io: IO = io or ConsoleIO()
@@ -66,6 +70,8 @@ class InteractiveChatApp:
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
     def run(self) -> None:
+        """Starts the blocking REPL loop."""
+
         self._print_banner()
         self._print_help()
         while True:
@@ -89,6 +95,8 @@ class InteractiveChatApp:
             self._handle_user_message(line)
 
     def _print_banner(self) -> None:
+        """Prints startup diagnostics and schedules best-effort vector prewarm."""
+
         online = "online" if self.chat_llm is not None else "offline"
         self.io.print("AutoSkill interactive chat")
         self.io.print("Store dir:", self.config.store_dir)
@@ -101,6 +109,8 @@ class InteractiveChatApp:
         self._schedule_vector_prewarm(log=True)
 
     def _print_help(self) -> None:
+        """Prints command list and extraction behavior notes."""
+
         self.io.print(
             "\nCommands:\n"
             "  /help\n"
@@ -125,6 +135,8 @@ class InteractiveChatApp:
         )
 
     def _handle_command(self, cmd: Command) -> bool:
+        """Handles slash commands; returns True only when the app should exit."""
+
         name = cmd.name
         arg = cmd.arg
 
@@ -317,6 +329,8 @@ class InteractiveChatApp:
         return "\n".join(lines)
 
     def _read_file_message(self, raw_path: str) -> Optional[str]:
+        """Loads file content as message text, with size cap and UTF-8 replacement decode."""
+
         import os
 
         path = str(raw_path or "").strip()
@@ -349,6 +363,8 @@ class InteractiveChatApp:
         return text
 
     def _read_clipboard_message(self) -> Optional[str]:
+        """Loads clipboard text using platform-specific commands."""
+
         import subprocess
 
         def _try(cmd: list[str]) -> Optional[bytes]:
@@ -380,6 +396,16 @@ class InteractiveChatApp:
         return text
 
     def _handle_user_message(self, text: str) -> None:
+        """
+        Main console turn pipeline.
+
+        Stages:
+        1) drain background extraction result
+        2) rewrite query + retrieve/select skills
+        3) stream assistant response
+        4) stage/schedule extraction in background
+        """
+
         latest_user = text.strip()
 
         # Drain any completed extraction results from background jobs.
@@ -479,6 +505,8 @@ class InteractiveChatApp:
                 self._start_background_extraction(scheduled_window, trigger="auto")
 
     def _print_retrieval(self, hits: List[Any]) -> None:
+        """Renders retrieval hits to console with score and source info."""
+
         if not hits:
             self.io.print("\n[retrieve] no skills")
             return
@@ -497,6 +525,8 @@ class InteractiveChatApp:
             self.io.print(f"- {i}. {source} | {s.id} | {s.name} | {score:.4f}")
 
     def _print_selected_for_context(self, skills: List[Any]) -> None:
+        """Renders skills that survived context-length selection."""
+
         if not skills:
             self.io.print("[retrieve] selected for context: none (max_chars limit)")
             return
@@ -511,6 +541,8 @@ class InteractiveChatApp:
             self.io.print(f"- {i}. {source} | {s.id} | {s.name}")
 
     def _print_selected_for_use(self, skills: List[Any]) -> None:
+        """Renders skills chosen by optional LLM selector before context truncation."""
+
         if not skills:
             self.io.print("[retrieve] selected for use: none")
             return
@@ -525,6 +557,12 @@ class InteractiveChatApp:
             self.io.print(f"- {i}. {source} | {s.id} | {s.name}")
 
     def _build_assistant_inputs(self, *, context: str, use_skills: bool) -> Tuple[str, str]:
+        """
+        Assembles prompts for chat generation.
+
+        When skills are injected, prompt explicitly requires ignoring irrelevant retrieved skills.
+        """
+
         if use_skills and (context or "").strip():
             system = (
                 "You are a helpful assistant.\n"
@@ -542,6 +580,8 @@ class InteractiveChatApp:
         return system, user
 
     def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
+        """Blocking response generation with defensive error formatting."""
+
         if self.chat_llm is None:
             return "Offline mode: no chat LLM configured."
 
@@ -565,6 +605,8 @@ class InteractiveChatApp:
         context: str,
         use_skills: bool,
     ) -> Iterator[str]:
+        """Streaming response generation that yields chunks as they arrive."""
+
         if self.chat_llm is None:
             yield "Offline mode: no chat LLM configured."
             return
@@ -586,6 +628,8 @@ class InteractiveChatApp:
             yield f"(LLM error: {msg})"
 
     def _format_history(self, *, max_turns: int) -> str:
+        """Formats recent turns into plain text conversation history."""
+
         if not self.messages:
             return ""
         max_msgs = max(0, int(max_turns)) * 2
@@ -605,6 +649,13 @@ class InteractiveChatApp:
         return "\n".join(lines).strip()
 
     def _pop_pending_extraction_window(self, *, user_feedback: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Converts pending turn snapshot into an extraction window.
+
+        The current user message is appended as feedback so extractor/maintainer can decide whether
+        the previous response should become or update a reusable skill.
+        """
+
         pending = self._pending
         if pending is None:
             return None
@@ -617,6 +668,15 @@ class InteractiveChatApp:
         return window
 
     def _should_trigger_auto_extraction(self) -> bool:
+        """
+        Returns whether this turn should schedule extraction in auto mode.
+
+        Policy:
+        - never: disabled
+        - always: every turn
+        - auto: once every `extract_turn_limit` assistant turns
+        """
+
         mode = (self.config.extract_mode or "auto").lower()
         if mode == "never":
             return False
@@ -638,6 +698,14 @@ class InteractiveChatApp:
         trigger: str,
         hint: Optional[str] = None,
     ) -> None:
+        """
+        Schedules asynchronous extraction work.
+
+        Concurrency strategy:
+        - at most one running extraction worker
+        - while busy, only the latest queued job is retained (coalescing)
+        """
+
         if not window:
             return
         job = _BgExtractJob(
@@ -660,6 +728,13 @@ class InteractiveChatApp:
             self._queued_extract = job
 
     def _background_extraction_worker(self, job: _BgExtractJob) -> None:
+        """
+        Worker loop for extraction tasks.
+
+        Processes the current job and then one latest queued job at a time; stale epochs are
+        discarded so `/clear` can safely reset session state.
+        """
+
         try:
             current = job
             while True:
@@ -735,6 +810,8 @@ class InteractiveChatApp:
                         self._print_skill_md(str(sid), label=f"extract:{trigger}")
 
     def _print_skill_md(self, skill_id: str, *, label: str) -> None:
+        """Prints a capped SKILL.md preview for explicit extraction actions."""
+
         md = self.sdk.export_skill_md(str(skill_id))
         if not md:
             return
@@ -747,6 +824,8 @@ class InteractiveChatApp:
         self.io.print(f"\n[{label}] SKILL.md for {skill_id}:\n{md_s}")
 
     def _schedule_vector_prewarm(self, *, log: bool = False) -> None:
+        """Best-effort vector prewarm to reduce first-query retrieval latency."""
+
         store = getattr(self.sdk, "store", None)
         fn = getattr(store, "schedule_vector_prewarm", None)
         if not callable(fn):
