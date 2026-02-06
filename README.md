@@ -33,20 +33,21 @@ Open `http://127.0.0.1:8000`.
 
 ## 1.1 Skill Lifecycle Example (4 Aspects)
 
-### A) Skill Extraction (v0.1.0)
+### A) Auto Decision: No Extraction for Generic One-shot Tasks
 
-From interaction data, AutoSkill extracts a new skill for **government report writing** and creates version `v0.1.0`.
+If the user only asks to "write a report" and gives no stable preference/correction, AutoSkill does **not** create a new skill
+(it outputs an empty extraction result) to avoid noisy, generic skills.
+
+### B) Feedback-triggered Extraction + Management (v0.1.0)
 
 ![Skill Extraction](imgs/skill_extraction.png)
 
-### B) Skill Management (Backend-first + Human Editable)
-
-Skill management is primarily handled by the backend: it automatically decides add/merge actions to keep the skill set clean and evolving.
-On top of that, users can manually edit and save the generated `SKILL.md` (or delete a skill when needed).
+When the user adds durable constraints (for example: "do not hallucinate"), AutoSkill extracts or merges a skill into version `v0.1.0`.
+Skill management is backend-first (automatic add/merge), with optional human edit/save/delete of `SKILL.md`.
 
 ### C) Skill Update (v0.1.1)
 
-When user requirements change during later interactions, AutoSkill updates the existing skill instead of creating noisy duplicates,
+When user feedback adds new constraints or changes priorities in later turns, AutoSkill updates the existing skill (instead of creating duplicates)
 and evolves the version from `v0.1.0` to `v0.1.1`.
 
 ![Skill Update](imgs/skill_update.png)
@@ -62,10 +63,9 @@ to generate outputs aligned with user expectations.
 
 - **Experience-native learning**: learns directly from user/assistant interactions and behavior traces.
 - **Continuous skill evolution**: not only adds new skills, but also merges/improves similar existing skills with version bumps.
+- **Feedback-gated extraction**: generic one-shot tasks are filtered out; stable user feedback (e.g., "no hallucination") triggers extraction/update.
 - **Portable skill artifact**: stores skills in Agent Skill format (`SKILL.md`), so existing skills can be imported and extracted skills can be migrated.
 - **Personal + shared knowledge planes**: supports both user-private skills (`Users/<user_id>`) and shared libraries (`Common/`) in one retrieval flow.
-- **Fast interactive UX**: retrieval happens every turn; extraction/maintenance runs asynchronously to avoid blocking response latency.
-- **Model/embedding decoupling**: pluggable providers (`dashscope`, `glm`, `openai`, `anthropic`, offline `mock/hashing`).
 
 ## 3. System Workflow
 
@@ -102,6 +102,9 @@ User Query (+ recent history)
 - `extract_mode=always`: attempt every turn.
 - `extract_mode=never`: disable auto extraction.
 - `extract_now [hint]`: force immediate background extraction for current context.
+- Generic requests without user correction (for example, one-time report writing) should return no skill extraction.
+- User feedback that encodes durable preferences/constraints (for example, "do not hallucinate") should trigger extraction or update.
+- If a similar user skill already exists, prefer merge/update over creating a duplicate skill.
 
 ## 4. Key Concepts
 
