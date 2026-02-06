@@ -2,17 +2,161 @@
 
 中文 | [English](README.md)
 
-AutoSkill 是一个持续自进化的「Skill Layer」SDK：它把对话与行为/事件日志转化为可复用、可执行的 **Skills**，并持续维护（去重/合并/版本化），在后续任务中检索并注入合适的 Skills 来提升下游任务表现。
+AutoSkill 是 **Experience-driven Lifelong Learning（经验驱动终身学习）** 的工程化实践。
+它从真实交互经验（对话 + 行为/事件）中学习，自动生成可复用技能，并通过合并与版本演进持续优化已有技能。
 
-目标：参考常见的「memory 插件」工作流，但把存储单元从“原始记忆”升级为“可执行、可复用的技能（Skill）”。
+与只保存原始记忆片段不同，AutoSkill 保存的是可迁移、可执行的 **Agent Skill 制品**（`SKILL.md` + 可选资源）。
 
-## 安装（本地开发）
+## 1. 快速开始：Web UI（默认百炼 DashScope）
 
 ```bash
 python3 -m pip install -e .
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.web_ui \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --store-dir Skills \
+  --user-id u1 \
+  --skill-scope all \
+  --rewrite-mode always \
+  --extract-mode auto \
+  --extract-turn-limit 1 \
+  --min-score 0.4 \
+  --top-k 1
 ```
 
-## 快速开始
+启动后打开 `http://127.0.0.1:8000`。
+
+示例结果：
+
+![AutoSkill Web UI Example](imgs/example.png)
+
+## 2. 项目核心特点
+
+- **经验原生学习**：直接从真实用户交互和行为轨迹中抽取可复用能力。
+- **技能持续进化**：不仅新增技能，还会把相似技能进行合并、补充并自动版本递增。
+- **通用技能格式**：使用 Agent Skill 形态（`SKILL.md`），已有技能可导入，抽取技能可迁移到其他系统。
+- **用户域 + 共享域协同**：支持用户私有技能 `Users/<user_id>` 与共享技能库 `Common/` 联合检索。
+- **交互体验优先**：每轮先检索，抽取/维护异步执行，尽量不影响对话响应速度。
+- **模型与向量解耦**：LLM 与 embedding provider 可插拔（`dashscope/glm/openai/anthropic` + 离线模式）。
+
+## 3. 系统工作流
+
+### 3.1 学习与进化流程
+
+```text
+经验数据（messages/events）
+  -> 技能抽取（candidate）
+  -> 技能维护（add / merge / discard）
+  -> 技能存储（Agent Skill + 向量索引）
+```
+
+- 每次尝试最多产出一个高质量候选技能。
+- 维护阶段先做相似匹配，再决定新增/合并/丢弃。
+- 合并后自动递增 patch 版本，形成长期演化轨迹。
+
+### 3.2 检索与回答流程
+
+```text
+当前 Query（含最近上下文）
+  -> Query 重写（可选）
+  -> 向量化 + 向量检索
+  -> 技能选择与注入
+  -> 大模型回答
+```
+
+- 检索每轮执行。
+- 通过相似度阈值与 `top_k` 控制召回质量。
+- 检索后仍可二次筛选，避免无关技能注入。
+
+### 3.3 交互抽取策略
+
+- `extract_mode=auto`：每 `extract_turn_limit` 轮尝试抽取。
+- `extract_mode=always`：每轮都尝试抽取。
+- `extract_mode=never`：关闭自动抽取。
+- `extract_now [hint]`：对当前上下文立即发起后台抽取。
+
+## 4. 核心概念
+
+- **Experience**：对话消息或行为事件，是学习信号源。
+- **Skill**：可复用能力制品，包含元数据与可执行指令。
+- **Skill Candidate**：抽取阶段的临时候选，尚未进入长期库。
+- **Maintenance**：新增/合并/丢弃决策与版本管理。
+- **Skill Store**：技能制品与向量映射的持久化层。
+- **Retrieval Context**：被选中的技能上下文，注入回答链路。
+
+## 5. 本地存储结构（Local Store）
+
+当使用 `store={"provider": "local", "path": "Skills"}`：
+
+```text
+Skills/
+  Users/
+    <user_id>/
+      <skill-slug>/
+        SKILL.md
+        scripts/          (可选)
+        references/       (可选)
+        assets/           (可选)
+  Common/
+    <skill-slug>/SKILL.md
+    <library>/<skill-slug>/SKILL.md
+  vectors/
+    <embedding-signature>.meta.json
+    <embedding-signature>.ids.txt
+    <embedding-signature>.vecs.f32
+```
+
+说明：
+
+- `Users/<user_id>`：用户私有技能。
+- `Common/`：共享技能库（通常只读）。
+- `vectors/`：按 embedding 签名分开的持久化向量缓存，切换 embedding 模型后不会混用旧索引。
+
+## 6. 仓库结构（更易读版本）
+
+### 6.1 顶层目录
+
+- `autoskill/`：SDK 核心实现。
+- `examples/`：可直接运行的示例入口。
+- `web/`：本地 Web UI 静态资源。
+- `Skills/`：默认本地技能存储根目录。
+- `imgs/`：README 示例图片。
+
+### 6.2 SDK 核心模块
+
+- `autoskill/client.py`：SDK 对外入口（`ingest/search/render/import/export`）。
+- `autoskill/config.py`：全局配置模型。
+- `autoskill/models.py`：核心数据结构（`Skill`、`SkillHit` 等）。
+- `autoskill/render.py`：技能上下文渲染。
+
+### 6.3 Skill Management 层
+
+- `autoskill/skill_management/extraction.py`：技能抽取逻辑与提示词。
+- `autoskill/skill_management/maintenance.py`：新增/合并/丢弃和版本演化。
+- `autoskill/skill_management/formats/agent_skill.py`：`SKILL.md` 渲染与解析。
+- `autoskill/skill_management/stores/local.py`：目录存储与向量映射。
+- `autoskill/skill_management/vectors/flat.py`：本地向量索引后端。
+- `autoskill/skill_management/importer.py`：导入外部 Agent Skills。
+
+### 6.4 Interactive 层
+
+- `autoskill/interactive/app.py`：CLI 交互编排。
+- `autoskill/interactive/session.py`：Web/API 可复用会话引擎。
+- `autoskill/interactive/rewriting.py`：检索 query 重写。
+- `autoskill/interactive/selection.py`：注入前技能选择。
+
+### 6.5 示例入口
+
+- `examples/web_ui.py`：本地 Web UI 服务。
+- `examples/interactive_chat.py`：终端交互式对话。
+- `examples/import_agent_skills.py`：导入已有技能。
+- `examples/normalize_skill_ids.py`：补齐/规范化技能 ID。
+- `examples/local_persistent_store.py`：离线本地持久化示例。
+
+## 7. SDK 最小使用示例
 
 ```python
 from autoskill import AutoSkill, AutoSkillConfig
@@ -21,312 +165,93 @@ sdk = AutoSkill(
     AutoSkillConfig(
         llm={"provider": "mock"},
         embeddings={"provider": "hashing", "dims": 256},
-        store={"provider": "inmemory"},  # 或 {"provider": "local", "path": "Skills"}
+        store={"provider": "local", "path": "Skills"},
     )
 )
 
 sdk.ingest(
-    messages=[
-        {"role": "user", "content": "Before each release: run regression tests -> canary rollout -> monitor -> full rollout."},
-        {"role": "assistant", "content": "Got it."},
-    ],
     user_id="u1",
+    messages=[
+        {"role": "user", "content": "Before each release: run regression -> canary -> monitor -> full rollout."},
+        {"role": "assistant", "content": "Understood."},
+    ],
 )
 
-hits = sdk.search("How should I do a release?", user_id="u1", limit=5)
+hits = sdk.search("How should I do a safe release?", user_id="u1", limit=3)
 for h in hits:
     print(h.skill.name, h.score)
 ```
 
-## Provider 配置示例
+## 8. Provider 配置建议
 
-OpenAI：
-
-```python
-from autoskill import AutoSkill, AutoSkillConfig
-
-sdk = AutoSkill(
-    AutoSkillConfig(
-        llm={"provider": "openai", "model": "gpt-4o-mini", "api_key": "YOUR_KEY"},
-        embeddings={
-            "provider": "openai",
-            "model": "text-embedding-3-small",
-            "api_key": "YOUR_KEY",
-        },
-        store={"provider": "inmemory"},
-        maintenance_strategy="llm",
-    )
-)
-```
-
-DashScope Qwen（OpenAI 兼容模式）：
-
-```python
-from autoskill import AutoSkill, AutoSkillConfig
-
-sdk = AutoSkill(
-    AutoSkillConfig(
-        llm={
-            "provider": "dashscope",
-            "model": "qwen-plus",
-            "api_key": "YOUR_DASHSCOPE_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
-        },
-        embeddings={
-            "provider": "dashscope",
-            "model": "text-embedding-v4",
-            "api_key": "YOUR_DASHSCOPE_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
-            "extra_body": {"dimensions": 1024, "encoding_format": "float"},
-        },
-        store={"provider": "inmemory"},
-        maintenance_strategy="llm",
-    )
-)
-```
-
-Anthropic：
-
-```python
-from autoskill import AutoSkill, AutoSkillConfig
-
-sdk = AutoSkill(
-    AutoSkillConfig(
-        llm={"provider": "anthropic", "model": "claude-3-5-sonnet-latest", "api_key": "YOUR_KEY"},
-        embeddings={"provider": "hashing", "dims": 256},
-        store={"provider": "inmemory"},
-        maintenance_strategy="llm",
-    )
-)
-```
-
-BigModel GLM（GLM-4.7 + embedding-3）：
-
-```python
-from autoskill import AutoSkill, AutoSkillConfig
-
-sdk = AutoSkill(
-    AutoSkillConfig(
-        llm={
-            "provider": "glm",
-            "model": "glm-4.7",
-            "api_key": "YOUR_ID.YOUR_SECRET",
-            "auth_mode": "auto",  # 默认 auto；也可以强制 jwt 或 api_key
-        },
-        embeddings={
-            "provider": "glm",
-            "model": "embedding-3",
-            "api_key": "YOUR_ID.YOUR_SECRET",
-            "auth_mode": "auto",  # 默认 auto；也可以强制 jwt 或 api_key
-        },
-        store={"provider": "inmemory"},
-        maintenance_strategy="llm",
-    )
-)
-```
-
-## SDK 能力概览
-
-- `ingest(...)`：从 `messages`（对话）或 `events`（行为日志）中抽取/更新 Skills
-- `search(query, ...)`：检索与当前任务相关的 Skills
-- `get(skill_id)` / `list(user_id)` / `delete(skill_id)`
-- `render_context(query, ...)`：把检索到的 Skills 渲染成可注入的上下文块
-
-## Skill 格式（Agent Skill / anthropics/skills 风格）
-
-在 SDK 内部，一个 Skill 会以结构化对象表示，并可导出为 **Agent Skill 目录制品（artifact）**：即一个目录，至少包含 `SKILL.md`（YAML frontmatter + Markdown 正文），参考 `anthropics/skills` 的组织方式。
-
-核心字段：
-
-- `name`：短、可检索的标题
-- `description`：该技能的用途与适用场景
-- `instructions`（即 `prompt`）：可复用、可直接执行的技能指令
-- `triggers`：触发/使用条件
-- `examples`：可选示例
-- `tags`：主题标签
-- `version`：语义化版本（默认 `0.1.0`，合并时 bump patch）
-
-Agent Skill 制品：
-
-- `Skill.files["SKILL.md"]`：生成的 `SKILL.md`
-- `AutoSkill.export_skill_md(skill_id)`：导出 `SKILL.md` 文本
-- `AutoSkill.write_skill_dir(skill_id, root_dir=...)`：写出一个技能目录（可附带脚本/资源）
-- `AutoSkill.write_skill_dirs(user_id=..., root_dir=...)`：批量写出用户所有技能目录
-
-## LLM / Embeddings / Store
-
-AutoSkill 采用可插拔架构：
-
-- LLM：`mock`（离线）、`openai`、`dashscope`（Qwen）、`anthropic`、`glm`（BigModel GLM-4.7）
-- Embeddings：`hashing`（离线）、`openai`、`dashscope`（Qwen）、`glm`（BigModel embedding-3）
-- Store：`inmemory`（离线）、`local`（按目录持久化：`Users/<user_id>/...` + 共享库 `Common/...`；向量索引持久化以加速检索）
-
-## 架构说明
-
-AutoSkill 主要由几层可组合模块构成（类似 Mem0 的「client + provider + store」分层），并额外提供 Skill Management 层来负责抽取与维护。
-
-### 核心数据流
-
-**Ingest（生长/维护 skills）：**
-
-1) `AutoSkill.ingest(...)` 接收 `messages`（对话）或 `events`（行为日志）
-2) `SkillExtractor.extract(...)` 产生最多 1 个 `SkillCandidate`（LLM 抽取或启发式）
-3) `SkillMaintainer.apply(...)` 基于相似技能检索做 add/merge/discard 决策并 upsert
-4) `SkillStore.upsert(...)` 把技能保存为 Agent Skill 制品（`SKILL.md` + 可选资源）
-
-**Retrieve（使用 skills）：**
-
-1)（可选）把用户 query 重写为更适合检索的 query（关注能力/需求/约束，而非粘贴内容细节）
-2) 用配置的 embedding provider 生成 query 向量
-3) `SkillStore.search(...)` 对技能向量做检索，返回 `SkillHit`
-4) 通过 `render_skills_context(...)` 把选中的技能渲染为可注入上下文块
-
-### 本地持久化目录结构（Local Store）
-
-当 `store={"provider":"local","path":"Skills"}` 时，推荐目录结构如下：
-
-```text
-Skills/
-  Users/
-    <user_id>/
-      <skill-slug>/
-        SKILL.md
-        scripts/…            (可选)
-        references/…         (可选)
-        assets/…             (可选)
-  Common/
-    <skill-slug>/SKILL.md
-    <library-name>/<skill-slug>/SKILL.md
-  vectors/
-    <index>.meta.json
-    <index>.ids.txt
-    <index>.vecs.f32
-```
-
-说明：
-- `Common/` 是共享技能库；`Users/<user_id>/` 是用户私有技能。
-- 也支持通过 `--library-dir` 加载额外只读技能库（见 examples）。
-- 向量缓存会按 embedding 签名（provider + model + 可选 dimensions）分开存储，避免切换 embedding 模型后混用旧向量。
-
-### 交互式流程（Retrieve + Extract）
-
-在 `autoskill.interactive` 中，每轮用户输入会先执行检索，再生成回复。抽取按固定频率尝试：在 `auto` 模式下每 N 轮尝试一次（`extract_turn_limit`，默认 `1`）。是否真正生成 Skill 由抽取器决定（当没有足够可复用信号时输出 `{"skills": []}`），抽取在下一条用户消息时执行（因此可以把这条消息作为轻量反馈上下文）。
-
-## 仓库结构（代码地图）
-
-### 顶层
-
-- `README.md`：英文文档与架构说明
-- `README.zh-CN.md`：中文文档与架构说明
-- `pyproject.toml`：打包与依赖
-- `Skills/`：默认本地 store 根目录（运行时创建/使用）
-- `web/`：本地 Web UI 的静态资源（`examples/web_ui.py`）
-- `autoskill/`：SDK 源码
-- `examples/`：端到端示例脚本
-
-### `autoskill/`（SDK）
-
-- `autoskill/__init__.py`：对外导出（`AutoSkill`、`AutoSkillConfig`、核心模型）
-- `autoskill/client.py`：SDK 入口（ingest/search/render/export/import）
-- `autoskill/config.py`：`AutoSkillConfig`（可序列化配置 + 默认值）
-- `autoskill/models.py`：核心数据结构（`Skill`、`SkillHit`、`SkillExample`、状态枚举）
-- `autoskill/render.py`：把选中的 skills 渲染为可注入的 context block
-- `autoskill/py.typed`：类型提示标记
-
-#### `autoskill/llm/`（对话模型 Provider）
-
-- `autoskill/llm/__init__.py`：LLM provider 层导出（`LLM`、`build_llm`）
-- `autoskill/llm/base.py`：LLM 接口（`complete(system, user, temperature)`）
-- `autoskill/llm/factory.py`：provider 工厂（`mock|openai|dashscope|glm|anthropic`）
-- `autoskill/llm/mock.py`：离线 mock LLM（固定输出）
-- `autoskill/llm/openai.py`：最小 OpenAI 兼容 Chat Completions 客户端（OpenAI + DashScope 共用）
-- `autoskill/llm/glm.py`：BigModel GLM-4.7 客户端（`auth_mode` 支持 auto/jwt/api_key）
-- `autoskill/llm/anthropic.py`：最小 Anthropic Messages 客户端
-
-#### `autoskill/embeddings/`（Embedding Provider）
-
-- `autoskill/embeddings/__init__.py`：Embedding provider 层导出（`EmbeddingModel`、`build_embeddings`）
-- `autoskill/embeddings/base.py`：Embedding 接口（`embed(texts) -> vectors`）
-- `autoskill/embeddings/factory.py`：provider 工厂（`hashing|openai|dashscope|glm`）
-- `autoskill/embeddings/hashing.py`：离线 hashing embedding（无网络、快速 baseline）
-- `autoskill/embeddings/openai.py`：最小 OpenAI 兼容 embeddings 客户端（OpenAI + DashScope 共用）
-- `autoskill/embeddings/bigmodel.py`：BigModel embedding-3 客户端（auto/jwt/api_key）
-
-#### `autoskill/skill_management/`（抽取 + 维护 + 格式）
-
-- `autoskill/skill_management/__init__.py`：skill management 相关导出（extract/maintain/store/vector 等）
-- `autoskill/skill_management/extraction.py`：技能抽取（LLM 抽取 + 修复 + 启发式兜底）
-- `autoskill/skill_management/maintenance.py`：技能维护（去重/合并/版本；可选 LLM 决策）
-- `autoskill/skill_management/importer.py`：导入外部 Agent Skills（扫描 `**/SKILL.md`）
-- `autoskill/skill_management/artifacts.py`：导出/写入技能制品（`SKILL.md`、技能目录）
-
-##### `autoskill/skill_management/formats/`
-
-- `autoskill/skill_management/formats/__init__.py`：格式导出（render/parse helpers）
-- `autoskill/skill_management/formats/agent_skill.py`：Agent Skill 目录制品格式（`SKILL.md` 渲染/解析）
-
-##### `autoskill/skill_management/stores/`
-
-- `autoskill/skill_management/stores/__init__.py`：store 导出（`SkillStore`、`build_store`）
-- `autoskill/skill_management/stores/base.py`：`SkillStore` 接口
-- `autoskill/skill_management/stores/factory.py`：store 工厂（并生成按 embedding 签名区分的向量索引名）
-- `autoskill/skill_management/stores/inmemory.py`：内存 store（无持久化）
-- `autoskill/skill_management/stores/local.py`：本地文件系统 store（`Users/` + `Common/`；向量缓存）
-
-##### `autoskill/skill_management/vectors/`
-
-- `autoskill/skill_management/vectors/__init__.py`：向量后端导出（`VectorIndex`、`FlatFileVectorIndex`）
-- `autoskill/skill_management/vectors/base.py`：向量索引接口
-- `autoskill/skill_management/vectors/flat.py`：依赖零的持久化平面索引（meta/ids/vecs 文件）
-
-#### `autoskill/interactive/`（交互式编排）
-
-- `autoskill/interactive/__init__.py`：交互模块导出（`InteractiveChatApp`、`InteractiveConfig` 等）
-- `autoskill/interactive/app.py`：交互编排（rewrite → retrieve → respond → extract）
-- `autoskill/interactive/config.py`：交互配置（scope/阈值/窗口等）
-- `autoskill/interactive/commands.py`：命令解析（`/help`、`/extract_now` 等）
-- `autoskill/interactive/io.py`：IO 抽象（便于嵌入其他前端）
-- `autoskill/interactive/rewriting.py`：检索 query 重写
-- `autoskill/interactive/selection.py`：可选 LLM selector（决定是否注入检索到的 skills）
-- `autoskill/interactive/gating.py`：抽取时机相关的启发式（目前交互默认按固定间隔抽取；这些启发式可用于扩展策略）
-
-#### `autoskill/utils/`（通用工具）
-
-- `autoskill/utils/__init__.py`：小型工具导出（JSON 解析、脱敏、时间戳）
-- `autoskill/utils/units.py`：混合语言长度度量 + 截断（CJK 按字、英文按词）
-- `autoskill/utils/json.py`：LLM 输出的容错 JSON 提取
-- `autoskill/utils/text.py`：关键词提取（标签/启发式）
-- `autoskill/utils/redact.py`：源数据脱敏（减少把敏感信息喂给 LLM）
-- `autoskill/utils/time.py`：时间戳
-- `autoskill/utils/bigmodel_auth.py`：BigModel JWT/auth 工具（GLM + embedding-3 使用）
-
-### `examples/`（示例脚本）
-
-- `examples/__init__.py`：示例脚本入口（`python3 -m examples.<script>`）
-- `examples/basic_ingest_search.py`：最小 ingest + search 演示
-- `examples/interactive_chat.py`：交互式演示（`mock|glm|dashscope|openai|anthropic`）
-- `examples/web_ui.py`：本地 Web UI（对话 + 检索/抽取面板）
-- `examples/personalized_email_demo.py`：迭代写作 → 抽取 → 检索的脚本化 demo
-- `examples/local_persistent_store.py`：本地持久化 store demo
-- `examples/bigmodel_glm_persistent_store.py`：GLM + embedding-3 + 本地持久化 demo
-- `examples/bigmodel_glm_embed_extract.py`：BigModel 的 embed + extract 流程 demo
-- `examples/dashscope_qwen_chat.py`：DashScope chat demo
-- `examples/dashscope_qwen_embeddings.py`：DashScope embeddings demo
-- `examples/import_agent_skills.py`：导入外部 Agent Skills 到本地 store
-- `examples/normalize_skill_ids.py`：为 store 根目录下缺失 `id:` 的 `SKILL.md` 做规范化
-
-## 示例运行
-
-交互式（每轮检索 + 可选抽取/维护）：
+### 8.1 百炼 DashScope（默认推荐）
 
 ```bash
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.interactive_chat --llm-provider dashscope
+```
+
+### 8.2 GLM（BigModel）
+
+```bash
+export ZHIPUAI_API_KEY="YOUR_ID.YOUR_SECRET"
 python3 -m examples.interactive_chat --llm-provider glm
 ```
 
-Web UI（本地）：
+### 8.3 OpenAI / Anthropic
 
 ```bash
-python3 -m examples.web_ui --llm-provider glm
+export OPENAI_API_KEY="YOUR_OPENAI_KEY"
+python3 -m examples.interactive_chat --llm-provider openai
+
+export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_KEY"
+python3 -m examples.interactive_chat --llm-provider anthropic
 ```
 
-然后打开 `http://127.0.0.1:8000`（默认）。Ctrl/Cmd+Enter 发送；Enter 换行。
+## 9. 常用工作流
+
+### 9.1 终端交互（每轮检索）
+
+```bash
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.interactive_chat --llm-provider dashscope
+```
+
+常用命令：
+
+- `/extract_now [hint]`
+- `/extract_every <n>`
+- `/extract auto|always|never`
+- `/scope user|common|all`
+- `/search <query>`
+- `/skills`
+- `/export <skill_id>`
+
+### 9.2 Web UI
+
+```bash
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+python3 -m examples.web_ui --llm-provider dashscope
+```
+
+### 9.3 导入已有 Agent Skills
+
+```bash
+python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir Skills
+```
+
+### 9.4 规范化缺失的技能 ID
+
+```bash
+python3 -m examples.normalize_skill_ids --store-dir Skills
+```
+
+## 10. 项目价值与意义
+
+AutoSkill 把短期交互沉淀为长期能力资产。
+
+- 降低手工编写技能和维护技能的成本。
+- 让能力随真实用户反馈持续对齐和升级。
+- 支持跨系统迁移与复用，形成可互操作的技能生态。
+
+可以把它理解为：从“提示词工程”走向“经验驱动终身学习 Agent”的一条可落地路径。

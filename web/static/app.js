@@ -10,6 +10,12 @@ const state = {
   editingSkillId: null,
   skillEditorDirty: false,
   pollTimer: null,
+  extractionJobId: null,
+  extractionStatus: "",
+  extractionStartedAtMs: null,
+  extractionFinishedAtMs: null,
+  extractionRunningTimer: null,
+  extractionElapsedTimer: null,
 };
 
 function el(id) {
@@ -119,9 +125,131 @@ function renderRetrieval(retrieval) {
   el("hits").innerHTML = hits.map(formatHit).join("");
 }
 
+function _toMs(raw) {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.floor(raw);
+  const s = String(raw || "").trim();
+  if (!s) return Date.now();
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : Date.now();
+}
+
+function _fmtTime(ms) {
+  if (!ms || !Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  return d.toLocaleTimeString([], { hour12: false });
+}
+
+function _fmtElapsed(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const sec = Math.floor(ms / 1000);
+  const s = sec % 60;
+  const mTotal = Math.floor(sec / 60);
+  const m = mTotal % 60;
+  const h = Math.floor(mTotal / 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function _clearExtractionTimers() {
+  if (state.extractionRunningTimer) {
+    window.clearTimeout(state.extractionRunningTimer);
+    state.extractionRunningTimer = null;
+  }
+  if (state.extractionElapsedTimer) {
+    window.clearInterval(state.extractionElapsedTimer);
+    state.extractionElapsedTimer = null;
+  }
+}
+
+function _setExtractionProgress(status, widthPct) {
+  const fill = el("extractProgressFill");
+  if (!fill) return;
+  const pct = Math.max(0, Math.min(100, Number(widthPct) || 0));
+  fill.style.width = `${pct}%`;
+  fill.className = "extract-progress__fill";
+  if (status) fill.classList.add(`extract-progress__fill--${status}`);
+}
+
+function _renderExtractionTimes() {
+  const started = state.extractionStartedAtMs;
+  const finished = state.extractionFinishedAtMs;
+  el("extractStartedAt").textContent = started ? _fmtTime(started) : "";
+  el("extractFinishedAt").textContent = finished ? _fmtTime(finished) : "";
+
+  let elapsed = "";
+  if (started) {
+    const end = finished || Date.now();
+    elapsed = _fmtElapsed(Math.max(0, end - started));
+  }
+  el("extractElapsed").textContent = elapsed;
+}
+
+function _startElapsedTickerIfNeeded() {
+  if (state.extractionElapsedTimer) {
+    window.clearInterval(state.extractionElapsedTimer);
+    state.extractionElapsedTimer = null;
+  }
+  if (!state.extractionStartedAtMs) {
+    _renderExtractionTimes();
+    return;
+  }
+  const live = state.extractionStatus === "scheduled" || state.extractionStatus === "running";
+  _renderExtractionTimes();
+  if (!live) return;
+  state.extractionElapsedTimer = window.setInterval(() => {
+    _renderExtractionTimes();
+  }, 1000);
+}
+
+function _scheduleRunningTransition(jobId) {
+  if (state.extractionRunningTimer) {
+    window.clearTimeout(state.extractionRunningTimer);
+    state.extractionRunningTimer = null;
+  }
+  state.extractionRunningTimer = window.setTimeout(() => {
+    if (!jobId || state.extractionJobId !== jobId) return;
+    if (state.extractionStatus !== "scheduled") return;
+    state.extractionStatus = "running";
+    setExtractionState("running");
+    _setExtractionProgress("running", 64);
+    _startElapsedTickerIfNeeded();
+  }, 420);
+}
+
+function normalizeExtractionStatus(extraction) {
+  const raw = String(extraction?.status || "").trim().toLowerCase();
+  if (raw === "scheduled" || raw === "running" || raw === "completed" || raw === "failed") {
+    return raw;
+  }
+  if (extraction?.error) return "failed";
+  return "completed";
+}
+
+function setExtractionState(status) {
+  const node = el("extractState");
+  if (!node) return;
+  const s = String(status || "").trim().toLowerCase();
+  if (!s) {
+    node.textContent = "";
+    node.className = "kv__v";
+    return;
+  }
+  node.textContent = s;
+  node.className = `kv__v state-chip state-chip--${s}`;
+}
+
 function renderExtraction(extraction) {
   if (!extraction) {
+    _clearExtractionTimers();
+    state.extractionJobId = null;
+    state.extractionStatus = "";
+    state.extractionStartedAtMs = null;
+    state.extractionFinishedAtMs = null;
     el("extractTrigger").textContent = "";
+    setExtractionState("");
+    _setExtractionProgress("", 0);
+    _renderExtractionTimes();
     el("extractionError").textContent = "";
     el("upserted").innerHTML = "";
     el("editingSkill").textContent = "";
@@ -133,6 +261,56 @@ function renderExtraction(extraction) {
     state.skillEditorDirty = false;
     return;
   }
+  const status = normalizeExtractionStatus(extraction);
+  const jobId = String(extraction?.job_id || "").trim();
+  const eventTime = _toMs(extraction?.event_time);
+  const hasCurrentJob = !!state.extractionJobId;
+  const isNewScheduled = status === "scheduled" && !!jobId && jobId !== state.extractionJobId;
+
+  if (isNewScheduled || (!hasCurrentJob && status === "scheduled")) {
+    _clearExtractionTimers();
+    state.extractionJobId = jobId || `job-${eventTime}`;
+    state.extractionStatus = "scheduled";
+    state.extractionStartedAtMs = eventTime;
+    state.extractionFinishedAtMs = null;
+    setExtractionState("scheduled");
+    _setExtractionProgress("scheduled", 18);
+    _startElapsedTickerIfNeeded();
+    _scheduleRunningTransition(state.extractionJobId);
+  } else {
+    if (jobId && hasCurrentJob && jobId !== state.extractionJobId) {
+      // Ignore stale events from older extraction jobs.
+      return;
+    }
+    if (!hasCurrentJob) {
+      state.extractionJobId = jobId || `job-${eventTime}`;
+      state.extractionStartedAtMs = eventTime;
+    }
+    state.extractionStatus = status;
+    if (!state.extractionStartedAtMs) state.extractionStartedAtMs = eventTime;
+    if (status === "running") {
+      setExtractionState("running");
+      _setExtractionProgress("running", 64);
+      _startElapsedTickerIfNeeded();
+    } else if (status === "completed") {
+      _clearExtractionTimers();
+      state.extractionFinishedAtMs = eventTime;
+      setExtractionState("completed");
+      _setExtractionProgress("completed", 100);
+      _startElapsedTickerIfNeeded();
+    } else if (status === "failed") {
+      _clearExtractionTimers();
+      state.extractionFinishedAtMs = eventTime;
+      setExtractionState("failed");
+      _setExtractionProgress("failed", 100);
+      _startElapsedTickerIfNeeded();
+    } else {
+      setExtractionState(status);
+      _setExtractionProgress(status, 18);
+      _startElapsedTickerIfNeeded();
+    }
+  }
+
   el("extractTrigger").textContent = extraction.trigger || "";
   el("extractionError").textContent = extraction.error ? String(extraction.error) : "";
 

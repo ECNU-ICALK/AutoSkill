@@ -49,14 +49,9 @@ def _normalize_ack_line(text: str) -> str:
 
 _ACK_KEYS = {_normalize_ack_line(s) for s in _ACK_LINES}
 
-def _contains_non_ascii_alnum(text: str) -> bool:
-    return any(ord(ch) > 127 and ch.isalnum() for ch in (text or ""))
-
 def _sanitize_step_for_prompt(step: str, idx: int) -> str:
     s = str(step or "").strip()
     if not s:
-        return f"<STEP_{idx}>"
-    if _contains_non_ascii_alnum(s):
         return f"<STEP_{idx}>"
     return s
 
@@ -407,7 +402,6 @@ class LLMSkillExtractor:
             )
             if cand:
                 out.append(cand)
-        print(out)
         return out
 
     def _repair_to_json(self, *, payload: Dict[str, Any], draft: str, max_candidates: int) -> str:
@@ -738,9 +732,7 @@ def _heuristic_instructions(text: str) -> str:
             "Output format: for each step number, provide status/result and what to do next."
         )
         if had_placeholders:
-            lines.append(
-                "If any step is a placeholder (e.g., <STEP_1>), ask the user to restate it in English."
-            )
+            lines.append("If any step is a placeholder (e.g., <STEP_1>), ask the user to clarify it.")
         return "\n".join(lines).strip()
 
     return "\n".join(

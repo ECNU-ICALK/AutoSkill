@@ -23,6 +23,7 @@ Notes:
 from __future__ import annotations
 
 import hashlib
+import collections
 import os
 import re
 import shutil
@@ -198,6 +199,10 @@ class LocalSkillStore(SkillStore):
 
         self._lock = threading.RLock()
         self._records: Dict[str, _Record] = {}
+        self._bg_embed_lock = threading.Lock()
+        self._bg_embed_pending: set[str] = set()
+        self._bg_embed_queue: "collections.deque[str]" = collections.deque()
+        self._bg_embed_thread: Optional[threading.Thread] = None
 
         os.makedirs(self._root_dir, exist_ok=True)
         if self._cache_vectors:
@@ -289,6 +294,7 @@ class LocalSkillStore(SkillStore):
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
         filters = filters or {}
+        allow_partial_vectors = bool(filters.get("allow_partial_vectors", False))
         scope = str(filters.get("scope") or "").strip().lower()  # user|library|all
         if scope in {"common", "shared"}:
             scope = "library"
@@ -342,8 +348,11 @@ class LocalSkillStore(SkillStore):
 
                 missing = [r for r in filtered_records if not self._index.has(r.skill.id)]
                 if missing:
-                    self._embed_missing_records(missing)
-                    self._index.save()
+                    if allow_partial_vectors:
+                        self._schedule_embed_records(missing)
+                    else:
+                        self._embed_missing_records(missing)
+                        self._index.save()
 
                 keys = [r.skill.id for r in filtered_records]
                 ranked = self._index.search(qvec, keys=keys, top_k=int(limit))
@@ -360,7 +369,10 @@ class LocalSkillStore(SkillStore):
                 r for r in filtered_records if r.vector is None or (qdims and len(r.vector) != qdims)
             ]
             if missing2:
-                self._embed_missing_records(missing2)
+                if allow_partial_vectors:
+                    self._schedule_embed_records(missing2)
+                else:
+                    self._embed_missing_records(missing2)
 
             candidates: List[Tuple[float, Skill]] = []
             for rec in filtered_records:
@@ -369,6 +381,40 @@ class LocalSkillStore(SkillStore):
 
             candidates.sort(key=lambda x: x[0], reverse=True)
             return [SkillHit(skill=s, score=float(sc)) for sc, s in candidates[:limit]]
+
+    def schedule_vector_prewarm(self, *, user_id: str, scope: str = "all") -> int:
+        """
+        Schedules background vectorization for skills in the given scope.
+
+        This is a best-effort prewarm API for interactive use-cases where first-query latency
+        should remain low while vectors are built progressively in the background.
+        """
+
+        scope_s = str(scope or "all").strip().lower()
+        if scope_s in {"common", "shared"}:
+            scope_s = "library"
+        uid = str(user_id or "").strip()
+        with self._lock:
+            records: List[_Record] = []
+            for rec in self._records.values():
+                if rec.skill.status == SkillStatus.ARCHIVED:
+                    continue
+                if scope_s == "user":
+                    if rec.scope == "user" and rec.owner == uid:
+                        records.append(rec)
+                    continue
+                if scope_s == "library":
+                    if rec.scope == "library":
+                        records.append(rec)
+                    continue
+                if rec.scope == "user" and rec.owner == uid:
+                    records.append(rec)
+                    continue
+                if self._include_libraries and rec.scope == "library":
+                    records.append(rec)
+            if not records:
+                return 0
+        return self._schedule_embed_records(records)
 
     def _load_existing(self) -> None:
         loaded: Dict[str, _Record] = {}
@@ -617,6 +663,98 @@ class LocalSkillStore(SkillStore):
                     self._index.upsert(s.id, vec)
                 else:
                     rec.vector = vec
+
+    def _schedule_embed_records(self, records: List[_Record]) -> int:
+        """
+        Schedules missing vectors for asynchronous embedding.
+
+        Returns how many unique skill IDs were newly scheduled.
+        """
+
+        queued = 0
+        with self._bg_embed_lock:
+            for rec in records or []:
+                sid = str(getattr(rec.skill, "id", "") or "").strip()
+                if not sid:
+                    continue
+                if sid in self._bg_embed_pending:
+                    continue
+                self._bg_embed_pending.add(sid)
+                self._bg_embed_queue.append(sid)
+                queued += 1
+            self._ensure_bg_embed_worker_locked()
+        return queued
+
+    def _ensure_bg_embed_worker_locked(self) -> None:
+        t = self._bg_embed_thread
+        if t is not None and t.is_alive():
+            return
+        t2 = threading.Thread(target=self._background_embed_worker, daemon=True)
+        self._bg_embed_thread = t2
+        t2.start()
+
+    def _background_embed_worker(self) -> None:
+        batch_size = 32
+        while True:
+            with self._bg_embed_lock:
+                if not self._bg_embed_queue:
+                    self._bg_embed_thread = None
+                    return
+                batch_ids: List[str] = []
+                while self._bg_embed_queue and len(batch_ids) < batch_size:
+                    sid = str(self._bg_embed_queue.popleft() or "").strip()
+                    if sid:
+                        batch_ids.append(sid)
+            if not batch_ids:
+                continue
+
+            work: List[Tuple[str, str]] = []
+            with self._lock:
+                for sid in batch_ids:
+                    rec = self._records.get(sid)
+                    if rec is None:
+                        continue
+                    if self._cache_vectors and self._index is not None:
+                        if self._index.has(sid):
+                            continue
+                    else:
+                        if rec.vector is not None:
+                            continue
+                    work.append((sid, _skill_to_text(rec.skill)))
+
+            if not work:
+                self._mark_embed_done(batch_ids)
+                continue
+
+            try:
+                vectors = self._embeddings.embed([txt for _, txt in work])
+            except Exception:
+                self._mark_embed_done(batch_ids)
+                continue
+
+            with self._lock:
+                changed = False
+                for (sid, _txt), vec in zip(work, vectors):
+                    rec = self._records.get(sid)
+                    if rec is None:
+                        continue
+                    vec_f = [float(x) for x in vec]
+                    if self._cache_vectors and self._index is not None:
+                        self._index.upsert(sid, vec_f)
+                        changed = True
+                    else:
+                        rec.vector = vec_f
+                if changed and self._index is not None:
+                    self._index.save()
+
+            self._mark_embed_done(batch_ids)
+
+    def _mark_embed_done(self, ids: List[str]) -> None:
+        with self._bg_embed_lock:
+            for sid in ids or []:
+                sid_s = str(sid or "").strip()
+                if sid_s:
+                    self._bg_embed_pending.discard(sid_s)
 
 def _hash_id(skill_id: str) -> str:
     return hashlib.sha256(str(skill_id or "").encode("utf-8")).hexdigest()[:40]

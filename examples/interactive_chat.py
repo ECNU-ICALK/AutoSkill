@@ -44,10 +44,10 @@ def _env_json(name: str) -> Optional[Dict[str, Any]]:
 
 
 def _pick_default_provider() -> str:
-    if os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY"):
-        return "glm"
     if os.getenv("DASHSCOPE_API_KEY"):
         return "dashscope"
+    if os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY"):
+        return "glm"
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     if os.getenv("ANTHROPIC_API_KEY"):

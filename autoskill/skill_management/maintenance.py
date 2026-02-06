@@ -447,9 +447,12 @@ def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
     if len(cand.description.strip()) > len(existing.description.strip()) * 1.1:
         description = cand.description.strip()
 
+    # Keep stable naming on heuristic merge: update name only when the existing one is missing.
+    merged_name = (existing.name or "").strip() or (cand.name or "").strip()
+
     merged = replace(
         existing,
-        name=_prefer_name(existing.name, cand.name),
+        name=merged_name,
         description=description,
         instructions=instructions,
         triggers=_dedupe(existing.triggers + list(cand.triggers or [])),
@@ -463,36 +466,48 @@ def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
 def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
     try:
         system = (
-            "You are AutoSkill's Skill Maintainer.\n"
-            "Task: Update the `existing_skill` using new insights from `candidate_skill`.\n"
-            "Output ONLY strict JSON (parsable by json.loads); no Markdown, no commentary.\n"
+            "You are AutoSkill's Skill Merger.\n"
+            "Task: Merge existing_skill and candidate_skill into ONE improved Skill.\n"
+            "Output ONLY strict JSON (parsable by json.loads); no Markdown, no commentary, no extra text.\n"
             "\n"
-            "### CRITICAL STRATEGY: INCREMENTAL PATCHING\n"
-            "Treat `existing_skill` as the **Master Copy** and `candidate_skill` as a **Patch/Update**.\n"
-            "Your goal is to **INJECT** new rules into the Master Copy without rewriting the parts that work.\n"
+            "IMPORTANT: Follow the SAME requirements as the Skill Extractor. Do NOT invent a new format.\n"
+            "Only output the required fields: {name, description, prompt, triggers, tags, examples}.\n"
             "\n"
-            "1. **Anchor on Existing:** Start with the structure and content of `existing_skill`.\n"
-            "2. **Identify Deltas:** Look for NEW constraints, NEW triggers, or NEW style requirements in `candidate_skill` that are missing from `existing_skill`.\n"
-            "3. **Append (Don't Invent):** Add these new items to the existing lists. Do not rewrite valid existing rules.\n"
-            "4. **No Phantom Workflows:** \n"
-            "   - If `existing_skill` has no workflow AND `candidate_skill` has no workflow -> **KEEP IT EMPTY.**\n"
-            "   - Do NOT synthesize a workflow from constraints. (e.g., 'Don't use passive voice' is a Constraint, NOT a Workflow step).\n"
+            "### MERGE PRINCIPLES\n"
+            "- Shared intent: keep the same capability (do not change the skill's purpose).\n"
+            "- Diff-aware: merge unique, non-conflicting constraints and improvements from BOTH skills.\n"
+            "- Constraints over content: keep reusable rules and constraints; do not expand topic-specific details.\n"
+            "- Avoid regressions: do NOT drop important constraints/checks from existing_skill unless they are clearly wrong or overly specific.\n"
+            "- If candidate_skill adds no durable value, keep existing_skill largely unchanged.\n"
             "\n"
-            "### MERGE RULES\n"
-            "- **Name:** Keep `existing_skill.name` (unless it was empty/generic and candidate is specific).\n"
-            "- **Language:** CRITICAL. The output MUST use the **dominant language of the `existing_skill`**. If `candidate` is in a different language, translate the *new logic* to match the `existing` language before merging.\n"
-            "- **Prompt Composition (Markdown):**\n"
-            "  - **# Goal:** Use `existing` goal. Refine only if `candidate` makes it clearer.\n"
-            "  - **# Constraints & Style:** **(This is where 90% of updates happen)**. Combine lists from both. Deduplicate. Keep negative constraints (e.g., 'No hallucinations').\n"
-            "  - **# Workflow:** \n"
-            "    * If `existing` has one, keep it. Update steps only if `candidate` explicitly corrects a step.\n"
-            "    * If `existing` is empty, ADOPT `candidate`'s workflow ONLY IF it is explicitly defined.\n"
-            "    * **OTHERWISE: OMIT THIS SECTION.**\n"
-            "- **Triggers/Tags:** Union of both lists. Deduplicate.\n"
+            "### ANTI-HALLUCINATION / NO INVENTION (CRITICAL)\n"
+            "- Use ONLY information present in existing_skill and candidate_skill.\n"
+            "- Do NOT add generic industry standards or imagined details.\n"
             "\n"
-            "### OUTPUT FORMAT\n"
-            "Return JSON fields: {name, description, prompt, triggers, tags, examples}\n"
-            "JSON validity: Escape newlines inside strings as \\n."
+            "### LANGUAGE CONSISTENCY\n"
+            "- Keep language consistent with existing_skill unless candidate_skill is clearly a different user language.\n"
+            "- If candidate_skill is in a different language, translate ONLY the new logic to match existing_skill.\n"
+            "- Do NOT mix languages inside the same field.\n"
+            "\n"
+            "### FIELD DEFINITIONS (MUST FOLLOW)\n"
+            "- name: Concise, specific, kebab-case (for English). Keep existing_skill.name unless the new name is clearly more specific and improves retrieval.\n"
+            "- description: 1-2 sentences in third person. Clearly state WHAT the skill does and WHEN to use it.\n"
+            "- prompt: Use Markdown. Keep this structure EXACTLY:\n"
+            "  1. # Goal (Required)\n"
+            "  2. # Constraints & Style (Required: capture concrete user rules and negative constraints)\n"
+            "  3. # Workflow (OPTIONAL: include ONLY if either skill explicitly defines a multi-step process of distinct actions).\n"
+            "     - If steps are merely document sections, they belong in Constraints & Style, NOT Workflow.\n"
+            "  - Content strategy: keep only user-specific requirements; do NOT add new rules.\n"
+            "  - Resources: if reusable scripts/references are implied, mention 'Execute script: scripts/...' or 'Read reference: references/...'.\n"
+            "- triggers: 3-5 short, concrete phrases representing user intent.\n"
+            "- tags: 1-6 keywords.\n"
+            "- examples: 0-3 short, de-identified inputs.\n"
+            "\n"
+            "### GENERALIZATION\n"
+            "- De-identify: replace names, orgs, URLs, dates, IDs with placeholders <PROJECT>, <ENV>, <TOOL>, <DATE>, <VERSION>.\n"
+            "\n"
+            "### JSON VALIDITY\n"
+            "- Escape newlines inside strings as \\n.\n"
         )
         user = (
             "existing_skill:\n"
@@ -500,7 +515,6 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "candidate_skill:\n"
             f"{_candidate_to_raw(cand)}\n"
         )
-        print(user)
         text = llm.complete(system=system, user=user, temperature=0.0)
         obj = json_from_llm_text(text)
         if not isinstance(obj, dict):
@@ -546,16 +560,6 @@ def _examples_from_obj(obj) -> List[SkillExample]:
             )
         )
     return out
-
-
-def _prefer_name(old: str, new: str) -> str:
-    old_s = (old or "").strip()
-    new_s = (new or "").strip()
-    if not old_s:
-        return new_s
-    if not new_s:
-        return old_s
-    return new_s if len(new_s) < len(old_s) else old_s
 
 
 def _dedupe(items: List[str]) -> List[str]:

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
+import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
@@ -33,8 +35,10 @@ class _PendingExtraction:
 
 @dataclass
 class _BgExtractJob:
+    job_id: str
     window: List[Dict[str, Any]]
     trigger: str
+    hint: Optional[str]
     epoch: int
 
 
@@ -71,6 +75,10 @@ def _truncate_text(text: str, *, max_chars: int) -> str:
     return s[:max_chars].rstrip() + "\n\n...(truncated)...\n"
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
 class InteractiveSession:
     """
     Stateful session for interactive chat with retrieval and optional extraction.
@@ -103,6 +111,7 @@ class InteractiveSession:
         self._bg_lock = threading.Lock()
         self._queued_extract: Optional[_BgExtractJob] = None
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+        self._schedule_vector_prewarm()
 
     def state(self) -> Dict[str, Any]:
         return {
@@ -242,6 +251,7 @@ class InteractiveSession:
                 scope = "library"
             if scope in {"all", "user", "library"}:
                 self.config.skill_scope = scope
+                self._schedule_vector_prewarm()
                 return {
                     "kind": "command",
                     "command": name,
@@ -282,7 +292,7 @@ class InteractiveSession:
                 q,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
             )
             min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
             if hits and min_score > 0:
@@ -347,25 +357,20 @@ class InteractiveSession:
                 }
 
             hint = (arg or "").strip() or None
-            try:
-                updated = self.sdk.ingest(
-                    user_id=self.config.user_id,
-                    messages=window,
-                    metadata={"channel": "chat", "trigger": "extract_now"},
-                    hint=hint,
-                )
-            except Exception as e:
-                self._pending = None
-                return {
-                    "kind": "command",
-                    "command": name,
-                    "chat_append": [{"role": "system", "content": f"[extract_now] failed: {e}"}],
-                    "config": asdict(self.config),
-                }
-
             self._pending = None
-            extraction = self._build_extraction_info(updated, trigger="extract_now")
-            content = "[extract_now] no skills extracted" if not updated else f"[extract_now] upserted: {len(updated)}"
+            job_id = self._start_background_extraction(window, trigger="extract_now", hint=hint)
+            extraction = {
+                "trigger": "extract_now",
+                "job_id": str(job_id or ""),
+                "event_time": _now_ms(),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+                "skill_mds": [],
+            }
+            content = "[extract_now] scheduled in background"
+            if hint:
+                content += f" (hint: {hint})"
             return {
                 "kind": "command",
                 "command": name,
@@ -385,6 +390,7 @@ class InteractiveSession:
         latest_user = str(text or "").strip()
 
         extraction_event = self._drain_latest_event(kind="extraction")
+        extraction_scheduled: Optional[Dict[str, Any]] = None
 
         # Treat the current user message as feedback for the previous assistant response, but run
         # extraction asynchronously so chat latency is not impacted.
@@ -410,7 +416,7 @@ class InteractiveSession:
                 search_query,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
             )
         except Exception as e:
             hits = []
@@ -458,8 +464,25 @@ class InteractiveSession:
             messages=list(window),
         )
 
-        if extract_window is not None:
-            self._start_background_extraction(extract_window, trigger="auto")
+        if self._should_trigger_auto_extraction():
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            scheduled_window = list(extract_window) if extract_window is not None else list(window)
+            if scheduled_window:
+                job_id = self._start_background_extraction(scheduled_window, trigger="auto")
+                extraction_scheduled = {
+                    "trigger": "auto",
+                    "job_id": str(job_id or ""),
+                    "event_time": _now_ms(),
+                    "status": "scheduled",
+                    "error": "",
+                    "upserted": [],
+                    "skill_mds": [],
+                }
 
         retrieval = self._build_retrieval_info(
             original_query=original_query,
@@ -481,7 +504,7 @@ class InteractiveSession:
             "kind": "chat",
             "chat_append": chat_append,
             "retrieval": retrieval,
-            "extraction": extraction_event,
+            "extraction": (extraction_scheduled if extraction_scheduled is not None else extraction_event),
             "config": asdict(self.config),
         }
 
@@ -500,7 +523,8 @@ class InteractiveSession:
             "  /clear\n"
             "\nNotes:\n"
             "  - In /extract auto mode, extraction is attempted once every N turns (N=extract_turn_limit).\n"
-            "    Set N=1 to attempt extraction every turn. Use /extract_now to force.\n"
+            "    Set N=1 to attempt extraction every turn.\n"
+            "  - /extract_now [hint] schedules extraction in background (non-blocking).\n"
         )
 
     def _build_retrieval_info(
@@ -530,14 +554,30 @@ class InteractiveSession:
             "error": (str(error) if error else None),
         }
 
-    def _build_extraction_info(self, updated: List[Skill], *, trigger: str) -> Dict[str, Any]:
+    def _build_extraction_info(
+        self,
+        updated: List[Skill],
+        *,
+        job_id: str,
+        event_time: int,
+        trigger: str,
+        max_md_chars: int = 8000,
+    ) -> Dict[str, Any]:
         skills = list(updated or [])
         summaries = [{"id": s.id, "name": s.name, "version": s.version, "owner": s.user_id} for s in skills]
         md_items: List[Dict[str, Any]] = []
         for s in skills[:3]:
             md = self.sdk.export_skill_md(str(s.id)) or ""
-            md_items.append({"id": s.id, "md": md})
-        return {"trigger": str(trigger), "upserted": summaries, "skill_mds": md_items}
+            md_items.append({"id": s.id, "md": _truncate_text(md, max_chars=max(800, int(max_md_chars)))})
+        return {
+            "trigger": str(trigger),
+            "job_id": str(job_id or ""),
+            "event_time": int(event_time or _now_ms()),
+            "status": "completed",
+            "error": "",
+            "upserted": summaries,
+            "skill_mds": md_items,
+        }
 
     def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
         if self.chat_llm is None:
@@ -593,6 +633,14 @@ class InteractiveSession:
         extract_window = self._pop_pending_extraction_window(user_feedback=user_feedback)
         if extract_window is None:
             return None
+        if not self._should_trigger_auto_extraction():
+            return None
+        total_turns_abs = sum(
+            1
+            for m in (self.messages or [])
+            if str(m.get("role") or "").strip().lower() == "assistant"
+        )
+        self._turns_at_last_extract_check = int(total_turns_abs)
         self._start_background_extraction(extract_window, trigger="auto")
         return None
 
@@ -601,23 +649,6 @@ class InteractiveSession:
         if pending is None:
             return None
 
-        mode = (self.config.extract_mode or "auto").lower()
-        if mode == "never":
-            self._pending = None
-            return None
-
-        total_turns_abs = sum(
-            1
-            for m in (self.messages or [])
-            if str(m.get("role") or "").strip().lower() == "assistant"
-        )
-        interval = max(1, int(getattr(self.config, "extract_turn_limit", 1) or 1))
-        turns_since_check = max(0, int(total_turns_abs) - int(self._turns_at_last_extract_check or 0))
-        if mode == "auto" and turns_since_check < interval:
-            self._pending = None
-            return None
-
-        self._turns_at_last_extract_check = int(total_turns_abs)
         self._pending = None
 
         feedback = str(user_feedback or "").strip()
@@ -626,12 +657,36 @@ class InteractiveSession:
             window.append({"role": "user", "content": feedback})
         return window
 
-    def _start_background_extraction(self, window: List[Dict[str, Any]], *, trigger: str) -> None:
+    def _should_trigger_auto_extraction(self) -> bool:
+        mode = (self.config.extract_mode or "auto").lower()
+        if mode == "never":
+            return False
+        if mode == "always":
+            return True
+        total_turns_abs = sum(
+            1
+            for m in (self.messages or [])
+            if str(m.get("role") or "").strip().lower() == "assistant"
+        )
+        interval = max(1, int(getattr(self.config, "extract_turn_limit", 1) or 1))
+        turns_since_check = max(0, int(total_turns_abs) - int(self._turns_at_last_extract_check or 0))
+        return turns_since_check >= interval
+
+    def _start_background_extraction(
+        self,
+        window: List[Dict[str, Any]],
+        *,
+        trigger: str,
+        hint: Optional[str] = None,
+    ) -> Optional[str]:
         if not window:
-            return
+            return None
+        job_id = str(uuid.uuid4())
         job = _BgExtractJob(
+            job_id=job_id,
             window=list(window),
             trigger=str(trigger or "auto"),
+            hint=(str(hint).strip() if hint and str(hint).strip() else None),
             epoch=int(self._epoch),
         )
 
@@ -643,9 +698,10 @@ class InteractiveSession:
                     daemon=True,
                 )
                 thread.start()
-                return
+                return job_id
             # A background extraction is already running: keep only the latest scheduled job.
             self._queued_extract = job
+            return job_id
 
     def _background_extraction_worker(self, job: _BgExtractJob) -> None:
         try:
@@ -659,15 +715,34 @@ class InteractiveSession:
                     updated = self.sdk.ingest(
                         user_id=self.config.user_id,
                         messages=list(current.window or []),
-                        metadata={"channel": "chat"},
+                        metadata={"channel": "chat", "trigger": str(current.trigger)},
+                        hint=current.hint,
                     )
                     if not updated:
-                        event = {"trigger": str(current.trigger), "upserted": [], "skill_mds": []}
+                        event = {
+                            "trigger": str(current.trigger),
+                            "job_id": str(current.job_id),
+                            "event_time": _now_ms(),
+                            "status": "completed",
+                            "error": "",
+                            "upserted": [],
+                            "skill_mds": [],
+                        }
                     else:
-                        event = self._build_extraction_info(updated, trigger=str(current.trigger))
+                        md_chars = 8000 if str(current.trigger) == "extract_now" else 3000
+                        event = self._build_extraction_info(
+                            updated,
+                            job_id=str(current.job_id),
+                            event_time=_now_ms(),
+                            trigger=str(current.trigger),
+                            max_md_chars=md_chars,
+                        )
                 except Exception as e:
                     event = {
                         "trigger": str(current.trigger),
+                        "job_id": str(current.job_id),
+                        "event_time": _now_ms(),
+                        "status": "failed",
                         "error": str(e),
                         "upserted": [],
                         "skill_mds": [],
@@ -688,3 +763,13 @@ class InteractiveSession:
                 self._bg_extract_sema.release()
             except Exception:
                 pass
+
+    def _schedule_vector_prewarm(self) -> None:
+        store = getattr(self.sdk, "store", None)
+        fn = getattr(store, "schedule_vector_prewarm", None)
+        if not callable(fn):
+            return
+        try:
+            fn(user_id=self.config.user_id, scope=self.config.skill_scope)
+        except Exception:
+            return

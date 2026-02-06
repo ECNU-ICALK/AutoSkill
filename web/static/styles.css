@@ -619,6 +619,101 @@ body {
   font-size: 12px;
 }
 
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(51, 65, 85, 0.75);
+  color: rgba(148, 163, 184, 0.95);
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.state-chip--scheduled {
+  color: #bfdbfe;
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.state-chip--running {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.state-chip--completed {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.state-chip--failed {
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.extract-progress {
+  margin: 8px 0 12px 0;
+}
+
+.extract-progress__track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(51, 65, 85, 0.75);
+  background: rgba(2, 6, 23, 0.34);
+  overflow: hidden;
+}
+
+.extract-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  transition: width 280ms ease, background 180ms ease, box-shadow 180ms ease;
+  background: rgba(148, 163, 184, 0.45);
+}
+
+.extract-progress__fill--scheduled {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.82), rgba(96, 165, 250, 0.88));
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.32);
+}
+
+.extract-progress__fill--running {
+  background: repeating-linear-gradient(
+    120deg,
+    rgba(245, 158, 11, 0.88) 0px,
+    rgba(245, 158, 11, 0.88) 12px,
+    rgba(251, 191, 36, 0.95) 12px,
+    rgba(251, 191, 36, 0.95) 24px
+  );
+  background-size: 160px 100%;
+  animation: extractBarSlide 1s linear infinite;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.3);
+}
+
+.extract-progress__fill--completed {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.88), rgba(74, 222, 128, 0.9));
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.32);
+}
+
+.extract-progress__fill--failed {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.88), rgba(248, 113, 113, 0.9));
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.32);
+}
+
+@keyframes extractBarSlide {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 160px 0;
+  }
+}
+
 .kv__v--wrap {
   white-space: pre-wrap;
   word-break: break-word;

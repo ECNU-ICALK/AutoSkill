@@ -34,6 +34,7 @@ class _PendingExtraction:
 class _BgExtractJob:
     window: List[Dict[str, Any]]
     trigger: str
+    hint: Optional[str]
     epoch: int
 
 
@@ -97,6 +98,7 @@ class InteractiveChatApp:
         self.io.print("Extraction interval (turns):", self.config.extract_turn_limit)
         self.io.print("Mode:", online)
         self.io.print("Existing skills:", len(self.sdk.list(user_id=self.config.user_id)))
+        self._schedule_vector_prewarm(log=True)
 
     def _print_help(self) -> None:
         self.io.print(
@@ -118,7 +120,8 @@ class InteractiveChatApp:
             "  /clear\n"
             "\nNotes:\n"
             "  - In /extract auto mode, extraction is attempted once every N turns (N=extract_turn_limit).\n"
-            "    Set N=1 to attempt extraction every turn. Use /extract_now to force.\n"
+            "    Set N=1 to attempt extraction every turn.\n"
+            "  - /extract_now [hint] schedules extraction in background (non-blocking).\n"
         )
 
     def _handle_command(self, cmd: Command) -> bool:
@@ -210,28 +213,11 @@ class InteractiveChatApp:
                 return False
 
             hint = (arg or "").strip() or None
-            try:
-                updated = self.sdk.ingest(
-                    user_id=self.config.user_id,
-                    messages=window,
-                    metadata={"channel": "chat", "trigger": "extract_now"},
-                    hint=hint,
-                )
-            except Exception as e:
-                self.io.print("\n[extract_now] failed:", str(e))
-                self._pending = None
-                return False
-
-            if updated:
-                self.io.print("\n[extract_now] upserted:", len(updated))
-                for s in updated[:20]:
-                    self.io.print(f"- {s.id} | v{s.version} | {s.name}")
-                for s in updated[:3]:
-                    self._print_skill_md(s.id, label="extract_now")
-            else:
-                self.io.print("\n[extract_now] no skills extracted")
-
             self._pending = None
+            self._start_background_extraction(window, trigger="extract_now", hint=hint)
+            self.io.print("\n[extract_now] scheduled in background")
+            if hint:
+                self.io.print("[extract_now] hint:", hint)
             return False
 
         if name == "/rewrite":
@@ -250,6 +236,7 @@ class InteractiveChatApp:
             if scope in {"all", "user", "library"}:
                 self.config.skill_scope = scope
                 self.io.print("Skill scope:", self.config.skill_scope)
+                self._schedule_vector_prewarm(log=True)
             else:
                 self.io.print("Usage: /scope user|common|all")
             return False
@@ -271,7 +258,7 @@ class InteractiveChatApp:
                 arg,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
             )
             if not hits:
                 self.io.print("(no hits)")
@@ -419,7 +406,7 @@ class InteractiveChatApp:
                 search_query,
                 user_id=self.config.user_id,
                 limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope},
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
             )
         except Exception as e:
             self.io.print("\n[retrieve] failed:", str(e))
@@ -472,8 +459,16 @@ class InteractiveChatApp:
             messages=list(window),
         )
 
-        if extract_window is not None:
-            self._start_background_extraction(extract_window, trigger="auto")
+        if self._should_trigger_auto_extraction():
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            scheduled_window = list(extract_window) if extract_window is not None else list(window)
+            if scheduled_window:
+                self._start_background_extraction(scheduled_window, trigger="auto")
 
     def _print_retrieval(self, hits: List[Any]) -> None:
         if not hits:
@@ -576,11 +571,19 @@ class InteractiveChatApp:
         if pending is None:
             return None
 
+        self._pending = None
+        feedback = str(user_feedback or "").strip()
+        window = list(pending.messages or [])
+        if feedback:
+            window.append({"role": "user", "content": feedback})
+        return window
+
+    def _should_trigger_auto_extraction(self) -> bool:
         mode = (self.config.extract_mode or "auto").lower()
         if mode == "never":
-            self._pending = None
-            return None
-
+            return False
+        if mode == "always":
+            return True
         total_turns_abs = sum(
             1
             for m in (self.messages or [])
@@ -588,25 +591,21 @@ class InteractiveChatApp:
         )
         interval = max(1, int(getattr(self.config, "extract_turn_limit", 1) or 1))
         turns_since_check = max(0, int(total_turns_abs) - int(self._turns_at_last_extract_check or 0))
-        if mode == "auto" and turns_since_check < interval:
-            self._pending = None
-            return None
+        return turns_since_check >= interval
 
-        self._turns_at_last_extract_check = int(total_turns_abs)
-        self._pending = None
-
-        feedback = str(user_feedback or "").strip()
-        window = list(pending.messages or [])
-        if feedback:
-            window.append({"role": "user", "content": feedback})
-        return window
-
-    def _start_background_extraction(self, window: List[Dict[str, Any]], *, trigger: str) -> None:
+    def _start_background_extraction(
+        self,
+        window: List[Dict[str, Any]],
+        *,
+        trigger: str,
+        hint: Optional[str] = None,
+    ) -> None:
         if not window:
             return
         job = _BgExtractJob(
             window=list(window),
             trigger=str(trigger or "auto"),
+            hint=(str(hint).strip() if hint and str(hint).strip() else None),
             epoch=int(self._epoch),
         )
 
@@ -634,7 +633,8 @@ class InteractiveChatApp:
                     updated = self.sdk.ingest(
                         user_id=self.config.user_id,
                         messages=list(current.window or []),
-                        metadata={"channel": "chat"},
+                        metadata={"channel": "chat", "trigger": str(current.trigger)},
+                        hint=current.hint,
                     )
                     if epoch == int(self._epoch):
                         self._events.put(
@@ -689,10 +689,12 @@ class InteractiveChatApp:
                 name = getattr(s, "name", "")
                 ver = getattr(s, "version", "")
                 self.io.print(f"- {sid} | v{ver} | {name}")
-            for s in updated[:3]:
-                sid = getattr(s, "id", "")
-                if sid:
-                    self._print_skill_md(str(sid), label="extract")
+            # Keep auto mode lightweight for UX: only print full SKILL.md previews for explicit extract_now.
+            if trigger == "extract_now":
+                for s in updated[:3]:
+                    sid = getattr(s, "id", "")
+                    if sid:
+                        self._print_skill_md(str(sid), label=f"extract:{trigger}")
 
     def _print_skill_md(self, skill_id: str, *, label: str) -> None:
         md = self.sdk.export_skill_md(str(skill_id))
@@ -705,3 +707,20 @@ class InteractiveChatApp:
         if len(md_s) > max_chars:
             md_s = md_s[:max_chars].rstrip() + "\n\n...(truncated; use /export <skill_id> to view full SKILL.md)"
         self.io.print(f"\n[{label}] SKILL.md for {skill_id}:\n{md_s}")
+
+    def _schedule_vector_prewarm(self, *, log: bool = False) -> None:
+        store = getattr(self.sdk, "store", None)
+        fn = getattr(store, "schedule_vector_prewarm", None)
+        if not callable(fn):
+            return
+        try:
+            queued = int(
+                fn(
+                    user_id=self.config.user_id,
+                    scope=self.config.skill_scope,
+                )
+            )
+        except Exception:
+            return
+        if log and queued > 0:
+            self.io.print("Vector prewarm scheduled:", queued)
