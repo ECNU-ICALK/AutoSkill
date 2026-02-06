@@ -7,7 +7,7 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 与只保存原始记忆片段不同，AutoSkill 保存的是可迁移、可执行的 **Agent Skill 制品**（`SKILL.md` + 可选资源）。
 
-## 1. 快速开始：Web UI（默认百炼 DashScope）
+## 1. 快速开始：Web UI
 
 ```bash
 python3 -m pip install -e .
@@ -210,7 +210,7 @@ for h in hits:
 
 ## 8. Provider 配置建议
 
-### 8.1 百炼 DashScope（默认推荐）
+### 8.1 百炼 DashScope（示例）
 
 ```bash
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"

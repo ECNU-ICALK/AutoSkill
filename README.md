@@ -9,7 +9,7 @@ and continuously evolves existing Skills through merge + version updates.
 Instead of storing raw memory fragments, AutoSkill stores **portable Agent Skills** (`SKILL.md` + optional resources)
 that can be retrieved and reused in future tasks and even migrated to other agent systems.
 
-## 1. Start Here: Web UI (DashScope Default)
+## 1. Start Here: Web UI
 
 ```bash
 python3 -m pip install -e .
@@ -212,7 +212,7 @@ for h in hits:
 
 ## 8. Provider Setup
 
-### 8.1 DashScope (Default Recommendation)
+### 8.1 DashScope (Example)
 
 ```bash
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
