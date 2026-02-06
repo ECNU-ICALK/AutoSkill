@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..client import AutoSkill
 from ..llm.base import LLM
@@ -145,6 +145,23 @@ class InteractiveSession:
                 return self._handle_command(cmd)
 
         return self._handle_user_message(raw)
+
+    def handle_input_stream(self, text: str) -> Iterator[Dict[str, Any]]:
+        raw = str(text or "")
+        if not raw.strip():
+            yield {"type": "result", "result": {"kind": "noop", "chat_append": [], "config": asdict(self.config)}}
+            return
+
+        # Commands are intentionally single-line to avoid surprising behavior when users paste text.
+        if "\n" not in raw and "\r" not in raw:
+            cmd = parse_command(raw)
+            if cmd is not None:
+                out = self._handle_command(cmd)
+                yield {"type": "result", "result": out}
+                return
+
+        for ev in self._handle_user_message_stream(raw):
+            yield ev
 
     def _drain_latest_event(self, *, kind: str) -> Optional[Dict[str, Any]]:
         if kind != "extraction":
@@ -508,6 +525,137 @@ class InteractiveSession:
             "config": asdict(self.config),
         }
 
+    def _handle_user_message_stream(self, text: str) -> Iterator[Dict[str, Any]]:
+        latest_user = str(text or "").strip()
+
+        extraction_event = self._drain_latest_event(kind="extraction")
+        extraction_scheduled: Optional[Dict[str, Any]] = None
+
+        # Treat the current user message as feedback for the previous assistant response, but run
+        # extraction asynchronously so chat latency is not impacted.
+        extract_window = self._pop_pending_extraction_window(user_feedback=latest_user)
+
+        self.messages.append({"role": "user", "content": latest_user})
+
+        # 1) Rewrite query (optional) then retrieve Skills for this turn.
+        original_query = latest_user
+        search_query = latest_user
+        rewritten_query: Optional[str] = None
+
+        rewrite_mode = (self.config.rewrite_mode or "auto").strip().lower()
+        if rewrite_mode != "never" and self.query_rewriter is not None:
+            rewritten = self.query_rewriter.rewrite(query=latest_user, messages=self.messages)
+            if rewritten and rewritten.strip():
+                rewritten_query = rewritten.strip()
+                if rewrite_mode in {"auto", "always"}:
+                    search_query = rewritten_query
+
+        try:
+            hits = self.sdk.search(
+                search_query,
+                user_id=self.config.user_id,
+                limit=self.config.top_k,
+                filters={"scope": self.config.skill_scope, "allow_partial_vectors": True},
+            )
+        except Exception as e:
+            hits = []
+            retrieval_error = str(e)
+        else:
+            retrieval_error = ""
+
+        min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
+        if hits and min_score > 0:
+            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+
+        skills_for_use = [h.skill for h in hits]
+        selected_for_use = list(skills_for_use)
+        if self.skill_selector is not None and skills_for_use:
+            selected = self.skill_selector.select(
+                query=latest_user, messages=self.messages, skills=skills_for_use
+            )
+            selected_for_use = list(selected or [])
+
+        selected_for_context = select_skills_for_context(
+            selected_for_use,
+            query=search_query,
+            max_chars=self.sdk.config.max_context_chars,
+        )
+        use_skills = bool(selected_for_context)
+        context = (
+            render_skills_context(
+                selected_for_context,
+                query=search_query,
+                max_chars=self.sdk.config.max_context_chars,
+            )
+            if use_skills
+            else ""
+        )
+
+        # 2) Generate assistant response (streaming).
+        assistant_parts: List[str] = []
+        for part in self._generate_assistant_response_stream(context=context, use_skills=use_skills):
+            s = str(part or "")
+            if not s:
+                continue
+            assistant_parts.append(s)
+            yield {"type": "assistant_delta", "delta": s}
+        assistant = "".join(assistant_parts).strip()
+        if not assistant:
+            assistant = "(empty response)"
+        self.messages.append({"role": "assistant", "content": assistant})
+
+        # 3) Stage the latest window for potential extraction on the next turn.
+        window = self.messages[-self.config.ingest_window :]
+        self._pending = _PendingExtraction(
+            latest_user=latest_user,
+            latest_assistant=assistant,
+            messages=list(window),
+        )
+
+        if self._should_trigger_auto_extraction():
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            scheduled_window = list(extract_window) if extract_window is not None else list(window)
+            if scheduled_window:
+                job_id = self._start_background_extraction(scheduled_window, trigger="auto")
+                extraction_scheduled = {
+                    "trigger": "auto",
+                    "job_id": str(job_id or ""),
+                    "event_time": _now_ms(),
+                    "status": "scheduled",
+                    "error": "",
+                    "upserted": [],
+                    "skill_mds": [],
+                }
+
+        retrieval = self._build_retrieval_info(
+            original_query=original_query,
+            rewritten_query=rewritten_query,
+            search_query=search_query,
+            hits=hits,
+            selected_for_use=selected_for_use,
+            selected_for_context=selected_for_context,
+            context_injected=use_skills,
+            error=retrieval_error or None,
+        )
+
+        chat_append = [
+            {"role": "user", "content": latest_user},
+            {"role": "assistant", "content": assistant},
+        ]
+        result = {
+            "kind": "chat",
+            "chat_append": chat_append,
+            "retrieval": retrieval,
+            "extraction": (extraction_scheduled if extraction_scheduled is not None else extraction_event),
+            "config": asdict(self.config),
+        }
+        yield {"type": "result", "result": result}
+
     def _help_text(self) -> str:
         return (
             "Commands:\n"
@@ -579,10 +727,7 @@ class InteractiveSession:
             "skill_mds": md_items,
         }
 
-    def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
-        if self.chat_llm is None:
-            return "Offline mode: no chat LLM configured."
-
+    def _build_assistant_inputs(self, *, context: str, use_skills: bool) -> Tuple[str, str]:
         if use_skills and (context or "").strip():
             system = (
                 "You are a helpful assistant.\n"
@@ -597,6 +742,13 @@ class InteractiveSession:
             system = "You are a helpful assistant.\n"
         history = self._format_history(max_turns=self.config.history_turns)
         user = f"Conversation:\n{history}\n\nRespond to the latest user message."
+        return system, user
+
+    def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
+        if self.chat_llm is None:
+            return "Offline mode: no chat LLM configured."
+
+        system, user = self._build_assistant_inputs(context=context, use_skills=use_skills)
         try:
             out = self.chat_llm.complete(
                 system=system,
@@ -608,6 +760,31 @@ class InteractiveSession:
             msg = (msg[:500] + "...") if len(msg) > 500 else msg
             return f"(LLM error: {msg})"
         return (out or "").strip() or "(empty response)"
+
+    def _generate_assistant_response_stream(
+        self,
+        *,
+        context: str,
+        use_skills: bool,
+    ) -> Iterator[str]:
+        if self.chat_llm is None:
+            yield "Offline mode: no chat LLM configured."
+            return
+
+        system, user = self._build_assistant_inputs(context=context, use_skills=use_skills)
+        try:
+            for chunk in self.chat_llm.stream_complete(
+                system=system,
+                user=user,
+                temperature=float(self.config.assistant_temperature),
+            ):
+                s = str(chunk or "")
+                if s:
+                    yield s
+        except Exception as e:
+            msg = str(e).replace("\n", " ").strip()
+            msg = (msg[:500] + "...") if len(msg) > 500 else msg
+            yield f"(LLM error: {msg})"
 
     def _format_history(self, *, max_turns: int) -> str:
         if not self.messages:

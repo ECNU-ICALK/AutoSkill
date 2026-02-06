@@ -200,6 +200,18 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             self.send_response(404)
             self.end_headers()
 
+        def _start_ndjson(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+        def _write_ndjson(self, payload: Dict[str, Any]) -> None:
+            data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+            self.wfile.write(data)
+            self.wfile.flush()
+
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path or "/")
             path = parsed.path or "/"
@@ -240,6 +252,28 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 except Exception as e:
                     return _json_response(self, {"error": str(e)}, status=500)
                 return _json_response(self, {"session_id": sid, "result": out})
+
+            if path == "/api/session/input_stream":
+                sid = str(body.get("session_id") or "").strip()
+                text = str(body.get("text") or "")
+                session = manager.get(sid)
+                if session is None:
+                    return _json_response(self, {"error": "unknown session_id"}, status=404)
+                try:
+                    self._start_ndjson()
+                    self._write_ndjson({"type": "meta", "session_id": sid})
+                    for ev in session.handle_input_stream(text):
+                        if not isinstance(ev, dict):
+                            continue
+                        self._write_ndjson(ev)
+                except BrokenPipeError:
+                    return
+                except Exception as e:
+                    try:
+                        self._write_ndjson({"type": "error", "error": str(e)})
+                    except Exception:
+                        pass
+                return
 
             if path == "/api/skill/save_md":
                 sid = str(body.get("session_id") or "").strip()

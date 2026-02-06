@@ -31,9 +31,32 @@ python3 -m examples.web_ui \
 
 Open `http://127.0.0.1:8000`.
 
-Example result:
+## 1.1 Skill Lifecycle Example (4 Aspects)
 
-![AutoSkill Web UI Example](imgs/example.png)
+### A) Skill Extraction (v0.1.0)
+
+From interaction data, AutoSkill extracts a new skill for **government report writing** and creates version `v0.1.0`.
+
+![Skill Extraction](imgs/skill_extraction.png)
+
+### B) Skill Management (Backend-first + Human Editable)
+
+Skill management is primarily handled by the backend: it automatically decides add/merge actions to keep the skill set clean and evolving.
+On top of that, users can manually edit and save the generated `SKILL.md` (or delete a skill when needed).
+
+### C) Skill Update (v0.1.1)
+
+When user requirements change during later interactions, AutoSkill updates the existing skill instead of creating noisy duplicates,
+and evolves the version from `v0.1.0` to `v0.1.1`.
+
+![Skill Update](imgs/skill_update.png)
+
+### D) Skill Usage
+
+For the next similar task (for example, writing a **government report about a self-evolving agent**), the updated skill is retrieved and used
+to generate outputs aligned with user expectations.
+
+![Skill Usage](imgs/skill_utilize.png)
 
 ## 2. What Makes AutoSkill Different
 

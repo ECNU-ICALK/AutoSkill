@@ -13,7 +13,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from .base import LLM
 from ..utils.json import json_from_llm_text
@@ -100,6 +100,18 @@ def _extract_best_text(parsed: Dict[str, Any]) -> str:
     return ""
 
 
+def _extract_stream_delta(parsed: Dict[str, Any]) -> str:
+    choices = parsed.get("choices") or []
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    delta = first.get("delta") or first.get("message") or {}
+    if not isinstance(delta, dict):
+        delta = {}
+    text = _content_to_text(delta.get("content"))
+    return str(text) if text is not None else ""
+
+
 @dataclass
 class OpenAIChatLLM(LLM):
     model: str = "gpt-4o-mini"
@@ -116,56 +128,123 @@ class OpenAIChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
-        # Prefer explicit api_key; fall back to env var OPENAI_API_KEY.
-        key = self.api_key or os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OpenAIChatLLM requires api_key or OPENAI_API_KEY")
-
         system2, user2 = truncate_system_user(
             system=system, user=user, max_units=int(self.max_input_chars or 0)
         )
+        payload = self._build_payload(system=system2, user=user2, temperature=temperature, stream=False)
+        body = self._post_json(payload=payload, stream=False)
+        parsed = json.loads(body)
+        if not isinstance(parsed, dict):
+            return ""
+        return _extract_best_text(parsed)
 
-        base = self.base_url.rstrip("/")
-        # Support both styles:
-        # - https://api.openai.com
-        # - https://api.openai.com/v1
-        url = (
-            (base + "/chat/completions")
-            if base.endswith("/v1")
-            else (base + "/v1/chat/completions")
+    def stream_complete(
+        self,
+        *,
+        system: Optional[str],
+        user: str,
+        temperature: float = 0.0,
+    ) -> Iterator[str]:
+        system2, user2 = truncate_system_user(
+            system=system, user=user, max_units=int(self.max_input_chars or 0)
         )
-        messages = []
-        if system2:
-            messages.append({"role": "system", "content": system2})
-        messages.append({"role": "user", "content": user2})
+        payload = self._build_payload(system=system2, user=user2, temperature=temperature, stream=True)
+        req = self._build_request(payload=payload, stream=True)
+        emitted = False
+        fallback_lines: List[str] = []
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", errors="replace")
+                    fallback_lines.append(line)
+                    s = line.strip()
+                    if not s.startswith("data:"):
+                        continue
+                    payload_line = s[5:].strip()
+                    if not payload_line or payload_line == "[DONE]":
+                        continue
+                    try:
+                        obj = json.loads(payload_line)
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    part = _extract_stream_delta(obj)
+                    if part:
+                        emitted = True
+                        yield part
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"OpenAI-compatible HTTP {e.code}: {raw}") from e
 
-        payload = {
+        if emitted:
+            return
+
+        fallback_body = "".join(fallback_lines).strip()
+        if not fallback_body:
+            return
+        # Some gateways may ignore `stream=true` and return a normal JSON body.
+        try:
+            parsed = json.loads(fallback_body)
+        except Exception:
+            return
+        if not isinstance(parsed, dict):
+            return
+        text = _extract_best_text(parsed)
+        if text:
+            yield text
+
+    def _build_url(self) -> str:
+        base = self.base_url.rstrip("/")
+        return (base + "/chat/completions") if base.endswith("/v1") else (base + "/v1/chat/completions")
+
+    def _resolve_api_key(self) -> str:
+        key = self.api_key or os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OpenAIChatLLM requires api_key or OPENAI_API_KEY")
+        return key
+
+    def _build_payload(
+        self,
+        *,
+        system: Optional[str],
+        user: str,
+        temperature: float,
+        stream: bool,
+    ) -> Dict[str, Any]:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": user})
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": float(temperature),
+            "stream": bool(stream),
         }
         if int(self.max_tokens or 0) > 0:
             payload["max_tokens"] = int(self.max_tokens)
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return payload
 
-        req = urllib.request.Request(
-            url,
+    def _build_request(self, *, payload: Dict[str, Any], stream: bool) -> urllib.request.Request:
+        key = self._resolve_api_key()
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return urllib.request.Request(
+            self._build_url(),
             method="POST",
             data=data,
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
-                "Accept": "application/json",
+                "Accept": ("text/event-stream" if stream else "application/json"),
             },
         )
+
+    def _post_json(self, *, payload: Dict[str, Any], stream: bool) -> str:
+        req = self._build_request(payload=payload, stream=stream)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-                body = resp.read().decode("utf-8")
+                return resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"OpenAI-compatible HTTP {e.code}: {raw}") from e
-
-        parsed = json.loads(body)
-        if not isinstance(parsed, dict):
-            return ""
-        return _extract_best_text(parsed)

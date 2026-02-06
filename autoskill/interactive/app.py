@@ -12,7 +12,7 @@ from __future__ import annotations
 import queue
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..client import AutoSkill
 from ..llm.base import LLM
@@ -446,8 +446,16 @@ class InteractiveChatApp:
             else ""
         )
         # 2) Generate assistant response.
-        latest_assistant = self._generate_assistant_response(context=context, use_skills=use_skills)
-        self.io.print("\nAssistant> " + latest_assistant)
+        self.io.print("\nAssistant> ", end="")
+        assistant_parts: List[str] = []
+        for chunk in self._generate_assistant_response_stream(context=context, use_skills=use_skills):
+            s = str(chunk or "")
+            if not s:
+                continue
+            assistant_parts.append(s)
+            self.io.print(s, end="", flush=True)
+        latest_assistant = "".join(assistant_parts).strip() or "(empty response)"
+        self.io.print("")
         self.messages.append({"role": "assistant", "content": latest_assistant})
 
         # 3) Stage the latest window for potential extraction on the next turn, when we may have
@@ -516,10 +524,7 @@ class InteractiveChatApp:
                 source = f"user:{owner}"
             self.io.print(f"- {i}. {source} | {s.id} | {s.name}")
 
-    def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
-        if self.chat_llm is None:
-            return "Offline mode: no chat LLM configured."
-
+    def _build_assistant_inputs(self, *, context: str, use_skills: bool) -> Tuple[str, str]:
         if use_skills and (context or "").strip():
             system = (
                 "You are a helpful assistant.\n"
@@ -534,6 +539,13 @@ class InteractiveChatApp:
             system = "You are a helpful assistant.\n"
         history = self._format_history(max_turns=self.config.history_turns)
         user = f"Conversation:\n{history}\n\nRespond to the latest user message."
+        return system, user
+
+    def _generate_assistant_response(self, *, context: str, use_skills: bool) -> str:
+        if self.chat_llm is None:
+            return "Offline mode: no chat LLM configured."
+
+        system, user = self._build_assistant_inputs(context=context, use_skills=use_skills)
         try:
             out = self.chat_llm.complete(
                 system=system,
@@ -546,6 +558,32 @@ class InteractiveChatApp:
             msg = (msg[:500] + "...") if len(msg) > 500 else msg
             return f"(LLM error: {msg})"
         return (out or "").strip() or "(empty response)"
+
+    def _generate_assistant_response_stream(
+        self,
+        *,
+        context: str,
+        use_skills: bool,
+    ) -> Iterator[str]:
+        if self.chat_llm is None:
+            yield "Offline mode: no chat LLM configured."
+            return
+
+        system, user = self._build_assistant_inputs(context=context, use_skills=use_skills)
+        try:
+            for chunk in self.chat_llm.stream_complete(
+                system=system,
+                user=user,
+                temperature=float(self.config.assistant_temperature),
+            ):
+                s = str(chunk or "")
+                if s:
+                    yield s
+        except Exception as e:
+            msg = str(e)
+            msg = msg.replace("\n", " ").strip()
+            msg = (msg[:500] + "...") if len(msg) > 500 else msg
+            yield f"(LLM error: {msg})"
 
     def _format_history(self, *, max_turns: int) -> str:
         if not self.messages:

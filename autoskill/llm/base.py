@@ -7,7 +7,7 @@ AutoSkill only needs one minimal capability: given (system + user), return compl
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Iterator, Optional
 
 
 class LLM(ABC):
@@ -20,3 +20,21 @@ class LLM(ABC):
         temperature: float = 0.0,
     ) -> str:
         raise NotImplementedError
+
+    def stream_complete(
+        self,
+        *,
+        system: Optional[str],
+        user: str,
+        temperature: float = 0.0,
+    ) -> Iterator[str]:
+        """
+        Streams completion text chunks.
+
+        Default behavior falls back to `complete(...)` and yields one chunk.
+        Provider implementations can override this to support true token/chunk streaming.
+        """
+
+        out = self.complete(system=system, user=user, temperature=temperature)
+        if out:
+            yield str(out)

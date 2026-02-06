@@ -418,6 +418,95 @@ function startPolling() {
   }, 1200);
 }
 
+async function apiStreamNdjson(path, body, onEvent) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    const err = json?.error || `HTTP ${res.status}`;
+    throw new Error(err);
+  }
+  if (!res.body) {
+    throw new Error("Streaming response body is unavailable in this environment.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    while (true) {
+      const idx = buffer.indexOf("\n");
+      if (idx < 0) break;
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line) continue;
+      let obj = null;
+      try {
+        obj = JSON.parse(line);
+      } catch (_e) {
+        obj = null;
+      }
+      if (obj && typeof onEvent === "function") onEvent(obj);
+    }
+  }
+
+  buffer += decoder.decode();
+  const tail = buffer.trim();
+  if (tail) {
+    try {
+      const obj = JSON.parse(tail);
+      if (obj && typeof onEvent === "function") onEvent(obj);
+    } catch (_e) {
+      // Ignore non-JSON tail.
+    }
+  }
+}
+
+function applySendResult(result, streamAssistantIndex) {
+  const append = Array.isArray(result?.chat_append) ? result.chat_append : [];
+  if (result?.kind === "command" && result?.command === "/clear") {
+    state.messages = append.length ? append.slice() : [];
+    renderChat();
+    renderRetrieval(null);
+    renderExtraction(null);
+  } else if (result?.kind === "chat") {
+    let assistantObj = null;
+    if (append.length >= 2) {
+      assistantObj = append[1];
+    } else if (append.length === 1 && String(append[0]?.role || "") === "assistant") {
+      assistantObj = append[0];
+    }
+    if (assistantObj) {
+      if (
+        Number.isInteger(streamAssistantIndex) &&
+        streamAssistantIndex >= 0 &&
+        streamAssistantIndex < state.messages.length &&
+        String(state.messages[streamAssistantIndex]?.role || "") === "assistant"
+      ) {
+        state.messages[streamAssistantIndex] = { role: "assistant", content: assistantObj.content || "" };
+      } else {
+        state.messages.push(assistantObj);
+      }
+      renderChat();
+    }
+  } else if (append.length) {
+    state.messages.push(...append);
+    renderChat();
+  }
+
+  if (result?.retrieval) renderRetrieval(result.retrieval);
+  if (result?.extraction) renderExtraction(result.extraction);
+  if (result?.config) renderConfig(result.config);
+}
+
 async function sendText(text) {
   const sid = await ensureSession();
   if (state.inFlight) return;
@@ -437,40 +526,68 @@ async function sendText(text) {
   state.messages.push({ role: "user", content: text });
   state.messages.push({ role: "assistant", content: "", pending: true });
   renderChat();
-  setStatus(true, "thinking...");
+  setStatus(true, "streaming...");
 
   try {
-    const out = await api("/api/session/input", { session_id: sid, text });
-    const result = out.result || {};
+    let streamAssistantIndex = -1;
+    let streamStarted = false;
+    let result = null;
 
-    // Remove typing indicator.
+    const ensureAssistantBubble = () => {
+      if (streamAssistantIndex >= 0) return;
+      while (state.messages.length && state.messages[state.messages.length - 1]?.pending) {
+        state.messages.pop();
+      }
+      state.messages.push({ role: "assistant", content: "" });
+      streamAssistantIndex = state.messages.length - 1;
+    };
+
+    try {
+      await apiStreamNdjson(
+        "/api/session/input_stream",
+        { session_id: sid, text },
+        (ev) => {
+          const t = String(ev?.type || "").trim().toLowerCase();
+          if (t === "meta") {
+            streamStarted = true;
+            return;
+          }
+          if (t === "assistant_delta") {
+            streamStarted = true;
+            const delta = String(ev?.delta || "");
+            if (!delta) return;
+            ensureAssistantBubble();
+            state.messages[streamAssistantIndex].content += delta;
+            renderChat();
+            return;
+          }
+          if (t === "result") {
+            result = ev?.result || {};
+            return;
+          }
+          if (t === "error") {
+            const err = String(ev?.error || "unknown stream error");
+            throw new Error(err);
+          }
+        }
+      );
+    } catch (e) {
+      // Fallback for old backends that do not provide stream endpoint.
+      if (!streamStarted) {
+        const out = await api("/api/session/input", { session_id: sid, text });
+        result = out?.result || {};
+      } else {
+        throw e;
+      }
+    }
+
     while (state.messages.length && state.messages[state.messages.length - 1]?.pending) {
       state.messages.pop();
     }
-
-    const append = Array.isArray(result.chat_append) ? result.chat_append : [];
-    if (result.kind === "command" && result.command === "/clear") {
-      state.messages = append.length ? append.slice() : [];
-      renderChat();
-      renderRetrieval(null);
-      renderExtraction(null);
-    } else if (result.kind === "chat") {
-      // Server returns [user, assistant]. We already rendered the user message optimistically, so only append assistant.
-      if (append.length >= 2) {
-        state.messages.push(append[1]);
-      } else if (append.length === 1) {
-        state.messages.push(append[0]);
-      }
-      renderChat();
-    } else if (append.length) {
-      // Commands typically return system messages.
-      state.messages.push(...append);
-      renderChat();
+    if (!result || typeof result !== "object") {
+      throw new Error("Missing final result from stream.");
     }
-
-    if (result.retrieval) renderRetrieval(result.retrieval);
-    if (result.extraction) renderExtraction(result.extraction);
-    if (result.config) renderConfig(result.config);
+    applySendResult(result, streamAssistantIndex);
 
     setStatus(true, "connected");
   } catch (e) {

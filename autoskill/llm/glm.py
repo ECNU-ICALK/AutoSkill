@@ -12,7 +12,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..utils.bigmodel_auth import BigModelAuth
 from ..utils.json import json_from_llm_text
@@ -109,6 +109,88 @@ class GLMChatLLM(LLM):
 
         raise RuntimeError(_format_unexpected_response("GLM", body, parsed))
 
+    def stream_complete(
+        self,
+        *,
+        system: Optional[str],
+        user: str,
+        temperature: float = 0.0,
+    ) -> Iterator[str]:
+        system2, user2 = _truncate_inputs(
+            system=system, user=user, max_input_chars=int(self.max_input_chars or 0)
+        )
+        messages = []
+        if system2:
+            messages.append({"role": "system", "content": system2})
+        messages.append({"role": "user", "content": user2})
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": float(temperature),
+            "max_tokens": int(self.max_tokens),
+            "stream": True,
+        }
+        if self.extra_body:
+            payload.update(self.extra_body)
+            payload["stream"] = True
+
+        attempts: List[Tuple[bool, Optional[str]]] = [(False, None)]
+        if (self.auth_mode or "auto").lower() == "auto":
+            attempts.extend([(True, None), (False, "api_key")])
+
+        for idx, (retry_alt_unit, retry_auth_mode) in enumerate(attempts):
+            emitted = False
+            fallback_lines: List[str] = []
+            try:
+                for line in self._post_stream_lines(
+                    "/chat/completions",
+                    payload,
+                    retry_alternate_time_unit=retry_alt_unit,
+                    retry_auth_mode=retry_auth_mode,
+                ):
+                    fallback_lines.append(line)
+                    s = line.strip()
+                    if not s.startswith("data:"):
+                        continue
+                    data_line = s[5:].strip()
+                    if not data_line or data_line == "[DONE]":
+                        continue
+                    try:
+                        parsed = json.loads(data_line)
+                    except Exception:
+                        continue
+                    if not isinstance(parsed, dict):
+                        continue
+                    part = _extract_stream_delta(parsed)
+                    if part:
+                        emitted = True
+                        yield part
+                if emitted:
+                    return
+
+                fallback_body = "".join(fallback_lines).strip()
+                if fallback_body:
+                    try:
+                        parsed_body = json.loads(fallback_body)
+                    except Exception:
+                        parsed_body = None
+                    if isinstance(parsed_body, dict):
+                        if _is_auth_error_response(parsed_body) and idx < len(attempts) - 1:
+                            continue
+                        out = _extract_best_text(parsed_body)
+                        if out:
+                            yield out
+                            return
+                return
+            except RuntimeError as e:
+                msg = str(e)
+                if idx < len(attempts) - 1 and _looks_like_auth_error_text(msg):
+                    continue
+                raise
+
+        return
+
     def _post_json(
         self,
         path: str,
@@ -162,6 +244,54 @@ class GLMChatLLM(LLM):
         if not isinstance(parsed, dict):
             raise RuntimeError(f"GLM returned unexpected JSON: {body[:2000]}")
         return body, parsed
+
+    def _post_stream_lines(
+        self,
+        path: str,
+        payload: Dict[str, Any],
+        *,
+        retry_alternate_time_unit: bool = False,
+        retry_auth_mode: Optional[str] = None,
+    ) -> Iterator[str]:
+        url = self.base_url.rstrip("/") + str(path)
+
+        token_unit = (self.token_time_unit or "ms").lower()
+        if retry_alternate_time_unit:
+            token_unit = "s" if token_unit == "ms" else "ms"
+
+        token = self._auth.bearer_token(
+            force_refresh=retry_alternate_time_unit or bool(retry_auth_mode),
+            token_time_unit=token_unit,
+            auth_mode=retry_auth_mode,
+        )
+
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            method="POST",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                for raw in resp:
+                    yield raw.decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", errors="replace")
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                parsed["_http_status"] = int(getattr(e, "code", 0) or 0)
+                if _is_auth_error_response(parsed):
+                    raise RuntimeError(_format_unexpected_response("GLM", raw, parsed))
+            raise RuntimeError(f"GLM HTTP {e.code}: {raw}") from e
 
 
 def _extract_chat_content(parsed: Dict[str, Any]) -> Optional[str]:
@@ -259,6 +389,23 @@ def _extract_best_text(parsed: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _extract_stream_delta(parsed: Dict[str, Any]) -> str:
+    choices = _find_choices(parsed)
+    if not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+
+    for key in ("delta", "message"):
+        msg = first.get(key)
+        if isinstance(msg, dict):
+            text = _content_to_text(msg.get("content"))
+            if text is not None and str(text).strip():
+                return str(text)
+    return ""
+
+
 def _try_extract_json_text(text: str) -> Optional[str]:
     """
     Best-effort JSON normalization:
@@ -353,6 +500,25 @@ def _is_auth_error_response(parsed: Dict[str, Any]) -> bool:
         "permission denied",
     ]
     return any(n in msg_s for n in needles)
+
+
+def _looks_like_auth_error_text(msg: str) -> bool:
+    s = str(msg or "").lower()
+    needles = [
+        "invalid api key",
+        "apikey",
+        "api_key",
+        "unauthorized",
+        "forbidden",
+        "signature",
+        "auth",
+        "authentication",
+        "permission",
+        "permission denied",
+        "code=401",
+        "code=403",
+    ]
+    return any(n in s for n in needles)
 
 
 def _format_unexpected_response(prefix: str, body: str, parsed: Dict[str, Any]) -> str:
