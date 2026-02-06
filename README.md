@@ -283,3 +283,17 @@ AutoSkill turns short-term interaction into long-term capability.
 - It enables a transferable skill ecosystem across different agent runtimes.
 
 In short, this framework is a concrete path from prompt engineering to **experience-driven lifelong agent learning**.
+
+## 11. Citation
+
+If you use AutoSkill in academic work, technical reports, or demos, please cite:
+
+```bibtex
+@software{autoskill_2026,
+  author = {ECNU-ICALK},
+  title = {AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution},
+  year = {2026},
+  url = {https://github.com/ECNU-ICALK/AutoSkill},
+  note = {GitHub repository}
+}
+```

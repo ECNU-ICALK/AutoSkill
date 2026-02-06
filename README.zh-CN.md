@@ -281,3 +281,17 @@ AutoSkill 把短期交互沉淀为长期能力资产。
 - 支持跨系统迁移与复用，形成可互操作的技能生态。
 
 可以把它理解为：从“提示词工程”走向“经验驱动终身学习 Agent”的一条可落地路径。
+
+## 11. 引用（Citation）
+
+如果你在论文、技术报告或公开演示中使用了 AutoSkill，建议引用：
+
+```bibtex
+@software{autoskill_2026,
+  author = {ECNU-ICALK},
+  title = {AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution},
+  year = {2026},
+  url = {https://github.com/ECNU-ICALK/AutoSkill},
+  note = {GitHub repository}
+}
+```
