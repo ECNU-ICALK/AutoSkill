@@ -29,6 +29,8 @@ from ..utils.time import now_iso
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 _NAME_TOKEN_RE = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+")
+_HISTORY_KEY = "_autoskill_version_history"
+_HISTORY_LIMIT = 30
 
 
 def _name_similarity(a: str, b: str) -> float:
@@ -405,7 +407,10 @@ class SkillMaintainer:
                 else _merge(target, cand)
             )
             merged.updated_at = now_iso()
-            merged.metadata = _merge_metadata(target.metadata, metadata_clean, cand)
+            merged.metadata = _append_version_snapshot(
+                _merge_metadata(target.metadata, metadata_clean, cand),
+                target,
+            )
             if self._config.store_sources and cand.source:
                 merged.source = cand.source
             merged.files = _merge_files(target.files, build_agent_skill_files(merged))
@@ -866,6 +871,33 @@ def _merge_metadata(old: Dict, extra: Optional[Dict], cand: SkillCandidate) -> D
     except (TypeError, ValueError):
         prev_conf_f = 0.0
     out["confidence"] = max(prev_conf_f, float(cand.confidence))
+    return out
+
+
+def _skill_snapshot_for_history(skill: Skill) -> Dict[str, Optional[str]]:
+    files = dict(getattr(skill, "files", {}) or {})
+    return {
+        "version": str(getattr(skill, "version", "") or ""),
+        "name": str(getattr(skill, "name", "") or ""),
+        "description": str(getattr(skill, "description", "") or ""),
+        "instructions": str(getattr(skill, "instructions", "") or ""),
+        "skill_md": str(files.get("SKILL.md") or ""),
+        "updated_at": str(getattr(skill, "updated_at", "") or ""),
+    }
+
+
+def _append_version_snapshot(metadata: Dict, skill: Skill) -> Dict:
+    out = dict(metadata or {})
+    hist_raw = out.get(_HISTORY_KEY)
+    hist: List[Dict] = []
+    if isinstance(hist_raw, list):
+        for item in hist_raw:
+            if isinstance(item, dict):
+                hist.append(dict(item))
+    hist.append(_skill_snapshot_for_history(skill))
+    if len(hist) > int(_HISTORY_LIMIT):
+        hist = hist[-int(_HISTORY_LIMIT) :]
+    out[_HISTORY_KEY] = hist
     return out
 
 

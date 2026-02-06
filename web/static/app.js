@@ -7,6 +7,7 @@ const state = {
   inFlight: false,
   savingSkill: false,
   deletingSkill: false,
+  rollingBackSkill: false,
   editingSkillId: null,
   skillEditorDirty: false,
   pollTimer: null,
@@ -228,14 +229,9 @@ function _scheduleRunningTransition(jobId) {
     window.clearTimeout(state.extractionRunningTimer);
     state.extractionRunningTimer = null;
   }
-  state.extractionRunningTimer = window.setTimeout(() => {
-    if (!jobId || state.extractionJobId !== jobId) return;
-    if (state.extractionStatus !== "scheduled") return;
-    state.extractionStatus = "running";
-    setExtractionState("running");
-    _setExtractionProgress("running", 64);
-    _startElapsedTickerIfNeeded();
-  }, 420);
+  // Keep this hook for backward compatibility, but do not synthesize "running" state in UI.
+  // Extraction status should follow backend events only (scheduled/running/completed/failed).
+  void jobId;
 }
 
 function normalizeExtractionStatus(extraction) {
@@ -276,6 +272,7 @@ function renderExtraction(extraction) {
     el("editingSkill").textContent = "";
     el("saveSkillStatus").textContent = "";
     el("saveSkillBtn").disabled = true;
+    el("rollbackSkillBtn").disabled = true;
     el("deleteSkillBtn").disabled = true;
     el("skillMdEditor").value = "";
     state.editingSkillId = null;
@@ -355,8 +352,10 @@ function renderExtraction(extraction) {
   if (!mdItems.length) {
     const id = state.editingSkillId || "";
     el("editingSkill").textContent = id;
-    el("saveSkillBtn").disabled = !id || state.savingSkill;
-    el("deleteSkillBtn").disabled = !id || state.deletingSkill;
+    const busy = state.savingSkill || state.deletingSkill || state.rollingBackSkill;
+    el("saveSkillBtn").disabled = !id || busy;
+    el("rollbackSkillBtn").disabled = !id || busy;
+    el("deleteSkillBtn").disabled = !id || busy;
     return;
   }
   const item0 = mdItems.length ? mdItems[0] : null;
@@ -364,8 +363,10 @@ function renderExtraction(extraction) {
   const md = item0 ? String(item0.md || "") : "";
 
   el("editingSkill").textContent = id || "";
-  el("saveSkillBtn").disabled = !id || state.savingSkill;
-  el("deleteSkillBtn").disabled = !id || state.deletingSkill;
+  const busy = state.savingSkill || state.deletingSkill || state.rollingBackSkill;
+  el("saveSkillBtn").disabled = !id || busy;
+  el("rollbackSkillBtn").disabled = !id || busy;
+  el("deleteSkillBtn").disabled = !id || busy;
 
   // Avoid clobbering in-progress user edits unless this is a new skill.
   if (!id) return;
@@ -619,6 +620,12 @@ async function sendText(text) {
       throw new Error("Missing final result from stream.");
     }
     applySendResult(result, streamAssistantIndex);
+    // Force a near-immediate extraction event sync after this turn so the right panel can
+    // transition to completed/failed without waiting for the next timer tick.
+    await pollSession();
+    window.setTimeout(() => {
+      pollSession();
+    }, 900);
 
     setStatus(true, "connected");
   } catch (e) {
@@ -719,6 +726,7 @@ function bind() {
       if (state.savingSkill) return;
       state.savingSkill = true;
       el("saveSkillBtn").disabled = true;
+      if (el("rollbackSkillBtn")) el("rollbackSkillBtn").disabled = true;
       if (el("deleteSkillBtn")) el("deleteSkillBtn").disabled = true;
       el("saveSkillStatus").textContent = "saving...";
       try {
@@ -738,7 +746,51 @@ function bind() {
       } finally {
         state.savingSkill = false;
         el("saveSkillBtn").disabled = !state.editingSkillId;
+        if (el("rollbackSkillBtn")) el("rollbackSkillBtn").disabled = !state.editingSkillId;
         if (el("deleteSkillBtn")) el("deleteSkillBtn").disabled = !state.editingSkillId;
+      }
+    });
+  }
+
+  if (el("rollbackSkillBtn")) {
+    el("rollbackSkillBtn").addEventListener("click", async () => {
+      const sid = await ensureSession();
+      const skillId = state.editingSkillId;
+      if (!skillId) return;
+      if (state.rollingBackSkill) return;
+
+      const ok = window.confirm(
+        "Rollback this skill to the previous saved version?\n\nThis will overwrite current editor content."
+      );
+      if (!ok) return;
+
+      state.rollingBackSkill = true;
+      el("rollbackSkillBtn").disabled = true;
+      if (el("saveSkillBtn")) el("saveSkillBtn").disabled = true;
+      if (el("deleteSkillBtn")) el("deleteSkillBtn").disabled = true;
+      el("saveSkillStatus").textContent = "rolling back...";
+      try {
+        const out = await api("/api/skill/rollback_prev", {
+          session_id: sid,
+          skill_id: skillId,
+        });
+        const md = out?.skill_md != null ? String(out.skill_md) : "";
+        if (el("skillMdEditor")) el("skillMdEditor").value = md;
+        state.skillEditorDirty = false;
+        const outId = out?.skill?.id ? String(out.skill.id) : skillId;
+        state.editingSkillId = outId;
+        el("editingSkill").textContent = outId;
+        const ver = out?.skill?.version ? String(out.skill.version) : "";
+        el("saveSkillStatus").textContent = ver ? `rolled back to v${ver}` : "rolled back";
+      } catch (e) {
+        el("saveSkillStatus").textContent = `rollback failed: ${String(e?.message || e)}`;
+        setStatus(false, String(e?.message || e));
+      } finally {
+        state.rollingBackSkill = false;
+        const hasSkill = !!state.editingSkillId;
+        if (el("rollbackSkillBtn")) el("rollbackSkillBtn").disabled = !hasSkill;
+        if (el("saveSkillBtn")) el("saveSkillBtn").disabled = !hasSkill;
+        if (el("deleteSkillBtn")) el("deleteSkillBtn").disabled = !hasSkill;
       }
     });
   }
@@ -757,6 +809,7 @@ function bind() {
       state.deletingSkill = true;
       el("deleteSkillBtn").disabled = true;
       el("saveSkillBtn").disabled = true;
+      if (el("rollbackSkillBtn")) el("rollbackSkillBtn").disabled = true;
       el("saveSkillStatus").textContent = "deleting...";
       try {
         await api("/api/skill/delete", { session_id: sid, skill_id: skillId });
@@ -771,6 +824,7 @@ function bind() {
       } finally {
         state.deletingSkill = false;
         el("deleteSkillBtn").disabled = true;
+        if (el("rollbackSkillBtn")) el("rollbackSkillBtn").disabled = true;
         el("saveSkillBtn").disabled = true;
       }
     });

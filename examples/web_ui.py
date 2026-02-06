@@ -23,7 +23,7 @@ import uuid
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from autoskill import AutoSkill, AutoSkillConfig
@@ -31,6 +31,7 @@ from autoskill.config import default_store_path
 from autoskill.interactive import InteractiveConfig, LLMQueryRewriter
 from autoskill.interactive.session import InteractiveSession
 from autoskill.llm.factory import build_llm
+from autoskill.models import Skill, SkillExample
 
 from .interactive_chat import (
     _env,
@@ -38,6 +39,134 @@ from .interactive_chat import (
     build_embeddings_config,
     build_llm_config,
 )
+
+_HISTORY_KEY = "_autoskill_version_history"
+_HISTORY_LIMIT = 30
+
+
+def _examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for ex in examples or []:
+        out.append(
+            {
+                "input": str(getattr(ex, "input", "") or ""),
+                "output": (str(getattr(ex, "output", "")) if getattr(ex, "output", None) is not None else None),
+                "notes": (str(getattr(ex, "notes", "")) if getattr(ex, "notes", None) is not None else None),
+            }
+        )
+    return out
+
+
+def _examples_from_raw(raw: Any) -> List[SkillExample]:
+    out: List[SkillExample] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:50]:
+        if not isinstance(item, dict):
+            continue
+        inp = str(item.get("input") or "").strip()
+        if not inp:
+            continue
+        out.append(
+            SkillExample(
+                input=inp,
+                output=(str(item.get("output")).strip() if item.get("output") else None),
+                notes=(str(item.get("notes")).strip() if item.get("notes") else None),
+            )
+        )
+    return out
+
+
+def _metadata_without_history(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    md = dict(metadata or {})
+    md.pop(_HISTORY_KEY, None)
+    return md
+
+
+def _make_skill_snapshot(skill: Skill) -> Dict[str, Any]:
+    files = dict(getattr(skill, "files", {}) or {})
+    return {
+        "version": str(getattr(skill, "version", "") or ""),
+        "name": str(getattr(skill, "name", "") or ""),
+        "description": str(getattr(skill, "description", "") or ""),
+        "instructions": str(getattr(skill, "instructions", "") or ""),
+        "tags": [str(t).strip() for t in (getattr(skill, "tags", []) or []) if str(t).strip()],
+        "triggers": [
+            str(t).strip() for t in (getattr(skill, "triggers", []) or []) if str(t).strip()
+        ],
+        "examples": _examples_to_raw(list(getattr(skill, "examples", []) or [])),
+        "skill_md": str(files.get("SKILL.md") or ""),
+        "metadata": _metadata_without_history(dict(getattr(skill, "metadata", {}) or {})),
+        "source": dict(getattr(skill, "source", {}) or {}) if getattr(skill, "source", None) else None,
+        "updated_at": str(getattr(skill, "updated_at", "") or ""),
+    }
+
+
+def _history_from_metadata(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    hist = metadata.get(_HISTORY_KEY)
+    if not isinstance(hist, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in hist:
+        if isinstance(item, dict):
+            out.append(dict(item))
+    return out
+
+
+def _push_skill_snapshot(skill: Skill) -> int:
+    metadata = dict(getattr(skill, "metadata", {}) or {})
+    history = _history_from_metadata(metadata)
+    history.append(_make_skill_snapshot(skill))
+    if len(history) > int(_HISTORY_LIMIT):
+        history = history[-int(_HISTORY_LIMIT) :]
+    metadata[_HISTORY_KEY] = history
+    skill.metadata = metadata
+    return len(history)
+
+
+def _pop_skill_snapshot(skill: Skill) -> Optional[Dict[str, Any]]:
+    metadata = dict(getattr(skill, "metadata", {}) or {})
+    history = _history_from_metadata(metadata)
+    if not history:
+        return None
+    snapshot = dict(history[-1])
+    history = history[:-1]
+    metadata[_HISTORY_KEY] = history
+    skill.metadata = metadata
+    return snapshot
+
+
+def _apply_snapshot(skill: Skill, snapshot: Dict[str, Any]) -> None:
+    skill.version = str(snapshot.get("version") or str(getattr(skill, "version", "0.1.0")))
+    skill.name = str(snapshot.get("name") or str(getattr(skill, "name", "")))
+    skill.description = str(snapshot.get("description") or str(getattr(skill, "description", "")))
+    skill.instructions = str(snapshot.get("instructions") or str(getattr(skill, "instructions", "")))
+
+    tags = snapshot.get("tags")
+    if isinstance(tags, list):
+        skill.tags = [str(t).strip() for t in tags if str(t).strip()]
+
+    triggers = snapshot.get("triggers")
+    if isinstance(triggers, list):
+        skill.triggers = [str(t).strip() for t in triggers if str(t).strip()]
+
+    skill.examples = _examples_from_raw(snapshot.get("examples"))
+
+    files = dict(getattr(skill, "files", {}) or {})
+    skill_md = snapshot.get("skill_md")
+    if skill_md is not None:
+        files["SKILL.md"] = str(skill_md)
+    skill.files = files
+
+    md_saved = snapshot.get("metadata")
+    if isinstance(md_saved, dict):
+        current_history = _history_from_metadata(dict(getattr(skill, "metadata", {}) or {}))
+        new_md = dict(md_saved)
+        new_md[_HISTORY_KEY] = current_history
+        skill.metadata = new_md
+
+    src = snapshot.get("source")
+    skill.source = dict(src) if isinstance(src, dict) else None
 
 
 def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int = 200) -> None:
@@ -297,7 +426,6 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 if owner and owner != str(session.config.user_id or "").strip():
                     return _json_response(self, {"error": "skill does not belong to this session user"}, status=403)
 
-                from autoskill.models import SkillExample
                 from autoskill.skill_management.formats.agent_skill import (
                     parse_agent_skill_md,
                     upsert_skill_md_metadata,
@@ -348,6 +476,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                     md, skill_id=skill_id, name=name, description=description, version=version
                 )
 
+                history_size = _push_skill_snapshot(skill)
                 skill.name = name
                 skill.description = description
                 skill.instructions = instructions
@@ -376,6 +505,64 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                             "owner": skill.user_id,
                         },
                         "skill_md": md2,
+                        "history_count": int(history_size),
+                    },
+                )
+
+            if path == "/api/skill/rollback_prev":
+                sid = str(body.get("session_id") or "").strip()
+                skill_id = str(body.get("skill_id") or "").strip()
+                if not sid or not skill_id:
+                    return _json_response(self, {"error": "session_id and skill_id are required"}, status=400)
+
+                session = manager.get(sid)
+                if session is None:
+                    return _json_response(self, {"error": "unknown session_id"}, status=404)
+
+                skill = manager.sdk.get(skill_id)
+                if skill is None:
+                    return _json_response(self, {"error": "unknown skill_id"}, status=404)
+
+                owner = str(getattr(skill, "user_id", "") or "").strip()
+                if owner.startswith("library:"):
+                    return _json_response(self, {"error": "library skills are read-only"}, status=403)
+                if owner and owner != str(session.config.user_id or "").strip():
+                    return _json_response(self, {"error": "skill does not belong to this session user"}, status=403)
+
+                from autoskill.utils.time import now_iso
+
+                snapshot = _pop_skill_snapshot(skill)
+                if snapshot is None:
+                    return _json_response(self, {"error": "no previous version available"}, status=400)
+
+                _apply_snapshot(skill, snapshot)
+                skill.updated_at = now_iso()
+                skill.files = dict(skill.files or {})
+                skill_md = str(skill.files.get("SKILL.md") or "")
+
+                try:
+                    manager.sdk.store.upsert(skill, raw=asdict(skill))
+                except Exception as e:
+                    return _json_response(self, {"error": str(e)}, status=500)
+
+                history_count = len(_history_from_metadata(dict(skill.metadata or {})))
+                return _json_response(
+                    self,
+                    {
+                        "ok": True,
+                        "skill": {
+                            "id": skill.id,
+                            "name": skill.name,
+                            "description": skill.description,
+                            "version": skill.version,
+                            "owner": skill.user_id,
+                        },
+                        "skill_md": skill_md,
+                        "restored_from": {
+                            "version": str(snapshot.get("version") or ""),
+                            "updated_at": str(snapshot.get("updated_at") or ""),
+                        },
+                        "history_count": int(history_count),
                     },
                 )
 
