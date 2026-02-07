@@ -23,13 +23,20 @@
         <div class="topbar__meta">
           <span id="sessionBadge" class="badge">session: -</span>
           <span id="statusBadge" class="badge badge--ok">connected</span>
-          <button id="exportBtn" class="btn btn--ghost" type="button">Export JSON</button>
           <button id="helpBtn" class="btn btn--ghost" type="button">/help</button>
           <button id="clearBtn" class="btn btn--ghost" type="button">/clear</button>
         </div>
       </header>
 
       <main class="main">
+        <aside class="sessions-nav">
+          <div class="sessions-nav__header">
+            <div class="sessions-nav__title">SESSIONS</div>
+            <button id="newSessionBtn" class="btn btn--ghost btn--small" type="button">New</button>
+          </div>
+          <div id="sessionList" class="sessions-nav__list"></div>
+        </aside>
+
         <section class="chat">
           <div id="chatLog" class="chat__log"></div>
 
@@ -49,7 +56,7 @@
                     id="extractHintInput"
                     class="input input--hint"
                     type="text"
-                    placeholder="extract_now hint (optional)"
+                    placeholder="Skill requirements for extraction (optional)"
                   />
                   <button id="extractBtn" class="btn btn--ghost" type="button">Extract now</button>
                   <button id="sendBtn" class="btn btn--primary" type="button">Send</button>

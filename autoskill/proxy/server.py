@@ -437,7 +437,7 @@ class AutoSkillProxyConfig:
     history_turns: int = 10
     assistant_temperature: float = 0.2
     extract_enabled: bool = True
-    ingest_window: int = 8
+    ingest_window: int = 6
     max_bg_extract_jobs: int = 2
     proxy_api_key: Optional[str] = None
 
@@ -451,7 +451,7 @@ class AutoSkillProxyConfig:
         self.min_score = _safe_float(self.min_score, 0.4)
         self.top_k = max(1, int(self.top_k or 1))
         self.history_turns = max(1, int(self.history_turns or 10))
-        self.ingest_window = max(2, int(self.ingest_window or 8))
+        self.ingest_window = max(2, int(self.ingest_window or 6))
         self.max_bg_extract_jobs = max(1, int(self.max_bg_extract_jobs or 2))
         self.assistant_temperature = _safe_float(self.assistant_temperature, 0.2)
         key = str(self.proxy_api_key or "").strip()

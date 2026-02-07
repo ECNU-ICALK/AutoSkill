@@ -2,6 +2,8 @@
 
 const state = {
   sessionId: null,
+  sessionList: [],
+  sessionRuntime: Object.create(null),
   messages: [],
   lastResult: null,
   inFlight: false,
@@ -42,10 +44,245 @@ function cloneJsonSafe(v) {
   }
 }
 
+function makeEmptyTrace() {
+  return {
+    sessionStartedAt: Date.now(),
+    turns: [],
+    retrievalEvents: [],
+    extractionEvents: [],
+    configEvents: [],
+  };
+}
+
+function latestPayloadFromTrace(traceObj, primaryBucket, fallbackBucket, payloadKey) {
+  if (!traceObj || typeof traceObj !== "object") return null;
+  const arrRaw = traceObj[primaryBucket];
+  const arrAlt = traceObj[fallbackBucket];
+  const arr = Array.isArray(arrRaw) ? arrRaw : Array.isArray(arrAlt) ? arrAlt : [];
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    const ev = arr[i];
+    const payload = ev && typeof ev === "object" ? ev[payloadKey] : null;
+    if (payload && typeof payload === "object") {
+      return cloneJsonSafe(payload);
+    }
+  }
+  return null;
+}
+
 function setStatus(ok, text) {
   const badge = el("statusBadge");
   badge.textContent = text;
   badge.className = ok ? "badge badge--ok" : "badge badge--err";
+}
+
+function snapshotCurrentSessionRuntime() {
+  const sid = String(state.sessionId || "").trim();
+  if (!sid) return;
+  state.sessionRuntime[sid] = {
+    messages: cloneJsonSafe(state.messages) || [],
+    lastResult: cloneJsonSafe(state.lastResult),
+    extractionJobId: state.extractionJobId || null,
+    extractionStatus: state.extractionStatus || "",
+    extractionStartedAtMs: state.extractionStartedAtMs || null,
+    extractionFinishedAtMs: state.extractionFinishedAtMs || null,
+    editingSkillId: state.editingSkillId || null,
+    skillEditorDirty: !!state.skillEditorDirty,
+    turnSeq: Number(state.turnSeq || 0),
+    turnById: cloneJsonSafe(state.turnById) || {},
+    jobTurnMap: cloneJsonSafe(state.jobTurnMap) || {},
+    trace: cloneJsonSafe(state.trace) || makeEmptyTrace(),
+  };
+}
+
+function restoreSessionRuntime(sid, serverState, serverTrace = null) {
+  const key = String(sid || "").trim();
+  const snap = state.sessionRuntime[key];
+  _clearExtractionTimers();
+  if (snap && typeof snap === "object") {
+    state.messages = Array.isArray(snap.messages) ? snap.messages : [];
+    state.lastResult = snap.lastResult || null;
+    state.extractionJobId = snap.extractionJobId || null;
+    state.extractionStatus = snap.extractionStatus || "";
+    state.extractionStartedAtMs = snap.extractionStartedAtMs || null;
+    state.extractionFinishedAtMs = snap.extractionFinishedAtMs || null;
+    state.editingSkillId = snap.editingSkillId || null;
+    state.skillEditorDirty = !!snap.skillEditorDirty;
+    state.turnSeq = Number(snap.turnSeq || 0);
+    state.turnById = snap.turnById && typeof snap.turnById === "object" ? snap.turnById : Object.create(null);
+    state.jobTurnMap = snap.jobTurnMap && typeof snap.jobTurnMap === "object" ? snap.jobTurnMap : Object.create(null);
+    state.trace = snap.trace && typeof snap.trace === "object" ? snap.trace : makeEmptyTrace();
+  } else {
+    const traceFromServer = normalizeTraceForExport(serverTrace);
+    const msgs = Array.isArray(serverState?.messages) ? serverState.messages : [];
+    state.messages = msgs;
+    state.lastResult = cloneJsonSafe(traceFromServer?.lastResult) || null;
+    state.extractionJobId = null;
+    state.extractionStatus = "";
+    state.extractionStartedAtMs = null;
+    state.extractionFinishedAtMs = null;
+    state.editingSkillId = null;
+    state.skillEditorDirty = false;
+    state.turnSeq = 0;
+    state.turnById = Object.create(null);
+    state.jobTurnMap = Object.create(null);
+    state.trace = traceFromServer && typeof traceFromServer === "object" ? traceFromServer : makeEmptyTrace();
+    if (serverState?.config) rememberConfig(serverState.config, "session/state");
+  }
+  renderChat();
+  const latestRetrieval =
+    latestPayloadFromTrace(state.trace, "retrievalEvents", "retrieval_events", "retrieval") ||
+    (state.lastResult && state.lastResult.retrieval ? cloneJsonSafe(state.lastResult.retrieval) : null);
+  renderRetrieval(latestRetrieval);
+
+  const latestExtraction =
+    latestPayloadFromTrace(state.trace, "extractionEvents", "extraction_events", "extraction") ||
+    (state.lastResult && state.lastResult.extraction ? cloneJsonSafe(state.lastResult.extraction) : null);
+  if (latestExtraction) {
+    renderExtraction(latestExtraction);
+  } else {
+    const ts = state.extractionFinishedAtMs || state.extractionStartedAtMs || Date.now();
+    if (state.extractionStatus) {
+      renderExtraction({
+        trigger: "",
+        job_id: state.extractionJobId || "",
+        event_time: ts,
+        status: state.extractionStatus,
+        error: "",
+        upserted: [],
+        skill_mds: [],
+      });
+    } else {
+      renderExtraction(null);
+    }
+  }
+  if (serverState?.config) renderConfig(serverState.config);
+}
+
+function formatSessionTime(ms) {
+  if (!ms || !Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  return d.toLocaleTimeString([], { hour12: false });
+}
+
+function renderSessionList() {
+  const list = el("sessionList");
+  if (!list) return;
+  const rows = Array.isArray(state.sessionList) ? state.sessionList : [];
+  if (!rows.length) {
+    list.innerHTML = `<div class="muted">(no sessions)</div>`;
+    return;
+  }
+  const cur = String(state.sessionId || "").trim();
+  list.innerHTML = rows
+    .map((s) => {
+      const sid = String(s.id || "");
+      const active = sid && sid === cur;
+      const title = String(s.title || "New Chat");
+      const preview = String(s.preview || "");
+      const updated = formatSessionTime(Number(s.updated_at_ms || 0));
+      const count = Number(s.message_count || 0);
+      return `
+        <div class="session-item ${active ? "session-item--active" : ""}">
+          <button class="session-item__main" type="button" data-session-id="${escapeHtml(sid)}">
+            <div class="session-item__title">${escapeHtml(title)}</div>
+            <div class="session-item__meta">${escapeHtml(updated)} · ${count} msg</div>
+            <div class="session-item__preview">${escapeHtml(preview)}</div>
+          </button>
+          <div class="session-item__actions">
+            <button
+              class="session-item__action session-item__action--export"
+              type="button"
+              data-session-export-id="${escapeHtml(sid)}"
+              title="Export session JSON"
+              aria-label="Export session JSON"
+            >Export</button>
+            <button
+              class="session-item__action session-item__action--delete"
+              type="button"
+              data-session-delete-id="${escapeHtml(sid)}"
+              title="Delete session"
+              aria-label="Delete session"
+            >×</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function refreshSessionList() {
+  const out = await api("/api/session/list", {});
+  state.sessionList = Array.isArray(out?.sessions) ? out.sessions : [];
+  renderSessionList();
+}
+
+async function createNewSession(overrides) {
+  snapshotCurrentSessionRuntime();
+  const out = await api("/api/session/new", { config: overrides || {} });
+  const sid = String(out?.session_id || "").trim();
+  if (!sid) {
+    throw new Error("failed to create session");
+  }
+  state.sessionId = sid;
+  const serverState = out?.state || null;
+  state.sessionList = Array.isArray(out?.sessions) ? out.sessions : [];
+  restoreSessionRuntime(sid, serverState, out?.trace || null);
+  renderSessionList();
+  el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
+  return sid;
+}
+
+async function switchSession(sid) {
+  const nextId = String(sid || "").trim();
+  if (!nextId) return;
+  if (state.sessionId === nextId) return;
+
+  snapshotCurrentSessionRuntime();
+  const out = await api("/api/session/state", { session_id: nextId });
+  state.sessionId = nextId;
+  const serverState = out?.state || null;
+  restoreSessionRuntime(nextId, serverState, out?.trace || null);
+  state.sessionList = Array.isArray(out?.sessions) ? out.sessions : state.sessionList;
+  renderSessionList();
+  el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
+}
+
+async function deleteSession(sid) {
+  const targetId = String(sid || "").trim();
+  if (!targetId) return;
+  const row = (Array.isArray(state.sessionList) ? state.sessionList : []).find(
+    (s) => String(s?.id || "").trim() === targetId
+  );
+  const title = String(row?.title || "this session");
+  const ok = window.confirm(`Delete "${title}"? This cannot be undone.`);
+  if (!ok) return;
+
+  snapshotCurrentSessionRuntime();
+  const currentId = String(state.sessionId || "").trim();
+  const out = await api("/api/session/delete", { session_id: targetId });
+
+  delete state.sessionRuntime[targetId];
+  state.sessionList = Array.isArray(out?.sessions) ? out.sessions : [];
+
+  if (currentId !== targetId) {
+    renderSessionList();
+    return;
+  }
+
+  const nextId = String(out?.next_session_id || "").trim();
+  if (nextId) {
+    state.sessionId = nextId;
+    restoreSessionRuntime(nextId, out?.state || null, out?.trace || null);
+    renderSessionList();
+    el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
+    return;
+  }
+
+  state.sessionId = null;
+  restoreSessionRuntime("", { messages: [] });
+  renderSessionList();
+  el("sessionBadge").textContent = "session: -";
+  await createNewSession({});
 }
 
 function newTurn(text) {
@@ -534,9 +771,36 @@ function downloadJsonFile(fileName, payload) {
   URL.revokeObjectURL(url);
 }
 
-function collectExtractedSkillIds() {
+function normalizeTraceForExport(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      sessionStartedAt: null,
+      turns: [],
+      retrievalEvents: [],
+      extractionEvents: [],
+      configEvents: [],
+      lastResult: null,
+    };
+  }
+  const started =
+    raw.sessionStartedAt != null
+      ? raw.sessionStartedAt
+      : raw.session_started_at_ms != null
+      ? raw.session_started_at_ms
+      : null;
+  return {
+    sessionStartedAt: started,
+    turns: cloneJsonSafe(raw.turns) || [],
+    retrievalEvents: cloneJsonSafe(raw.retrievalEvents || raw.retrieval_events) || [],
+    extractionEvents: cloneJsonSafe(raw.extractionEvents || raw.extraction_events) || [],
+    configEvents: cloneJsonSafe(raw.configEvents || raw.config_events) || [],
+    lastResult: cloneJsonSafe(raw.lastResult != null ? raw.lastResult : raw.last_result),
+  };
+}
+
+function collectExtractedSkillIds(traceObj, lastResultObj) {
   const ids = new Set();
-  const events = Array.isArray(state.trace.extractionEvents) ? state.trace.extractionEvents : [];
+  const events = Array.isArray(traceObj?.extractionEvents) ? traceObj.extractionEvents : [];
   for (const ev of events) {
     const ex = ev && ev.extraction && typeof ev.extraction === "object" ? ev.extraction : null;
     if (!ex) continue;
@@ -551,22 +815,67 @@ function collectExtractedSkillIds() {
       if (id) ids.add(id);
     }
   }
+  const lastEx = lastResultObj?.extraction;
+  if (lastEx && typeof lastEx === "object") {
+    const upserted = Array.isArray(lastEx.upserted) ? lastEx.upserted : [];
+    for (const s of upserted) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+    const skillMds = Array.isArray(lastEx.skill_mds) ? lastEx.skill_mds : [];
+    for (const s of skillMds) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+  }
   return Array.from(ids);
 }
 
-async function exportSessionJson() {
-  const sid = await ensureSession();
+async function exportSessionJson(sessionId) {
+  const sidIn = String(sessionId || "").trim();
+  const sid = sidIn || (await ensureSession());
+  const runtime = state.sessionRuntime[sid];
+  const isCurrent = sid === String(state.sessionId || "").trim();
   let sessionState = null;
+  let sessionTraceRaw = null;
   let extractedSkillSnapshots = [];
   try {
     const out = await api("/api/session/state", { session_id: sid });
     sessionState = out?.state || null;
+    sessionTraceRaw = out?.trace || null;
   } catch (_e) {
     sessionState = null;
+    sessionTraceRaw = null;
   }
 
+  const traceForExport = isCurrent
+    ? normalizeTraceForExport(state.trace)
+    : runtime?.trace
+    ? normalizeTraceForExport(runtime.trace)
+    : normalizeTraceForExport(sessionTraceRaw);
+  const lastResultForExport = isCurrent
+    ? cloneJsonSafe(state.lastResult)
+    : runtime?.lastResult != null
+    ? cloneJsonSafe(runtime.lastResult)
+    : cloneJsonSafe(traceForExport.lastResult);
+  const uiStateForExport = isCurrent
+    ? {
+        extraction_job_id: state.extractionJobId || null,
+        extraction_status: state.extractionStatus || "",
+        extraction_started_at_ms: state.extractionStartedAtMs || null,
+        extraction_finished_at_ms: state.extractionFinishedAtMs || null,
+        editing_skill_id: state.editingSkillId || null,
+      }
+    : {
+        extraction_job_id: runtime?.extractionJobId || null,
+        extraction_status: runtime?.extractionStatus || "",
+        extraction_started_at_ms: runtime?.extractionStartedAtMs || null,
+        extraction_finished_at_ms: runtime?.extractionFinishedAtMs || null,
+        editing_skill_id: runtime?.editingSkillId || null,
+      };
+
   try {
-    const skillIds = collectExtractedSkillIds();
+    const skillIds = collectExtractedSkillIds(traceForExport, lastResultForExport);
     if (skillIds.length) {
       const out2 = await api("/api/skills/get_many", {
         session_id: sid,
@@ -581,26 +890,20 @@ async function exportSessionJson() {
   const payload = {
     exported_at: new Date().toISOString(),
     session_id: sid,
-    ui_state: {
-      extraction_job_id: state.extractionJobId || null,
-      extraction_status: state.extractionStatus || "",
-      extraction_started_at_ms: state.extractionStartedAtMs || null,
-      extraction_finished_at_ms: state.extractionFinishedAtMs || null,
-      editing_skill_id: state.editingSkillId || null,
-    },
+    ui_state: uiStateForExport,
     session_state: {
       config: cloneJsonSafe(sessionState?.config) || null,
       pending: !!sessionState?.pending,
-      messages: cloneJsonSafe(sessionState?.messages) || cloneJsonSafe(state.messages) || [],
+      messages: cloneJsonSafe(sessionState?.messages) || [],
     },
     process: {
-      trace_started_at_ms: state.trace.sessionStartedAt || null,
-      turns: cloneJsonSafe(state.trace.turns) || [],
-      retrieval_events: cloneJsonSafe(state.trace.retrievalEvents) || [],
-      extraction_events: cloneJsonSafe(state.trace.extractionEvents) || [],
+      trace_started_at_ms: traceForExport.sessionStartedAt || null,
+      turns: cloneJsonSafe(traceForExport.turns) || [],
+      retrieval_events: cloneJsonSafe(traceForExport.retrievalEvents) || [],
+      extraction_events: cloneJsonSafe(traceForExport.extractionEvents) || [],
       extracted_skill_snapshots: cloneJsonSafe(extractedSkillSnapshots) || [],
-      config_events: cloneJsonSafe(state.trace.configEvents) || [],
-      last_result: cloneJsonSafe(state.lastResult),
+      config_events: cloneJsonSafe(traceForExport.configEvents) || [],
+      last_result: cloneJsonSafe(lastResultForExport),
     },
   };
 
@@ -611,27 +914,15 @@ async function exportSessionJson() {
 
 async function ensureSession() {
   if (state.sessionId) return state.sessionId;
-  const out = await api("/api/session/new", {});
-  state.sessionId = out.session_id;
-  state.trace = {
-    sessionStartedAt: Date.now(),
-    turns: [],
-    retrievalEvents: [],
-    extractionEvents: [],
-    configEvents: [],
-  };
-  state.turnSeq = 0;
-  state.turnById = Object.create(null);
-  state.jobTurnMap = Object.create(null);
-  el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
+  await refreshSessionList();
+  if (Array.isArray(state.sessionList) && state.sessionList.length) {
+    await switchSession(state.sessionList[0].id);
+    setStatus(true, "connected");
+    return state.sessionId;
+  }
+  const sid = await createNewSession({});
   setStatus(true, "connected");
-
-  const msgs = Array.isArray(out?.state?.messages) ? out.state.messages : [];
-  state.messages = msgs;
-  renderChat();
-  renderConfig(out?.state?.config);
-  rememberConfig(out?.state?.config, "session/new");
-  return state.sessionId;
+  return sid;
 }
 
 async function pollSession() {
@@ -874,6 +1165,11 @@ async function sendText(text) {
     window.setTimeout(() => {
       pollSession();
     }, 900);
+    try {
+      await refreshSessionList();
+    } catch (_e) {
+      // Best-effort only.
+    }
 
     setStatus(true, "connected");
   } catch (e) {
@@ -952,11 +1248,57 @@ function bind() {
     await triggerSend("/clear");
   });
 
-  if (el("exportBtn")) {
-    el("exportBtn").addEventListener("click", async () => {
+  if (el("newSessionBtn")) {
+    el("newSessionBtn").addEventListener("click", async () => {
       if (state.inFlight) return;
       try {
-        await exportSessionJson();
+        await createNewSession({});
+        setStatus(true, "connected");
+      } catch (e) {
+        setStatus(false, String(e?.message || e));
+      }
+    });
+  }
+
+  if (el("sessionList")) {
+    el("sessionList").addEventListener("click", async (ev) => {
+      const exportBtn =
+        ev.target && ev.target.closest ? ev.target.closest("[data-session-export-id]") : null;
+      if (exportBtn) {
+        const sid = String(exportBtn.getAttribute("data-session-export-id") || "").trim();
+        if (!sid) return;
+        if (state.inFlight) return;
+        try {
+          await exportSessionJson(sid);
+        } catch (e) {
+          setStatus(false, String(e?.message || e));
+        }
+        return;
+      }
+
+      const deleteBtn =
+        ev.target && ev.target.closest ? ev.target.closest("[data-session-delete-id]") : null;
+      if (deleteBtn) {
+        const sid = String(deleteBtn.getAttribute("data-session-delete-id") || "").trim();
+        if (!sid) return;
+        if (state.inFlight) return;
+        try {
+          await deleteSession(sid);
+          setStatus(true, "connected");
+        } catch (e) {
+          setStatus(false, String(e?.message || e));
+        }
+        return;
+      }
+
+      const btn = ev.target && ev.target.closest ? ev.target.closest("[data-session-id]") : null;
+      if (!btn) return;
+      const sid = String(btn.getAttribute("data-session-id") || "").trim();
+      if (!sid) return;
+      if (state.inFlight) return;
+      try {
+        await switchSession(sid);
+        setStatus(true, "connected");
       } catch (e) {
         setStatus(false, String(e?.message || e));
       }

@@ -42,6 +42,7 @@ from .interactive_chat import (
 
 _HISTORY_KEY = "_autoskill_version_history"
 _HISTORY_LIMIT = 30
+_SESSION_DUMP_VERSION = 1
 
 
 def _examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
@@ -255,6 +256,331 @@ class _SessionManager:
 
         self._lock = threading.Lock()
         self._sessions: Dict[str, InteractiveSession] = {}
+        self._meta: Dict[str, Dict[str, Any]] = {}
+        self._trace: Dict[str, Dict[str, Any]] = {}
+
+        store_root = os.path.abspath(
+            os.path.expanduser(str(getattr(self.interactive_cfg, "store_dir", "") or "Skills"))
+        )
+        user_key = str(getattr(self.interactive_cfg, "user_id", "") or "u1").strip() or "u1"
+        self._persist_file = os.path.join(store_root, "web_sessions", f"{user_key}.json")
+        self._load_from_disk()
+
+    @staticmethod
+    def _now_ms() -> int:
+        import time
+
+        return int(time.time() * 1000)
+
+    @staticmethod
+    def _title_from_text(text: str, *, max_chars: int = 32) -> str:
+        s = " ".join(str(text or "").strip().split())
+        if not s:
+            return "New Chat"
+        chars = list(s)
+        if len(chars) <= max_chars:
+            return s
+        return "".join(chars[: max(3, max_chars - 3)]) + "..."
+
+    @staticmethod
+    def _session_preview(messages: List[Dict[str, Any]], *, max_chars: int = 120) -> str:
+        for m in reversed(messages or []):
+            content = str((m or {}).get("content") or "").strip()
+            if content:
+                s = " ".join(content.split())
+                if len(s) <= max_chars:
+                    return s
+                return s[: max(3, max_chars - 3)] + "..."
+        return ""
+
+    @staticmethod
+    def _default_trace() -> Dict[str, Any]:
+        return {
+            "version": 1,
+            "next_turn_seq": 1,
+            "turns": [],
+            "retrieval_events": [],
+            "extraction_events": [],
+            "config_events": [],
+            "last_result": None,
+        }
+
+    @staticmethod
+    def _clone(obj: Any) -> Any:
+        try:
+            return json.loads(json.dumps(obj, ensure_ascii=False))
+        except Exception:
+            return None
+
+    def _trace_for_locked(self, sid: str) -> Dict[str, Any]:
+        t = self._trace.get(sid)
+        if not isinstance(t, dict):
+            t = self._default_trace()
+            self._trace[sid] = t
+        return t
+
+    def _append_event_locked(self, sid: str, bucket: str, payload: Dict[str, Any]) -> None:
+        tr = self._trace_for_locked(sid)
+        arr = tr.get(bucket)
+        if not isinstance(arr, list):
+            arr = []
+            tr[bucket] = arr
+        arr.append(dict(payload or {}))
+
+    @staticmethod
+    def _trace_turn_id(seq: int) -> str:
+        return f"turn_{int(seq)}"
+
+    def _next_turn_id_locked(self, sid: str) -> str:
+        tr = self._trace_for_locked(sid)
+        seq_raw = tr.get("next_turn_seq")
+        try:
+            seq = int(seq_raw)
+        except Exception:
+            seq = 1
+        if seq < 1:
+            seq = 1
+        tr["next_turn_seq"] = seq + 1
+        return self._trace_turn_id(seq)
+
+    def _find_turn_locked(self, sid: str, turn_id: str) -> Optional[Dict[str, Any]]:
+        tr = self._trace_for_locked(sid)
+        turns = tr.get("turns")
+        if not isinstance(turns, list):
+            turns = []
+            tr["turns"] = turns
+        for item in reversed(turns):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id") or "").strip() == str(turn_id or "").strip():
+                return item
+        return None
+
+    def begin_turn(self, sid: str, *, user_text: str) -> Optional[str]:
+        key = str(sid or "").strip()
+        if not key:
+            return None
+        now = self._now_ms()
+        with self._lock:
+            if key not in self._sessions:
+                return None
+            turn_id = self._next_turn_id_locked(key)
+            tr = self._trace_for_locked(key)
+            turns = tr.get("turns")
+            if not isinstance(turns, list):
+                turns = []
+                tr["turns"] = turns
+            turns.append(
+                {
+                    "id": turn_id,
+                    "input": str(user_text or ""),
+                    "started_at_ms": now,
+                    "finished_at_ms": None,
+                    "kind": "unknown",
+                    "command": "",
+                    "chat_append": [],
+                    "retrieval": None,
+                    "extraction": None,
+                    "error": "",
+                }
+            )
+            return turn_id
+
+    def record_retrieval(self, sid: str, *, turn_id: Optional[str], retrieval: Any, source: str) -> None:
+        key = str(sid or "").strip()
+        if not key:
+            return
+        if not isinstance(retrieval, dict):
+            return
+        now = self._now_ms()
+        rec = self._clone(retrieval) or {}
+        with self._lock:
+            if key not in self._sessions:
+                return
+            self._append_event_locked(
+                key,
+                "retrieval_events",
+                {
+                    "event_time": now,
+                    "source": str(source or ""),
+                    "turn_id": (str(turn_id).strip() if turn_id else None),
+                    "retrieval": rec,
+                },
+            )
+            if turn_id:
+                turn = self._find_turn_locked(key, turn_id)
+                if turn is not None:
+                    turn["retrieval"] = rec
+
+    def record_extraction(self, sid: str, *, turn_id: Optional[str], extraction: Any, source: str) -> None:
+        key = str(sid or "").strip()
+        if not key:
+            return
+        if not isinstance(extraction, dict):
+            return
+        now = self._now_ms()
+        rec = self._clone(extraction) or {}
+        with self._lock:
+            if key not in self._sessions:
+                return
+            self._append_event_locked(
+                key,
+                "extraction_events",
+                {
+                    "event_time": now,
+                    "source": str(source or ""),
+                    "turn_id": (str(turn_id).strip() if turn_id else None),
+                    "extraction": rec,
+                },
+            )
+            if turn_id:
+                turn = self._find_turn_locked(key, turn_id)
+                if turn is not None:
+                    turn["extraction"] = rec
+
+    def complete_turn(self, sid: str, *, turn_id: Optional[str], result: Any, source: str) -> None:
+        key = str(sid or "").strip()
+        if not key:
+            return
+        if not isinstance(result, dict):
+            return
+        now = self._now_ms()
+        result_copy = self._clone(result) or {}
+        with self._lock:
+            if key not in self._sessions:
+                return
+            if turn_id:
+                turn = self._find_turn_locked(key, turn_id)
+                if turn is not None:
+                    turn["finished_at_ms"] = now
+                    turn["kind"] = str(result.get("kind") or "unknown")
+                    turn["command"] = str(result.get("command") or "")
+                    chat_append = result.get("chat_append")
+                    turn["chat_append"] = self._clone(chat_append) if isinstance(chat_append, list) else []
+                    turn["error"] = ""
+            tr = self._trace_for_locked(key)
+            tr["last_result"] = result_copy
+
+        # Record retrieval/extraction payloads from final result as well.
+        self.record_retrieval(key, turn_id=turn_id, retrieval=result.get("retrieval"), source=source)
+        self.record_extraction(key, turn_id=turn_id, extraction=result.get("extraction"), source=source)
+
+    def fail_turn(self, sid: str, *, turn_id: Optional[str], error: str) -> None:
+        key = str(sid or "").strip()
+        if not key:
+            return
+        now = self._now_ms()
+        msg = str(error or "").strip()
+        with self._lock:
+            if key not in self._sessions:
+                return
+            if turn_id:
+                turn = self._find_turn_locked(key, turn_id)
+                if turn is not None:
+                    turn["finished_at_ms"] = now
+                    turn["kind"] = "error"
+                    turn["command"] = ""
+                    turn["chat_append"] = []
+                    turn["error"] = msg
+            tr = self._trace_for_locked(key)
+            tr["last_result"] = {"kind": "error", "error": msg}
+
+    def _save_to_disk_locked(self) -> None:
+        try:
+            root_dir = os.path.dirname(self._persist_file)
+            os.makedirs(root_dir, exist_ok=True)
+            sessions_out: List[Dict[str, Any]] = []
+            for sid, session in self._sessions.items():
+                meta = dict(self._meta.get(sid) or {})
+                trace = self._clone(self._trace.get(sid) or self._default_trace()) or self._default_trace()
+                sessions_out.append(
+                    {
+                        "id": sid,
+                        "meta": meta,
+                        "state": session.state(),
+                        "trace": trace,
+                    }
+                )
+            payload = {
+                "version": _SESSION_DUMP_VERSION,
+                "user_id": str(getattr(self.interactive_cfg, "user_id", "") or "u1"),
+                "saved_at_ms": self._now_ms(),
+                "sessions": sessions_out,
+            }
+            tmp = self._persist_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            os.replace(tmp, self._persist_file)
+        except Exception:
+            return
+
+    def _load_from_disk(self) -> None:
+        path = str(self._persist_file or "")
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                obj = json.loads(f.read())
+        except Exception:
+            return
+        if not isinstance(obj, dict):
+            return
+        sessions = obj.get("sessions")
+        if not isinstance(sessions, list):
+            return
+
+        for item in sessions:
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("id") or "").strip() or str(uuid.uuid4())
+            state = item.get("state")
+            if not isinstance(state, dict):
+                state = {}
+            cfg_raw = state.get("config")
+            cfg = InteractiveConfig(**asdict(self.interactive_cfg)).normalize()
+            if isinstance(cfg_raw, dict):
+                for k, v in cfg_raw.items():
+                    if hasattr(cfg, k):
+                        setattr(cfg, k, v)
+                cfg = cfg.normalize()
+
+            session = InteractiveSession(
+                sdk=self.sdk,
+                config=cfg,
+                chat_llm=self.chat_llm,
+                query_rewriter=self.query_rewriter,
+                skill_selector=None,
+            )
+            msgs = state.get("messages")
+            if isinstance(msgs, list):
+                session.messages = [m for m in msgs if isinstance(m, dict)]
+
+            meta = item.get("meta")
+            if not isinstance(meta, dict):
+                meta = {}
+            now = self._now_ms()
+            title = str(meta.get("title") or "").strip() or "New Chat"
+            created_at_ms = int(meta.get("created_at_ms") or now)
+            updated_at_ms = int(meta.get("updated_at_ms") or now)
+
+            trace = item.get("trace")
+            if not isinstance(trace, dict):
+                trace = self._default_trace()
+            trace.setdefault("next_turn_seq", 1)
+            trace.setdefault("turns", [])
+            trace.setdefault("retrieval_events", [])
+            trace.setdefault("extraction_events", [])
+            trace.setdefault("config_events", [])
+            trace.setdefault("last_result", None)
+
+            self._sessions[sid] = session
+            self._meta[sid] = {
+                "id": sid,
+                "title": title,
+                "created_at_ms": created_at_ms,
+                "updated_at_ms": updated_at_ms,
+            }
+            self._trace[sid] = trace
 
     def new_session(self, *, overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, InteractiveSession]:
         overrides2 = dict(overrides or {})
@@ -273,8 +599,22 @@ class _SessionManager:
             query_rewriter=self.query_rewriter,
             skill_selector=None,
         )
+        now = self._now_ms()
         with self._lock:
             self._sessions[sid] = session
+            self._meta[sid] = {
+                "id": sid,
+                "title": "New Chat",
+                "created_at_ms": now,
+                "updated_at_ms": now,
+            }
+            self._trace[sid] = self._default_trace()
+            self._append_event_locked(
+                sid,
+                "config_events",
+                {"event_time": now, "source": "session/new", "config": asdict(cfg)},
+            )
+            self._save_to_disk_locked()
         return sid, session
 
     def get(self, sid: str) -> Optional[InteractiveSession]:
@@ -283,6 +623,87 @@ class _SessionManager:
             return None
         with self._lock:
             return self._sessions.get(key)
+
+    def get_trace(self, sid: str) -> Optional[Dict[str, Any]]:
+        key = str(sid or "").strip()
+        if not key:
+            return None
+        with self._lock:
+            if key not in self._sessions:
+                return None
+            trace = self._clone(self._trace.get(key) or self._default_trace())
+            if not isinstance(trace, dict):
+                return self._default_trace()
+            return trace
+
+    def touch(self, sid: str, *, user_text: Optional[str] = None) -> None:
+        key = str(sid or "").strip()
+        if not key:
+            return
+        now = self._now_ms()
+        with self._lock:
+            meta = self._meta.get(key)
+            if meta is None:
+                meta = {
+                    "id": key,
+                    "title": "New Chat",
+                    "created_at_ms": now,
+                    "updated_at_ms": now,
+                }
+                self._meta[key] = meta
+            meta["updated_at_ms"] = now
+            txt = str(user_text or "").strip()
+            if txt:
+                title = str(meta.get("title") or "").strip()
+                if not title or title == "New Chat":
+                    meta["title"] = self._title_from_text(txt)
+            self._save_to_disk_locked()
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            items: List[Dict[str, Any]] = []
+            for sid, session in self._sessions.items():
+                meta = dict(self._meta.get(sid) or {})
+                state = session.state()
+                msgs = list(state.get("messages") or [])
+                preview = self._session_preview(msgs)
+                title = str(meta.get("title") or "").strip() or self._title_from_text(preview)
+                items.append(
+                    {
+                        "id": sid,
+                        "title": title or "New Chat",
+                        "created_at_ms": int(meta.get("created_at_ms") or self._now_ms()),
+                        "updated_at_ms": int(meta.get("updated_at_ms") or self._now_ms()),
+                        "message_count": int(len(msgs)),
+                        "preview": preview,
+                    }
+                )
+        items.sort(key=lambda x: int(x.get("updated_at_ms") or 0), reverse=True)
+        return items
+
+    def delete_session(self, sid: str) -> Tuple[bool, Optional[str]]:
+        key = str(sid or "").strip()
+        if not key:
+            return False, None
+        with self._lock:
+            if key not in self._sessions:
+                return False, None
+            self._sessions.pop(key, None)
+            self._meta.pop(key, None)
+            self._trace.pop(key, None)
+
+            next_sid: Optional[str] = None
+            if self._sessions:
+                ranked: List[Tuple[int, str]] = []
+                for cur_sid in self._sessions.keys():
+                    meta = self._meta.get(cur_sid) or {}
+                    updated = int(meta.get("updated_at_ms") or 0)
+                    ranked.append((updated, str(cur_sid)))
+                ranked.sort(key=lambda x: x[0], reverse=True)
+                next_sid = ranked[0][1] if ranked else next(iter(self._sessions.keys()))
+
+            self._save_to_disk_locked()
+            return True, next_sid
 
 
 def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
@@ -355,14 +776,58 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 if overrides is not None and not isinstance(overrides, dict):
                     return _json_response(self, {"error": "config must be an object"}, status=400)
                 sid, session = manager.new_session(overrides=overrides)
-                return _json_response(self, {"session_id": sid, "state": session.state()})
+                return _json_response(
+                    self,
+                    {
+                        "session_id": sid,
+                        "state": session.state(),
+                        "trace": manager.get_trace(sid),
+                        "sessions": manager.list_sessions(),
+                    },
+                )
+
+            if path == "/api/session/list":
+                return _json_response(self, {"sessions": manager.list_sessions()})
+
+            if path == "/api/session/delete":
+                sid = str(body.get("session_id") or "").strip()
+                if not sid:
+                    return _json_response(self, {"error": "session_id is required"}, status=400)
+                deleted, next_sid = manager.delete_session(sid)
+                if not deleted:
+                    return _json_response(self, {"error": "unknown session_id"}, status=404)
+                next_state = None
+                next_trace = None
+                if next_sid:
+                    next_session = manager.get(next_sid)
+                    if next_session is not None:
+                        next_state = next_session.state()
+                        next_trace = manager.get_trace(next_sid)
+                return _json_response(
+                    self,
+                    {
+                        "deleted_session_id": sid,
+                        "next_session_id": next_sid,
+                        "state": next_state,
+                        "trace": next_trace,
+                        "sessions": manager.list_sessions(),
+                    },
+                )
 
             if path == "/api/session/state":
                 sid = str(body.get("session_id") or "").strip()
                 session = manager.get(sid)
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
-                return _json_response(self, {"session_id": sid, "state": session.state()})
+                return _json_response(
+                    self,
+                    {
+                        "session_id": sid,
+                        "state": session.state(),
+                        "trace": manager.get_trace(sid),
+                        "sessions": manager.list_sessions(),
+                    },
+                )
 
             if path == "/api/session/poll":
                 sid = str(body.get("session_id") or "").strip()
@@ -377,9 +842,15 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 session = manager.get(sid)
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
+                turn_id = manager.begin_turn(sid, user_text=text)
                 try:
+                    manager.touch(sid, user_text=text)
                     out = session.handle_input(text)
+                    manager.complete_turn(sid, turn_id=turn_id, result=out, source="input")
+                    # Persist again after generation so the latest assistant turn is not lost on refresh.
+                    manager.touch(sid)
                 except Exception as e:
+                    manager.fail_turn(sid, turn_id=turn_id, error=str(e))
                     return _json_response(self, {"error": str(e)}, status=500)
                 return _json_response(self, {"session_id": sid, "result": out})
 
@@ -389,18 +860,44 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 session = manager.get(sid)
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
+                turn_id = manager.begin_turn(sid, user_text=text)
                 try:
+                    manager.touch(sid, user_text=text)
                     self._start_ndjson()
                     self._write_ndjson({"type": "meta", "session_id": sid})
                     for ev in session.handle_input_stream(text):
                         if not isinstance(ev, dict):
                             continue
+                        ev_type = str(ev.get("type") or "").strip().lower()
+                        if ev_type == "retrieval":
+                            manager.record_retrieval(
+                                sid, turn_id=turn_id, retrieval=ev.get("retrieval"), source="stream"
+                            )
+                        elif ev_type == "extraction":
+                            manager.record_extraction(
+                                sid, turn_id=turn_id, extraction=ev.get("extraction"), source="stream"
+                            )
+                        elif ev_type == "result":
+                            manager.complete_turn(sid, turn_id=turn_id, result=ev.get("result"), source="stream")
                         self._write_ndjson(ev)
+                    # Persist after stream completes so refresh always sees the final turn.
+                    manager.touch(sid)
                 except BrokenPipeError:
+                    # Client disconnected; keep server-side conversation state persisted.
+                    try:
+                        manager.fail_turn(sid, turn_id=turn_id, error="client disconnected")
+                        manager.touch(sid)
+                    except Exception:
+                        pass
                     return
                 except Exception as e:
+                    manager.fail_turn(sid, turn_id=turn_id, error=str(e))
                     try:
                         self._write_ndjson({"type": "error", "error": str(e)})
+                    except Exception:
+                        pass
+                    try:
+                        manager.touch(sid)
                     except Exception:
                         pass
                 return
