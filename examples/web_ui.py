@@ -405,6 +405,51 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                         pass
                 return
 
+            if path == "/api/skills/get_many":
+                sid = str(body.get("session_id") or "").strip()
+                skill_ids_raw = body.get("skill_ids")
+                if not sid:
+                    return _json_response(self, {"error": "session_id is required"}, status=400)
+                if not isinstance(skill_ids_raw, list):
+                    return _json_response(self, {"error": "skill_ids must be an array"}, status=400)
+
+                session = manager.get(sid)
+                if session is None:
+                    return _json_response(self, {"error": "unknown session_id"}, status=404)
+
+                uid = str(session.config.user_id or "").strip()
+                out: List[Dict[str, Any]] = []
+                for item in skill_ids_raw[:500]:
+                    skill_id = str(item or "").strip()
+                    if not skill_id:
+                        continue
+                    skill = manager.sdk.get(skill_id)
+                    if skill is None:
+                        continue
+                    owner = str(getattr(skill, "user_id", "") or "").strip()
+                    # For export/debug purposes, allow current user's skills and shared library skills.
+                    if owner and not owner.startswith("library:") and owner != uid:
+                        continue
+                    md = manager.sdk.export_skill_md(skill_id) or ""
+                    out.append(
+                        {
+                            "id": str(skill.id),
+                            "name": str(skill.name),
+                            "description": str(skill.description),
+                            "version": str(skill.version),
+                            "owner": str(skill.user_id),
+                            "triggers": [str(t) for t in (skill.triggers or [])],
+                            "tags": [str(t) for t in (skill.tags or [])],
+                            "examples": _examples_to_raw(list(skill.examples or [])),
+                            "instructions": str(skill.instructions or ""),
+                            "skill_md": md,
+                            "created_at": str(skill.created_at or ""),
+                            "updated_at": str(skill.updated_at or ""),
+                            "metadata": dict(skill.metadata or {}),
+                        }
+                    )
+                return _json_response(self, {"skills": out})
+
             if path == "/api/skill/save_md":
                 sid = str(body.get("session_id") or "").strip()
                 skill_id = str(body.get("skill_id") or "").strip()

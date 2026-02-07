@@ -6,7 +6,7 @@ AutoSkill is a practical implementation of **Experience-driven Lifelong Learning
 It learns from real interaction experience (dialogue + behavior/events), automatically creates reusable Skills,
 and continuously evolves existing Skills through merge + version updates.
 
-Instead of storing raw memory fragments, AutoSkill stores **portable Agent Skills** (`SKILL.md` + optional resources)
+Instead of storing raw memory fragments, AutoSkill stores **portable Agent Skills** (`SKILL.md`)
 that can be retrieved and reused in future tasks and even migrated to other agent systems.
 
 ## 1. Start Here: Web UI
@@ -101,6 +101,8 @@ to generate outputs aligned with user expectations.
 - **Standards-compatible serving**: OpenAI-compatible proxy API lets existing clients use AutoSkill with no business-logic changes.
 
 ## 3. System Workflow
+
+![AutoSkill Framework](imgs/Framework.png)
 
 ### 3.1 Ingest and Evolve
 

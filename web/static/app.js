@@ -18,10 +18,28 @@ const state = {
   extractionRunningTimer: null,
   extractionElapsedTimer: null,
   retrievalPulseTimer: null,
+  turnSeq: 0,
+  turnById: Object.create(null),
+  jobTurnMap: Object.create(null),
+  trace: {
+    sessionStartedAt: Date.now(),
+    turns: [],
+    retrievalEvents: [],
+    extractionEvents: [],
+    configEvents: [],
+  },
 };
 
 function el(id) {
   return document.getElementById(id);
+}
+
+function cloneJsonSafe(v) {
+  try {
+    return JSON.parse(JSON.stringify(v == null ? null : v));
+  } catch (_e) {
+    return null;
+  }
 }
 
 function setStatus(ok, text) {
@@ -30,11 +48,98 @@ function setStatus(ok, text) {
   badge.className = ok ? "badge badge--ok" : "badge badge--err";
 }
 
+function newTurn(text) {
+  state.turnSeq += 1;
+  const id = `turn_${state.turnSeq}`;
+  const turn = {
+    id,
+    input: String(text || ""),
+    startedAt: Date.now(),
+    finishedAt: null,
+    kind: "unknown",
+    command: "",
+    chatAppend: [],
+    retrieval: null,
+    extraction: null,
+    error: "",
+  };
+  state.turnById[id] = turn;
+  state.trace.turns.push(turn);
+  return turn;
+}
+
+function getTurn(turnId) {
+  if (!turnId) return null;
+  return state.turnById[String(turnId)] || null;
+}
+
+function finishTurn(turnId, patch) {
+  const turn = getTurn(turnId);
+  if (!turn) return;
+  if (patch && typeof patch === "object") {
+    Object.assign(turn, patch);
+  }
+  if (!turn.finishedAt) turn.finishedAt = Date.now();
+}
+
+function rememberConfig(cfg, source) {
+  if (!cfg || typeof cfg !== "object") return;
+  state.trace.configEvents.push({
+    eventTime: Date.now(),
+    source: String(source || ""),
+    config: cloneJsonSafe(cfg),
+  });
+}
+
+function linkExtractionJobToTurn(jobId, turnId) {
+  const jid = String(jobId || "").trim();
+  if (!jid || !turnId) return;
+  state.jobTurnMap[jid] = String(turnId);
+}
+
+function recordRetrievalEvent(retrieval, source, turnId) {
+  if (!retrieval || typeof retrieval !== "object") return;
+  const event = {
+    eventTime: Date.now(),
+    source: String(source || ""),
+    turnId: turnId ? String(turnId) : null,
+    retrieval: cloneJsonSafe(retrieval),
+  };
+  state.trace.retrievalEvents.push(event);
+  const turn = getTurn(turnId);
+  if (turn) turn.retrieval = cloneJsonSafe(retrieval);
+}
+
+function recordExtractionEvent(extraction, source, turnIdHint) {
+  if (!extraction || typeof extraction !== "object") return;
+  const jobId = String(extraction.job_id || "").trim();
+  const mappedTurnId = jobId && state.jobTurnMap[jobId] ? state.jobTurnMap[jobId] : null;
+  const turnId = turnIdHint ? String(turnIdHint) : mappedTurnId;
+  if (jobId && turnId) linkExtractionJobToTurn(jobId, turnId);
+  const event = {
+    eventTime: Date.now(),
+    source: String(source || ""),
+    turnId: turnId || null,
+    extraction: cloneJsonSafe(extraction),
+  };
+  state.trace.extractionEvents.push(event);
+  const turn = getTurn(turnId);
+  if (turn) turn.extraction = cloneJsonSafe(extraction);
+}
+
 function escapeHtml(s) {
   return String(s || "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function truncateTextForDisplay(text, maxChars) {
+  const s = String(text || "");
+  const max = Math.max(1, Number(maxChars) || 1);
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  return `${chars.slice(0, Math.max(1, max - 3)).join("")}...`;
 }
 
 function renderChat() {
@@ -105,7 +210,10 @@ function formatHit(hit) {
 }
 
 function renderRetrieval(retrieval) {
-  el("origQuery").textContent = retrieval?.original_query || "";
+  const originalFull = String(retrieval?.original_query || "");
+  const originalShort = truncateTextForDisplay(originalFull, 50);
+  el("origQuery").textContent = originalShort;
+  el("origQuery").title = originalFull;
   el("rewrittenQuery").textContent = retrieval?.rewritten_query || "";
   el("searchQuery").textContent = retrieval?.search_query || "";
   const t = retrieval?.event_time ? _fmtTime(_toMs(retrieval.event_time)) : "";
@@ -405,10 +513,116 @@ async function api(path, body) {
   return json;
 }
 
+function _tsCompact() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(
+    d.getMinutes()
+  )}${pad(d.getSeconds())}`;
+}
+
+function downloadJsonFile(fileName, payload) {
+  const text = JSON.stringify(payload, null, 2);
+  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function collectExtractedSkillIds() {
+  const ids = new Set();
+  const events = Array.isArray(state.trace.extractionEvents) ? state.trace.extractionEvents : [];
+  for (const ev of events) {
+    const ex = ev && ev.extraction && typeof ev.extraction === "object" ? ev.extraction : null;
+    if (!ex) continue;
+    const upserted = Array.isArray(ex.upserted) ? ex.upserted : [];
+    for (const s of upserted) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+    const skillMds = Array.isArray(ex.skill_mds) ? ex.skill_mds : [];
+    for (const s of skillMds) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+  }
+  return Array.from(ids);
+}
+
+async function exportSessionJson() {
+  const sid = await ensureSession();
+  let sessionState = null;
+  let extractedSkillSnapshots = [];
+  try {
+    const out = await api("/api/session/state", { session_id: sid });
+    sessionState = out?.state || null;
+  } catch (_e) {
+    sessionState = null;
+  }
+
+  try {
+    const skillIds = collectExtractedSkillIds();
+    if (skillIds.length) {
+      const out2 = await api("/api/skills/get_many", {
+        session_id: sid,
+        skill_ids: skillIds,
+      });
+      extractedSkillSnapshots = Array.isArray(out2?.skills) ? out2.skills : [];
+    }
+  } catch (_e) {
+    extractedSkillSnapshots = [];
+  }
+
+  const payload = {
+    exported_at: new Date().toISOString(),
+    session_id: sid,
+    ui_state: {
+      extraction_job_id: state.extractionJobId || null,
+      extraction_status: state.extractionStatus || "",
+      extraction_started_at_ms: state.extractionStartedAtMs || null,
+      extraction_finished_at_ms: state.extractionFinishedAtMs || null,
+      editing_skill_id: state.editingSkillId || null,
+    },
+    session_state: {
+      config: cloneJsonSafe(sessionState?.config) || null,
+      pending: !!sessionState?.pending,
+      messages: cloneJsonSafe(sessionState?.messages) || cloneJsonSafe(state.messages) || [],
+    },
+    process: {
+      trace_started_at_ms: state.trace.sessionStartedAt || null,
+      turns: cloneJsonSafe(state.trace.turns) || [],
+      retrieval_events: cloneJsonSafe(state.trace.retrievalEvents) || [],
+      extraction_events: cloneJsonSafe(state.trace.extractionEvents) || [],
+      extracted_skill_snapshots: cloneJsonSafe(extractedSkillSnapshots) || [],
+      config_events: cloneJsonSafe(state.trace.configEvents) || [],
+      last_result: cloneJsonSafe(state.lastResult),
+    },
+  };
+
+  const fileName = `autoskill-session-${String(sid || "").slice(0, 8) || "local"}-${_tsCompact()}.json`;
+  downloadJsonFile(fileName, payload);
+  setStatus(true, "exported");
+}
+
 async function ensureSession() {
   if (state.sessionId) return state.sessionId;
   const out = await api("/api/session/new", {});
   state.sessionId = out.session_id;
+  state.trace = {
+    sessionStartedAt: Date.now(),
+    turns: [],
+    retrievalEvents: [],
+    extractionEvents: [],
+    configEvents: [],
+  };
+  state.turnSeq = 0;
+  state.turnById = Object.create(null);
+  state.jobTurnMap = Object.create(null);
   el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
   setStatus(true, "connected");
 
@@ -416,6 +630,7 @@ async function ensureSession() {
   state.messages = msgs;
   renderChat();
   renderConfig(out?.state?.config);
+  rememberConfig(out?.state?.config, "session/new");
   return state.sessionId;
 }
 
@@ -425,6 +640,9 @@ async function pollSession() {
     const out = await api("/api/session/poll", { session_id: state.sessionId });
     const events = out?.events?.extraction;
     if (Array.isArray(events) && events.length) {
+      for (const ev of events) {
+        recordExtractionEvent(ev, "poll", null);
+      }
       renderExtraction(events[events.length - 1]);
     }
   } catch (_e) {
@@ -491,7 +709,8 @@ async function apiStreamNdjson(path, body, onEvent) {
   }
 }
 
-function applySendResult(result, streamAssistantIndex) {
+function applySendResult(result, streamAssistantIndex, turnId) {
+  state.lastResult = cloneJsonSafe(result);
   const append = Array.isArray(result?.chat_append) ? result.chat_append : [];
   if (result?.kind === "command" && result?.command === "/clear") {
     state.messages = append.length ? append.slice() : [];
@@ -523,14 +742,37 @@ function applySendResult(result, streamAssistantIndex) {
     renderChat();
   }
 
-  if (result?.retrieval) renderRetrieval(result.retrieval);
-  if (result?.extraction) renderExtraction(result.extraction);
-  if (result?.config) renderConfig(result.config);
+  if (result?.retrieval) {
+    recordRetrievalEvent(result.retrieval, "result", turnId);
+    renderRetrieval(result.retrieval);
+  }
+  if (result?.extraction) {
+    recordExtractionEvent(result.extraction, "result", turnId);
+    const jid = String(result?.extraction?.job_id || "").trim();
+    if (jid) linkExtractionJobToTurn(jid, turnId);
+    renderExtraction(result.extraction);
+  }
+  if (result?.config) {
+    renderConfig(result.config);
+    rememberConfig(result.config, "result");
+  }
+
+  const patch = {
+    kind: String(result?.kind || "unknown"),
+    command: String(result?.command || ""),
+    chatAppend: cloneJsonSafe(append) || [],
+    retrieval: result?.retrieval ? cloneJsonSafe(result.retrieval) : null,
+    extraction: result?.extraction ? cloneJsonSafe(result.extraction) : null,
+    error: "",
+  };
+  finishTurn(turnId, patch);
 }
 
 async function sendText(text) {
   const sid = await ensureSession();
   if (state.inFlight) return;
+  const turn = newTurn(text);
+  const turnId = turn.id;
   state.inFlight = true;
 
   const sendBtn = el("sendBtn");
@@ -538,10 +780,12 @@ async function sendText(text) {
   const extractBtn = el("extractBtn");
   const helpBtn = el("helpBtn");
   const clearBtn = el("clearBtn");
+  const exportBtn = el("exportBtn");
   sendBtn.disabled = true;
   if (extractBtn) extractBtn.disabled = true;
   if (helpBtn) helpBtn.disabled = true;
   if (clearBtn) clearBtn.disabled = true;
+  if (exportBtn) exportBtn.disabled = true;
 
   // Optimistic UI: show the user message immediately + a typing indicator.
   state.messages.push({ role: "user", content: text });
@@ -584,12 +828,16 @@ async function sendText(text) {
           }
           if (t === "retrieval") {
             const payload = ev?.retrieval || null;
+            recordRetrievalEvent(payload, "stream", turnId);
             renderRetrieval(payload);
             pulseRetrievalCard();
             return;
           }
           if (t === "extraction") {
             const payload = ev?.extraction || null;
+            recordExtractionEvent(payload, "stream", turnId);
+            const jid = String(payload?.job_id || "").trim();
+            if (jid) linkExtractionJobToTurn(jid, turnId);
             renderExtraction(payload);
             return;
           }
@@ -619,7 +867,7 @@ async function sendText(text) {
     if (!result || typeof result !== "object") {
       throw new Error("Missing final result from stream.");
     }
-    applySendResult(result, streamAssistantIndex);
+    applySendResult(result, streamAssistantIndex, turnId);
     // Force a near-immediate extraction event sync after this turn so the right panel can
     // transition to completed/failed without waiting for the next timer tick.
     await pollSession();
@@ -636,12 +884,21 @@ async function sendText(text) {
     state.messages.push({ role: "system", content: `Error: ${String(e?.message || e)}` });
     renderChat();
     setStatus(false, String(e?.message || e));
+    finishTurn(turnId, {
+      kind: "error",
+      command: "",
+      chatAppend: [],
+      retrieval: null,
+      extraction: null,
+      error: String(e?.message || e),
+    });
   } finally {
     state.inFlight = false;
     sendBtn.disabled = false;
     if (extractBtn) extractBtn.disabled = false;
     if (helpBtn) helpBtn.disabled = false;
     if (clearBtn) clearBtn.disabled = false;
+    if (exportBtn) exportBtn.disabled = false;
     input.focus();
   }
 }
@@ -694,6 +951,17 @@ function bind() {
   el("clearBtn").addEventListener("click", async () => {
     await triggerSend("/clear");
   });
+
+  if (el("exportBtn")) {
+    el("exportBtn").addEventListener("click", async () => {
+      if (state.inFlight) return;
+      try {
+        await exportSessionJson();
+      } catch (e) {
+        setStatus(false, String(e?.message || e));
+      }
+    });
+  }
 
   el("extractBtn").addEventListener("click", async () => {
     const hint = el("extractHintInput")?.value || "";

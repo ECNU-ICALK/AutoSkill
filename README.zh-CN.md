@@ -100,6 +100,8 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 
 ## 3. 系统工作流
 
+![AutoSkill Framework](imgs/Framework.png)
+
 ### 3.1 学习与进化流程
 
 ```text
