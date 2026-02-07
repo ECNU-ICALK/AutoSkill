@@ -5,8 +5,6 @@
 AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身学习）** 的工程化实践。
 它从真实交互经验（对话 + 行为/事件）中学习，自动生成可复用技能，并通过合并与版本演进持续优化已有技能。
 
-与只保存原始记忆片段不同，AutoSkill 保存的是可迁移、可执行的 **Agent Skill 制品**（`SKILL.md` + 可选资源）。
-
 ![AutoSkill Framework](imgs/Framework.png)
 
 ## 1. 快速开始：Web UI
