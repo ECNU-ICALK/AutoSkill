@@ -429,26 +429,126 @@ class LocalSkillStore(SkillStore):
             scope_s = "library"
         uid = str(user_id or "").strip()
         with self._lock:
-            records: List[_Record] = []
-            for rec in self._records.values():
-                if rec.skill.status == SkillStatus.ARCHIVED:
-                    continue
-                if scope_s == "user":
-                    if rec.scope == "user" and rec.owner == uid:
-                        records.append(rec)
-                    continue
-                if scope_s == "library":
-                    if rec.scope == "library":
-                        records.append(rec)
-                    continue
-                if rec.scope == "user" and rec.owner == uid:
-                    records.append(rec)
-                    continue
-                if self._include_libraries and rec.scope == "library":
-                    records.append(rec)
+            records = self._collect_records_for_scope_locked(user_id=uid, scope=scope_s)
             if not records:
                 return 0
         return self._schedule_embed_records(records)
+
+    def vector_status(self, *, user_id: str, scope: str = "all") -> Dict[str, Any]:
+        """Returns vector index coverage for one user/scope view."""
+
+        scope_s = str(scope or "all").strip().lower()
+        if scope_s in {"common", "shared"}:
+            scope_s = "library"
+        uid = str(user_id or "").strip()
+
+        with self._lock:
+            records = self._collect_records_for_scope_locked(user_id=uid, scope=scope_s)
+            total = len(records)
+            if self._cache_vectors and self._index is not None:
+                indexed = sum(1 for r in records if self._index.has(r.skill.id))
+                dims = self._index.dims
+            else:
+                indexed = sum(1 for r in records if r.vector is not None)
+                dims = len(records[0].vector or []) if records and records[0].vector else None
+
+        with self._bg_embed_lock:
+            pending = sum(
+                1
+                for r in records
+                if str(getattr(r.skill, "id", "") or "").strip() in self._bg_embed_pending
+            )
+
+        return {
+            "scope": scope_s,
+            "user": uid,
+            "total_skills": int(total),
+            "indexed_skills": int(indexed),
+            "missing_skills": int(max(0, total - indexed)),
+            "pending_skills": int(pending),
+            "dims": (int(dims) if dims is not None else None),
+            "cache_dir": (self._vector_cache_dir if self._cache_vectors else ""),
+            "cache_enabled": bool(self._cache_vectors),
+        }
+
+    def rebuild_vectors(
+        self,
+        *,
+        user_id: str,
+        scope: str = "all",
+        force: bool = False,
+        blocking: bool = True,
+    ) -> int:
+        """
+        Rebuilds vectors for the given scope and returns affected record count.
+
+        - `force=False`: embeds only missing vectors.
+        - `force=True`: clears existing vectors first, then re-embeds.
+        """
+
+        scope_s = str(scope or "all").strip().lower()
+        if scope_s in {"common", "shared"}:
+            scope_s = "library"
+        uid = str(user_id or "").strip()
+
+        with self._lock:
+            records = self._collect_records_for_scope_locked(user_id=uid, scope=scope_s)
+            if not records:
+                return 0
+
+            if self._cache_vectors and self._index is not None:
+                if force:
+                    if scope_s == "all":
+                        self._index.reset(dims=None)
+                    else:
+                        for rec in records:
+                            self._index.delete(rec.skill.id)
+                    self._index.save()
+                missing = records if force else [r for r in records if not self._index.has(r.skill.id)]
+            else:
+                if force:
+                    for rec in records:
+                        rec.vector = None
+                missing = records if force else [r for r in records if r.vector is None]
+
+            if not missing:
+                return 0
+
+            if not blocking:
+                return int(self._schedule_embed_records(missing))
+
+            self._embed_missing_records(missing)
+            if self._cache_vectors and self._index is not None:
+                self._index.save()
+            return int(len(missing))
+
+    def _collect_records_for_scope_locked(self, *, user_id: str, scope: str) -> List[_Record]:
+        """
+        Collects records for a scope.
+
+        Must be called with `_lock` already held.
+        """
+
+        scope_s = str(scope or "all").strip().lower()
+        uid = str(user_id or "").strip()
+        out: List[_Record] = []
+        for rec in self._records.values():
+            if rec.skill.status == SkillStatus.ARCHIVED:
+                continue
+            if scope_s == "user":
+                if rec.scope == "user" and rec.owner == uid:
+                    out.append(rec)
+                continue
+            if scope_s == "library":
+                if rec.scope == "library":
+                    out.append(rec)
+                continue
+            if rec.scope == "user" and rec.owner == uid:
+                out.append(rec)
+                continue
+            if self._include_libraries and rec.scope == "library":
+                out.append(rec)
+        return out
 
     def _load_existing(self) -> None:
         """

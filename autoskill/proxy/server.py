@@ -9,14 +9,19 @@ Goals:
 
 from __future__ import annotations
 
+import base64
+import io
 import json
+import os
+import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ..client import AutoSkill
 from ..embeddings.base import EmbeddingModel
@@ -25,8 +30,16 @@ from ..interactive.rewriting import LLMQueryRewriter
 from ..interactive.selection import LLMSkillSelector
 from ..llm.base import LLM
 from ..llm.factory import build_llm
-from ..models import Skill
+from ..models import Skill, SkillExample
 from ..render import render_skills_context, select_skills_for_context
+from ..skill_management.formats.agent_skill import parse_agent_skill_md, upsert_skill_md_metadata
+from ..skill_management.stores.local import LocalSkillStore
+from ..utils.time import now_iso
+
+_HISTORY_KEY = "_autoskill_version_history"
+_HISTORY_LIMIT = 30
+_EXTRACT_EVENT_LIMIT = 200
+_EXTRACT_TERMINAL = {"completed", "failed"}
 
 
 def _content_to_text(content: Any) -> str:
@@ -93,6 +106,241 @@ def _normalize_messages(raw: Any) -> List[Dict[str, str]]:
             continue
         out.append({"role": role, "content": content})
     return out
+
+
+def _parse_bool(v: Any, *, default: bool = False) -> bool:
+    if v is None:
+        return bool(default)
+    s = str(v).strip().lower()
+    if not s:
+        return bool(default)
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def _q_first(qs: Dict[str, List[str]], key: str, default: str = "") -> str:
+    vals = qs.get(key) or []
+    if not vals:
+        return str(default or "")
+    return str(vals[0] or "")
+
+
+def _examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for ex in examples or []:
+        out.append(
+            {
+                "input": str(getattr(ex, "input", "") or ""),
+                "output": (str(getattr(ex, "output", "")) if getattr(ex, "output", None) is not None else None),
+                "notes": (str(getattr(ex, "notes", "")) if getattr(ex, "notes", None) is not None else None),
+            }
+        )
+    return out
+
+
+def _examples_from_raw(raw: Any) -> List[SkillExample]:
+    out: List[SkillExample] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:50]:
+        if not isinstance(item, dict):
+            continue
+        inp = str(item.get("input") or "").strip()
+        if not inp:
+            continue
+        out.append(
+            SkillExample(
+                input=inp,
+                output=(str(item.get("output")).strip() if item.get("output") else None),
+                notes=(str(item.get("notes")).strip() if item.get("notes") else None),
+            )
+        )
+    return out
+
+
+def _metadata_without_history(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    md = dict(metadata or {})
+    md.pop(_HISTORY_KEY, None)
+    return md
+
+
+def _make_skill_snapshot(skill: Skill) -> Dict[str, Any]:
+    files = dict(getattr(skill, "files", {}) or {})
+    return {
+        "version": str(getattr(skill, "version", "") or ""),
+        "name": str(getattr(skill, "name", "") or ""),
+        "description": str(getattr(skill, "description", "") or ""),
+        "instructions": str(getattr(skill, "instructions", "") or ""),
+        "tags": [str(t).strip() for t in (getattr(skill, "tags", []) or []) if str(t).strip()],
+        "triggers": [str(t).strip() for t in (getattr(skill, "triggers", []) or []) if str(t).strip()],
+        "examples": _examples_to_raw(list(getattr(skill, "examples", []) or [])),
+        "skill_md": str(files.get("SKILL.md") or ""),
+        "metadata": _metadata_without_history(dict(getattr(skill, "metadata", {}) or {})),
+        "source": dict(getattr(skill, "source", {}) or {}) if getattr(skill, "source", None) else None,
+        "updated_at": str(getattr(skill, "updated_at", "") or ""),
+    }
+
+
+def _history_from_metadata(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    hist = metadata.get(_HISTORY_KEY)
+    if not isinstance(hist, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in hist:
+        if isinstance(item, dict):
+            out.append(dict(item))
+    return out
+
+
+def _push_skill_snapshot(skill: Skill) -> int:
+    metadata = dict(getattr(skill, "metadata", {}) or {})
+    history = _history_from_metadata(metadata)
+    history.append(_make_skill_snapshot(skill))
+    if len(history) > int(_HISTORY_LIMIT):
+        history = history[-int(_HISTORY_LIMIT) :]
+    metadata[_HISTORY_KEY] = history
+    skill.metadata = metadata
+    return len(history)
+
+
+def _pop_skill_snapshot(skill: Skill) -> Optional[Dict[str, Any]]:
+    metadata = dict(getattr(skill, "metadata", {}) or {})
+    history = _history_from_metadata(metadata)
+    if not history:
+        return None
+    snapshot = dict(history[-1])
+    history = history[:-1]
+    metadata[_HISTORY_KEY] = history
+    skill.metadata = metadata
+    return snapshot
+
+
+def _apply_snapshot(skill: Skill, snapshot: Dict[str, Any]) -> None:
+    skill.version = str(snapshot.get("version") or str(getattr(skill, "version", "0.1.0")))
+    skill.name = str(snapshot.get("name") or str(getattr(skill, "name", "")))
+    skill.description = str(snapshot.get("description") or str(getattr(skill, "description", "")))
+    skill.instructions = str(snapshot.get("instructions") or str(getattr(skill, "instructions", "")))
+
+    tags = snapshot.get("tags")
+    if isinstance(tags, list):
+        skill.tags = [str(t).strip() for t in tags if str(t).strip()]
+
+    triggers = snapshot.get("triggers")
+    if isinstance(triggers, list):
+        skill.triggers = [str(t).strip() for t in triggers if str(t).strip()]
+
+    examples = snapshot.get("examples")
+    if isinstance(examples, list):
+        skill.examples = _examples_from_raw(examples)
+
+    files = dict(getattr(skill, "files", {}) or {})
+    skill_md = snapshot.get("skill_md")
+    if skill_md is not None:
+        files["SKILL.md"] = str(skill_md)
+    skill.files = files
+
+    md_saved = snapshot.get("metadata")
+    if isinstance(md_saved, dict):
+        current_history = _history_from_metadata(dict(getattr(skill, "metadata", {}) or {}))
+        new_md = dict(md_saved)
+        new_md[_HISTORY_KEY] = current_history
+        skill.metadata = new_md
+
+    src = snapshot.get("source")
+    if src is not None:
+        skill.source = dict(src) if isinstance(src, dict) else None
+
+
+def _is_library_skill(skill: Skill) -> bool:
+    owner = str(getattr(skill, "user_id", "") or "").strip().lower()
+    return owner.startswith("library:")
+
+
+def _skill_summary(skill: Skill) -> Dict[str, Any]:
+    return {
+        "id": str(skill.id),
+        "name": str(skill.name),
+        "description": str(skill.description),
+        "version": str(skill.version),
+        "owner": str(skill.user_id),
+        "tags": [str(t) for t in (skill.tags or [])],
+        "triggers": [str(t) for t in (skill.triggers or [])],
+        "updated_at": str(skill.updated_at or ""),
+    }
+
+
+def _skill_detail(skill: Skill, *, include_md: bool) -> Dict[str, Any]:
+    files = dict(skill.files or {})
+    out = {
+        **_skill_summary(skill),
+        "instructions": str(skill.instructions),
+        "examples": _examples_to_raw(list(skill.examples or [])),
+        "metadata": dict(skill.metadata or {}),
+        "source": (dict(skill.source or {}) if skill.source else None),
+    }
+    if include_md:
+        out["skill_md"] = str(files.get("SKILL.md") or "")
+    return out
+
+
+def _candidate_detail(candidate: Any) -> Dict[str, Any]:
+    return {
+        "name": str(getattr(candidate, "name", "") or ""),
+        "description": str(getattr(candidate, "description", "") or ""),
+        "instructions": str(getattr(candidate, "instructions", "") or ""),
+        "triggers": [str(t) for t in (getattr(candidate, "triggers", []) or []) if str(t).strip()],
+        "tags": [str(t) for t in (getattr(candidate, "tags", []) or []) if str(t).strip()],
+        "examples": _examples_to_raw(list(getattr(candidate, "examples", []) or [])),
+        "confidence": float(getattr(candidate, "confidence", 0.0) or 0.0),
+        "source": (dict(getattr(candidate, "source", {}) or {}) if getattr(candidate, "source", None) else None),
+    }
+
+
+def _skill_versions(skill: Skill) -> List[Dict[str, Any]]:
+    versions: List[Dict[str, Any]] = []
+    hist = _history_from_metadata(dict(skill.metadata or {}))
+    for item in hist:
+        versions.append(
+            {
+                "version": str(item.get("version") or ""),
+                "name": str(item.get("name") or ""),
+                "description": str(item.get("description") or ""),
+                "updated_at": str(item.get("updated_at") or ""),
+                "is_current": False,
+            }
+        )
+    versions.append(
+        {
+            "version": str(skill.version or ""),
+            "name": str(skill.name or ""),
+            "description": str(skill.description or ""),
+            "updated_at": str(skill.updated_at or ""),
+            "is_current": True,
+        }
+    )
+    return versions
+
+
+def _safe_extract_zip(zip_path: str, out_dir: str) -> None:
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            name = str(info.filename or "")
+            if not name or name.endswith("/") or "__MACOSX" in name:
+                continue
+            rel = os.path.normpath(name).replace("\\", "/")
+            if rel.startswith("../") or rel.startswith("/"):
+                continue
+            dst = os.path.join(out_dir, rel)
+            dst_abs = os.path.abspath(dst)
+            out_abs = os.path.abspath(out_dir) + os.sep
+            if not dst_abs.startswith(out_abs):
+                continue
+            os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
+            with zf.open(info, "r") as src, open(dst_abs, "wb") as out:
+                out.write(src.read())
 
 
 def _latest_user_query(messages: List[Dict[str, str]]) -> str:
@@ -220,6 +468,11 @@ class _PreparedChat:
     normalized_messages: List[Dict[str, str]]
     system_prompt: str
     user_prompt: str
+    latest_user_query: str
+    search_query: str
+    scope: str
+    retrieved_hits: List[Dict[str, Any]]
+    selected_skills: List[Dict[str, Any]]
     trigger: str
 
 
@@ -246,6 +499,9 @@ class AutoSkillProxyRuntime:
         self.config = (config or AutoSkillProxyConfig()).normalize()
         self.skill_selector = skill_selector
         self._extract_sema = threading.BoundedSemaphore(self.config.max_bg_extract_jobs)
+        self._extract_events_lock = threading.Lock()
+        self._extract_events_by_user: Dict[str, List[Dict[str, Any]]] = {}
+        self._extract_latest_by_job: Dict[str, Dict[str, Any]] = {}
 
         self._base_embeddings = build_embeddings(self.embeddings_config)
 
@@ -285,16 +541,29 @@ class AutoSkillProxyRuntime:
                 )
                 return False
 
+            def _read_body_safely(self) -> Dict[str, Any]:
+                try:
+                    return _read_json(self)
+                except Exception as e:
+                    _json_response(
+                        self,
+                        _openai_error(str(e), code="invalid_json"),
+                        status=400,
+                    )
+                    return {"_error": True}
+
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
+                qs = parse_qs(parsed.query or "", keep_blank_values=False)
 
                 if path == "/health" or path == "/api/health":
                     return _json_response(self, {"ok": True})
 
+                if path.startswith("/v1/") and not self._authorized():
+                    return
+
                 if path == "/v1/models":
-                    if not self._authorized():
-                        return
                     model = str(runtime.llm_config.get("model") or "autoskill-model")
                     payload = {
                         "object": "list",
@@ -309,6 +578,162 @@ class AutoSkillProxyRuntime:
                     }
                     return _json_response(self, payload)
 
+                if path in {"/openapi.json", "/v1/autoskill/openapi.json"}:
+                    return _json_response(self, runtime.openapi_spec())
+
+                if path == "/v1/autoskill/capabilities":
+                    return _json_response(self, runtime.capabilities())
+
+                if path == "/v1/autoskill/skills":
+                    user_id = runtime._resolve_user_id(body={}, headers=self.headers)
+                    user_q = _q_first(qs, "user", "")
+                    if user_q.strip():
+                        user_id = user_q.strip()
+                    limit = _safe_int(_q_first(qs, "limit", "200"), 200) or 200
+                    limit = max(1, min(1000, int(limit)))
+                    skills = runtime.sdk.list(user_id=user_id)[:limit]
+                    return _json_response(
+                        self,
+                        {
+                            "object": "list",
+                            "data": [_skill_summary(s) for s in skills],
+                            "user": user_id,
+                        },
+                    )
+
+                if path.startswith("/v1/autoskill/skills/"):
+                    skill_id, tail = runtime._parse_skill_path(path)
+                    if not skill_id:
+                        return _json_response(
+                            self,
+                            _openai_error("Invalid skill path", code="invalid_request"),
+                            status=400,
+                        )
+                    if tail in {"", "/"}:
+                        skill = runtime.sdk.get(skill_id)
+                        if skill is None:
+                            return _json_response(
+                                self,
+                                _openai_error("Skill not found", code="not_found"),
+                                status=404,
+                            )
+                        include_md = _parse_bool(_q_first(qs, "include_md", "0"), default=False)
+                        return _json_response(self, {"object": "skill", "data": _skill_detail(skill, include_md=include_md)})
+                    if tail == "/md":
+                        skill = runtime.sdk.get(skill_id)
+                        if skill is None:
+                            return _json_response(
+                                self,
+                                _openai_error("Skill not found", code="not_found"),
+                                status=404,
+                            )
+                        md = runtime.sdk.export_skill_md(skill_id) or ""
+                        return _json_response(
+                            self,
+                            {
+                                "object": "skill_md",
+                                "skill_id": skill_id,
+                                "name": skill.name,
+                                "version": skill.version,
+                                "skill_md": md,
+                            },
+                        )
+                    if tail == "/versions":
+                        skill = runtime.sdk.get(skill_id)
+                        if skill is None:
+                            return _json_response(
+                                self,
+                                _openai_error("Skill not found", code="not_found"),
+                                status=404,
+                            )
+                        return _json_response(
+                            self,
+                            {
+                                "object": "list",
+                                "skill_id": skill_id,
+                                "name": skill.name,
+                                "data": _skill_versions(skill),
+                            },
+                        )
+                    if tail == "/export":
+                        try:
+                            payload = runtime.export_skill_api(path=path, query=qs)
+                        except Exception as e:
+                            return _json_response(
+                                self,
+                                _openai_error(str(e), code="invalid_request"),
+                                status=400,
+                            )
+                        code = int(payload.pop("_status", 200))
+                        return _json_response(self, payload, status=code)
+
+                if path == "/v1/autoskill/vectors/status":
+                    user_id = runtime._resolve_user_id(body={}, headers=self.headers)
+                    user_q = _q_first(qs, "user", "")
+                    if user_q.strip():
+                        user_id = user_q.strip()
+                    scope = _normalize_scope(_q_first(qs, "scope", runtime._resolve_scope(headers=self.headers)))
+                    try:
+                        payload = runtime.vector_status_api(user_id=user_id, scope=scope)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+
+                if path == "/v1/autoskill/extractions/latest":
+                    user_id = runtime._resolve_user_id(body={}, headers=self.headers)
+                    user_q = _q_first(qs, "user", "")
+                    if user_q.strip():
+                        user_id = user_q.strip()
+                    ev = runtime._get_latest_extraction_event(user_id=user_id)
+                    return _json_response(self, {"object": "extraction_event", "data": ev})
+
+                if path == "/v1/autoskill/extractions":
+                    user_id = runtime._resolve_user_id(body={}, headers=self.headers)
+                    user_q = _q_first(qs, "user", "")
+                    if user_q.strip():
+                        user_id = user_q.strip()
+                    limit = _safe_int(_q_first(qs, "limit", "20"), 20) or 20
+                    limit = max(1, min(200, int(limit)))
+                    events = runtime._list_extraction_events(user_id=user_id, limit=limit)
+                    return _json_response(self, {"object": "list", "data": events})
+
+                if path.startswith("/v1/autoskill/extractions/"):
+                    rest = str(path.split("/v1/autoskill/extractions/", 1)[1] or "").strip().strip("/")
+                    if rest.endswith("/events"):
+                        job_id = str(rest[: -len("/events")] or "").strip().strip("/")
+                        if not job_id:
+                            return _json_response(
+                                self,
+                                _openai_error("Missing job_id", code="invalid_request"),
+                                status=400,
+                            )
+                        timeout_s = _safe_float(_q_first(qs, "timeout_s", "30"), 30.0)
+                        return runtime.stream_extraction_events(
+                            self,
+                            job_id=job_id,
+                            timeout_s=max(1.0, min(300.0, float(timeout_s))),
+                        )
+                    job_id = rest
+                    if not job_id:
+                        return _json_response(
+                            self,
+                            _openai_error("Missing job_id", code="invalid_request"),
+                            status=400,
+                        )
+                    ev = runtime._get_extraction_event_by_job(job_id=job_id)
+                    if ev is None:
+                        return _json_response(
+                            self,
+                            _openai_error("Extraction job not found", code="not_found"),
+                            status=404,
+                        )
+                    return _json_response(self, {"object": "extraction_event", "data": ev})
+
                 self.send_response(404)
                 self.end_headers()
 
@@ -317,14 +742,9 @@ class AutoSkillProxyRuntime:
                 path = parsed.path or "/"
                 if path.startswith("/v1/") and not self._authorized():
                     return
-                try:
-                    body = _read_json(self)
-                except Exception as e:
-                    return _json_response(
-                        self,
-                        _openai_error(str(e), code="invalid_json"),
-                        status=400,
-                    )
+                body = self._read_body_safely()
+                if body.get("_error"):
+                    return
 
                 if path == "/v1/chat/completions":
                     stream = bool(body.get("stream"))
@@ -339,10 +759,26 @@ class AutoSkillProxyRuntime:
                             _openai_error(str(e), code="invalid_request"),
                             status=400,
                         )
+                    extraction_job_id = runtime._schedule_extraction_job(
+                        user_id=prepared.user_id,
+                        messages=prepared.normalized_messages[-int(runtime.config.ingest_window) :],
+                        trigger=prepared.trigger,
+                    )
+                    ev = runtime._get_extraction_event_by_job(job_id=extraction_job_id)
+                    extraction_status = str((ev or {}).get("status") or "scheduled")
                     if stream:
-                        return runtime.stream_chat_completion(self, prepared=prepared)
+                        return runtime.stream_chat_completion(
+                            self,
+                            prepared=prepared,
+                            extraction_job_id=extraction_job_id,
+                            extraction_status=extraction_status,
+                        )
                     try:
-                        payload = runtime.complete_chat_completion(prepared=prepared)
+                        payload = runtime.complete_chat_completion(
+                            prepared=prepared,
+                            extraction_job_id=extraction_job_id,
+                            extraction_status=extraction_status,
+                        )
                     except Exception as e:
                         return _json_response(
                             self,
@@ -362,6 +798,133 @@ class AutoSkillProxyRuntime:
                         )
                     return _json_response(self, payload)
 
+                if path == "/v1/autoskill/skills/search":
+                    try:
+                        payload = runtime.search_skills_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                    )
+                    return _json_response(self, payload)
+
+                if path == "/v1/autoskill/retrieval/preview":
+                    try:
+                        payload = runtime.retrieval_preview_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    return _json_response(self, payload)
+
+                if path == "/v1/autoskill/extractions":
+                    try:
+                        payload = runtime.extract_now_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                    )
+                    return _json_response(self, payload)
+
+                if path == "/v1/autoskill/extractions/simulate":
+                    try:
+                        payload = runtime.simulate_extraction_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    return _json_response(self, payload)
+
+                if path == "/v1/autoskill/skills/import":
+                    try:
+                        payload = runtime.import_skills_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+
+                if path.startswith("/v1/autoskill/skills/") and path.endswith("/rollback"):
+                    try:
+                        payload = runtime.rollback_skill_api(path=path, body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+
+                if path == "/v1/autoskill/vectors/rebuild":
+                    try:
+                        payload = runtime.vector_rebuild_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+
+                return _json_response(
+                    self,
+                    _openai_error("Unknown endpoint", code="not_found"),
+                    status=404,
+                )
+
+            def do_PUT(self) -> None:  # noqa: N802
+                parsed = urlparse(self.path or "/")
+                path = parsed.path or "/"
+                if path.startswith("/v1/") and not self._authorized():
+                    return
+                body = self._read_body_safely()
+                if body.get("_error"):
+                    return
+                if path.startswith("/v1/autoskill/skills/") and path.endswith("/md"):
+                    try:
+                        payload = runtime.save_skill_md_api(path=path, body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+                return _json_response(
+                    self,
+                    _openai_error("Unknown endpoint", code="not_found"),
+                    status=404,
+                )
+
+            def do_DELETE(self) -> None:  # noqa: N802
+                parsed = urlparse(self.path or "/")
+                path = parsed.path or "/"
+                if path.startswith("/v1/") and not self._authorized():
+                    return
+                if path.startswith("/v1/autoskill/skills/"):
+                    try:
+                        payload = runtime.delete_skill_api(path=path, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
                 return _json_response(
                     self,
                     _openai_error("Unknown endpoint", code="not_found"),
@@ -374,25 +937,102 @@ class AutoSkillProxyRuntime:
         handler = self.make_handler()
         return ThreadingHTTPServer((str(host), int(port)), handler)
 
-    def prepare_chat(
+    def capabilities(self) -> Dict[str, Any]:
+        return {
+            "object": "autoskill.capabilities",
+            "data": {
+                "chat": {"path": "/v1/chat/completions", "stream": True},
+                "embeddings": {"path": "/v1/embeddings"},
+                "skills": {
+                    "list": "/v1/autoskill/skills",
+                    "get": "/v1/autoskill/skills/{skill_id}",
+                    "get_md": "/v1/autoskill/skills/{skill_id}/md",
+                    "save_md": "/v1/autoskill/skills/{skill_id}/md",
+                    "delete": "/v1/autoskill/skills/{skill_id}",
+                    "rollback": "/v1/autoskill/skills/{skill_id}/rollback",
+                    "versions": "/v1/autoskill/skills/{skill_id}/versions",
+                    "export": "/v1/autoskill/skills/{skill_id}/export",
+                    "search": "/v1/autoskill/skills/search",
+                    "import": "/v1/autoskill/skills/import",
+                },
+                "retrieval": {"preview": "/v1/autoskill/retrieval/preview"},
+                "extractions": {
+                    "extract_now": "/v1/autoskill/extractions",
+                    "simulate": "/v1/autoskill/extractions/simulate",
+                    "latest": "/v1/autoskill/extractions/latest",
+                    "list": "/v1/autoskill/extractions",
+                    "get": "/v1/autoskill/extractions/{job_id}",
+                    "events_stream": "/v1/autoskill/extractions/{job_id}/events",
+                },
+                "vectors": {
+                    "status": "/v1/autoskill/vectors/status",
+                    "rebuild": "/v1/autoskill/vectors/rebuild",
+                },
+                "meta": {
+                    "capabilities": "/v1/autoskill/capabilities",
+                    "openapi": "/v1/autoskill/openapi.json",
+                },
+            },
+        }
+
+    def openapi_spec(self) -> Dict[str, Any]:
+        return {
+            "openapi": "3.1.0",
+            "info": {
+                "title": "AutoSkill Proxy API",
+                "version": "0.2.0",
+                "description": "OpenAI-compatible proxy with skill retrieval/evolution management APIs.",
+            },
+            "paths": {
+                "/v1/chat/completions": {"post": {"summary": "OpenAI-compatible chat"}},
+                "/v1/embeddings": {"post": {"summary": "OpenAI-compatible embeddings"}},
+                "/v1/models": {"get": {"summary": "List models"}},
+                "/v1/autoskill/capabilities": {"get": {"summary": "Discover supported APIs"}},
+                "/v1/autoskill/openapi.json": {"get": {"summary": "OpenAPI schema"}},
+                "/v1/autoskill/skills": {"get": {"summary": "List user skills"}},
+                "/v1/autoskill/skills/{skill_id}": {
+                    "get": {"summary": "Get one skill"},
+                    "delete": {"summary": "Delete one skill"},
+                },
+                "/v1/autoskill/skills/{skill_id}/md": {
+                    "get": {"summary": "Get SKILL.md"},
+                    "put": {"summary": "Update SKILL.md"},
+                },
+                "/v1/autoskill/skills/{skill_id}/rollback": {
+                    "post": {"summary": "Rollback to previous version"},
+                },
+                "/v1/autoskill/skills/{skill_id}/versions": {"get": {"summary": "List version timeline"}},
+                "/v1/autoskill/skills/{skill_id}/export": {"get": {"summary": "Export one skill"}},
+                "/v1/autoskill/skills/search": {"post": {"summary": "Search skills"}},
+                "/v1/autoskill/skills/import": {"post": {"summary": "Import Agent Skills"}},
+                "/v1/autoskill/retrieval/preview": {"post": {"summary": "Preview retrieval pipeline"}},
+                "/v1/autoskill/extractions": {
+                    "get": {"summary": "List extraction events"},
+                    "post": {"summary": "Trigger extraction now"},
+                },
+                "/v1/autoskill/extractions/latest": {"get": {"summary": "Get latest extraction event"}},
+                "/v1/autoskill/extractions/{job_id}": {"get": {"summary": "Get extraction event by job"}},
+                "/v1/autoskill/extractions/{job_id}/events": {
+                    "get": {"summary": "SSE stream of extraction updates"},
+                },
+                "/v1/autoskill/extractions/simulate": {"post": {"summary": "Dry-run extraction"}},
+                "/v1/autoskill/vectors/status": {"get": {"summary": "Vector index status"}},
+                "/v1/autoskill/vectors/rebuild": {"post": {"summary": "Rebuild vector index"}},
+            },
+        }
+
+    def _retrieve_context(
         self,
         *,
-        body: Dict[str, Any],
-        headers: Any,
-    ) -> _PreparedChat:
-        messages = _normalize_messages(body.get("messages"))
-        if not messages:
-            raise ValueError("messages is required and must contain text messages")
-
-        model = str(body.get("model") or self.llm_config.get("model") or "autoskill-model")
-        temperature = _safe_float(body.get("temperature"), self.config.assistant_temperature)
-        max_tokens = _safe_int(body.get("max_tokens"), None)
-
-        user_id = self._resolve_user_id(body=body, headers=headers)
-        scope = self._resolve_scope(headers=headers)
-
+        messages: List[Dict[str, str]],
+        user_id: str,
+        scope: str,
+        limit: Optional[int] = None,
+        min_score: Optional[float] = None,
+    ) -> Dict[str, Any]:
         latest_user = _latest_user_query(messages)
         search_query = latest_user
+        rewritten_query = ""
         if (
             self.query_rewriter is not None
             and self.config.rewrite_mode in {"always", "auto"}
@@ -403,17 +1043,29 @@ class AutoSkillProxyRuntime:
             except Exception:
                 rewritten = ""
             if rewritten and rewritten.strip():
-                search_query = rewritten.strip()
+                rewritten_query = rewritten.strip()
+                search_query = rewritten_query
 
+        lim = max(1, int(limit or self.config.top_k))
         hits = self.sdk.search(
             search_query,
             user_id=user_id,
-            limit=max(1, int(self.config.top_k)),
+            limit=lim,
             filters={"scope": scope, "allow_partial_vectors": False},
         )
-        min_score = float(self.config.min_score or 0.0)
-        if hits and min_score > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        min_score_v = float(self.config.min_score if min_score is None else min_score)
+        if hits and min_score_v > 0:
+            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score_v]
+
+        retrieval_hits: List[Dict[str, Any]] = []
+        for idx, h in enumerate(hits, start=1):
+            retrieval_hits.append(
+                {
+                    "rank": int(idx),
+                    "score": float(getattr(h, "score", 0.0) or 0.0),
+                    "skill": _skill_summary(h.skill),
+                }
+            )
 
         skills_for_use = [h.skill for h in hits]
         if self.skill_selector is not None and skills_for_use:
@@ -443,9 +1095,45 @@ class AutoSkillProxyRuntime:
             else ""
         )
 
+        return {
+            "latest_user_query": latest_user,
+            "search_query": search_query,
+            "rewritten_query": rewritten_query,
+            "scope": scope,
+            "hits": retrieval_hits,
+            "selected_skills": selected,
+            "selected_summaries": [_skill_summary(s) for s in selected],
+            "context": context,
+        }
+
+    def prepare_chat(
+        self,
+        *,
+        body: Dict[str, Any],
+        headers: Any,
+    ) -> _PreparedChat:
+        messages = _normalize_messages(body.get("messages"))
+        if not messages:
+            raise ValueError("messages is required and must contain text messages")
+
+        model = str(body.get("model") or self.llm_config.get("model") or "autoskill-model")
+        temperature = _safe_float(body.get("temperature"), self.config.assistant_temperature)
+        max_tokens = _safe_int(body.get("max_tokens"), None)
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        scope = self._resolve_scope(headers=headers)
+        retrieval = self._retrieve_context(
+            messages=messages,
+            user_id=user_id,
+            scope=scope,
+            limit=self.config.top_k,
+            min_score=self.config.min_score,
+        )
+        use_skills = bool(retrieval["selected_skills"])
+
         system_prompt, user_prompt = self._build_assistant_inputs(
             messages=messages,
-            context=context,
+            context=str(retrieval["context"] or ""),
             use_skills=use_skills,
         )
 
@@ -457,10 +1145,21 @@ class AutoSkillProxyRuntime:
             normalized_messages=messages,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            latest_user_query=str(retrieval["latest_user_query"] or ""),
+            search_query=str(retrieval["search_query"] or ""),
+            scope=str(retrieval["scope"] or scope),
+            retrieved_hits=list(retrieval["hits"] or []),
+            selected_skills=list(retrieval["selected_summaries"] or []),
             trigger="proxy_chat_completion",
         )
 
-    def complete_chat_completion(self, *, prepared: _PreparedChat) -> Dict[str, Any]:
+    def complete_chat_completion(
+        self,
+        *,
+        prepared: _PreparedChat,
+        extraction_job_id: Optional[str] = None,
+        extraction_status: str = "scheduled",
+    ) -> Dict[str, Any]:
         chat_llm = self._build_chat_llm(
             model=prepared.model,
             max_tokens=prepared.max_tokens,
@@ -473,13 +1172,6 @@ class AutoSkillProxyRuntime:
         content = str(text or "").strip()
         if not content:
             content = "(empty response)"
-
-        self._schedule_background_extraction(
-            user_id=prepared.user_id,
-            messages=prepared.normalized_messages,
-            assistant_text=content,
-            trigger=prepared.trigger,
-        )
 
         created = int(time.time())
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -500,6 +1192,19 @@ class AutoSkillProxyRuntime:
                 "completion_tokens": 0,
                 "total_tokens": 0,
             },
+            "autoskill": {
+                "retrieval": {
+                    "query": prepared.latest_user_query,
+                    "search_query": prepared.search_query,
+                    "scope": prepared.scope,
+                    "hits": prepared.retrieved_hits,
+                    "selected_skills": prepared.selected_skills,
+                },
+                "extraction": {
+                    "job_id": extraction_job_id,
+                    "status": str(extraction_status or ("scheduled" if extraction_job_id else "disabled")),
+                },
+            },
         }
 
     def stream_chat_completion(
@@ -507,6 +1212,8 @@ class AutoSkillProxyRuntime:
         handler: BaseHTTPRequestHandler,
         *,
         prepared: _PreparedChat,
+        extraction_job_id: Optional[str] = None,
+        extraction_status: str = "scheduled",
     ) -> None:
         created = int(time.time())
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -533,6 +1240,19 @@ class AutoSkillProxyRuntime:
                 "created": created,
                 "model": prepared.model,
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                "autoskill": {
+                    "retrieval": {
+                        "query": prepared.latest_user_query,
+                        "search_query": prepared.search_query,
+                        "scope": prepared.scope,
+                        "hits": prepared.retrieved_hits,
+                        "selected_skills": prepared.selected_skills,
+                    },
+                    "extraction": {
+                        "job_id": extraction_job_id,
+                        "status": str(extraction_status or ("scheduled" if extraction_job_id else "disabled")),
+                    },
+                },
             }
             _send(role_chunk)
 
@@ -541,7 +1261,6 @@ class AutoSkillProxyRuntime:
                 max_tokens=prepared.max_tokens,
             )
 
-            parts: List[str] = []
             for chunk in chat_llm.stream_complete(
                 system=prepared.system_prompt,
                 user=prepared.user_prompt,
@@ -550,7 +1269,6 @@ class AutoSkillProxyRuntime:
                 s = str(chunk or "")
                 if not s:
                     continue
-                parts.append(s)
                 _send(
                     {
                         "id": completion_id,
@@ -571,16 +1289,6 @@ class AutoSkillProxyRuntime:
                 }
             )
             _done()
-
-            assistant_text = "".join(parts).strip()
-            if not assistant_text:
-                assistant_text = "(empty response)"
-            self._schedule_background_extraction(
-                user_id=prepared.user_id,
-                messages=prepared.normalized_messages,
-                assistant_text=assistant_text,
-                trigger=prepared.trigger,
-            )
         except BrokenPipeError:
             return
         except Exception as e:
@@ -617,6 +1325,623 @@ class AutoSkillProxyRuntime:
             "model": model,
             "usage": {"prompt_tokens": 0, "total_tokens": 0},
         }
+
+    def search_skills_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        query = str(body.get("query") or body.get("q") or "").strip()
+        if not query:
+            raise ValueError("query is required")
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        scope_raw = str(body.get("scope") or "").strip()
+        scope = _normalize_scope(scope_raw) if scope_raw else self._resolve_scope(headers=headers)
+        limit = _safe_int(body.get("limit"), self.config.top_k) or self.config.top_k
+        limit = max(1, min(200, int(limit)))
+        min_score = _safe_float(body.get("min_score"), self.config.min_score)
+
+        hits = self.sdk.search(
+            query,
+            user_id=user_id,
+            limit=limit,
+            filters={"scope": scope, "allow_partial_vectors": False},
+        )
+        if hits and min_score > 0:
+            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+
+        data: List[Dict[str, Any]] = []
+        for i, h in enumerate(hits, start=1):
+            rec = {
+                "rank": int(i),
+                "score": float(getattr(h, "score", 0.0) or 0.0),
+                "skill": _skill_summary(h.skill),
+            }
+            data.append(rec)
+        return {
+            "object": "list",
+            "query": query,
+            "user": user_id,
+            "scope": scope,
+            "data": data,
+        }
+
+    def retrieval_preview_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        messages = _normalize_messages(body.get("messages"))
+        query = str(body.get("query") or body.get("q") or "").strip()
+        if not messages and query:
+            messages = [{"role": "user", "content": query}]
+        if not messages:
+            raise ValueError("messages or query is required")
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        scope_raw = str(body.get("scope") or "").strip()
+        scope = _normalize_scope(scope_raw) if scope_raw else self._resolve_scope(headers=headers)
+        limit = _safe_int(body.get("limit"), self.config.top_k) or self.config.top_k
+        min_score = _safe_float(body.get("min_score"), self.config.min_score)
+
+        retrieval = self._retrieve_context(
+            messages=messages,
+            user_id=user_id,
+            scope=scope,
+            limit=limit,
+            min_score=min_score,
+        )
+        return {
+            "object": "retrieval_preview",
+            "user": user_id,
+            "scope": scope,
+            "query": retrieval["latest_user_query"],
+            "search_query": retrieval["search_query"],
+            "rewritten_query": retrieval["rewritten_query"],
+            "hits": retrieval["hits"],
+            "selected_skills": retrieval["selected_summaries"],
+            "context": retrieval["context"],
+        }
+
+    def extract_now_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        messages = _normalize_messages(body.get("messages"))
+        query = str(body.get("query") or "").strip()
+        if not messages and query:
+            messages = [{"role": "user", "content": query}]
+        if not messages:
+            raise ValueError("messages or query is required")
+        hint_raw = body.get("hint")
+        hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
+
+        job_id = self._schedule_extraction_job(
+            user_id=user_id,
+            messages=messages[-int(self.config.ingest_window) :],
+            trigger="proxy_extract_now",
+            hint=hint,
+        )
+        ev = self._get_extraction_event_by_job(job_id=job_id)
+        return {
+            "object": "extraction_event",
+            "data": ev,
+        }
+
+    def simulate_extraction_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        messages = _normalize_messages(body.get("messages"))
+        query = str(body.get("query") or "").strip()
+        if not messages and query:
+            messages = [{"role": "user", "content": query}]
+        if not messages:
+            raise ValueError("messages or query is required")
+        hint_raw = body.get("hint")
+        hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
+
+        max_candidates = max(0, min(1, int(self.sdk.config.max_candidates_per_ingest)))
+        extracted = self.sdk.extractor.extract(
+            user_id=user_id,
+            messages=messages[-int(self.config.ingest_window) :],
+            events=None,
+            max_candidates=max_candidates,
+            hint=hint,
+        )
+        return {
+            "object": "extraction_simulation",
+            "user": user_id,
+            "count": len(extracted or []),
+            "skills": [_candidate_detail(s) for s in (extracted or [])],
+        }
+
+    def save_skill_md_api(self, *, path: str, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        skill_id, tail = self._parse_skill_path(path)
+        if not skill_id or tail != "/md":
+            return {"_status": 400, **_openai_error("Invalid skill md path", code="invalid_request")}
+
+        skill = self.sdk.get(skill_id)
+        if skill is None:
+            return {"_status": 404, **_openai_error("Skill not found", code="not_found")}
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        owner_err = self._skill_owner_guard(skill=skill, user_id=user_id)
+        if owner_err is not None:
+            return owner_err
+
+        md = str(body.get("skill_md") or body.get("md") or "")
+        if not md.strip():
+            return {"_status": 400, **_openai_error("skill_md is required", code="invalid_request")}
+
+        parsed = parse_agent_skill_md(md)
+        name = str(parsed.get("name") or "").strip() or str(skill.name or "").strip()
+        if not name:
+            return {"_status": 400, **_openai_error("SKILL.md must include non-empty name", code="invalid_request")}
+
+        description = str(parsed.get("description") or "").strip() or str(skill.description or "").strip() or name
+        instructions = str(parsed.get("prompt") or "").strip() or str(skill.instructions or "").strip()
+        version = str(parsed.get("version") or "").strip() or str(skill.version or "0.1.0").strip()
+
+        tags = parsed.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+        tags2 = [str(t).strip() for t in tags if str(t).strip()]
+
+        triggers = parsed.get("triggers") or []
+        if not isinstance(triggers, list):
+            triggers = []
+        triggers2 = [str(t).strip() for t in triggers if str(t).strip()]
+
+        examples2 = _examples_from_raw(parsed.get("examples") or [])
+        md2 = upsert_skill_md_metadata(md, skill_id=skill_id, name=name, description=description, version=version)
+
+        history_size = _push_skill_snapshot(skill)
+        skill.name = name
+        skill.description = description
+        skill.instructions = instructions
+        skill.version = version
+        skill.tags = tags2
+        skill.triggers = triggers2
+        skill.examples = examples2
+        skill.updated_at = now_iso()
+        skill.files = dict(skill.files or {})
+        skill.files["SKILL.md"] = md2
+
+        try:
+            self.sdk.store.upsert(skill, raw=None)
+        except Exception as e:
+            return {"_status": 500, **_openai_error(str(e), code="upstream_error")}
+
+        return {
+            "ok": True,
+            "object": "skill",
+            "data": _skill_detail(skill, include_md=True),
+            "history_count": int(history_size),
+        }
+
+    def rollback_skill_api(self, *, path: str, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        skill_id, tail = self._parse_skill_path(path)
+        if not skill_id or tail != "/rollback":
+            return {"_status": 400, **_openai_error("Invalid rollback path", code="invalid_request")}
+
+        skill = self.sdk.get(skill_id)
+        if skill is None:
+            return {"_status": 404, **_openai_error("Skill not found", code="not_found")}
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        owner_err = self._skill_owner_guard(skill=skill, user_id=user_id)
+        if owner_err is not None:
+            return owner_err
+
+        snapshot = _pop_skill_snapshot(skill)
+        if snapshot is None:
+            return {"_status": 400, **_openai_error("No previous version available", code="invalid_request")}
+
+        _apply_snapshot(skill, snapshot)
+        skill.updated_at = now_iso()
+        skill.files = dict(skill.files or {})
+
+        try:
+            self.sdk.store.upsert(skill, raw=None)
+        except Exception as e:
+            return {"_status": 500, **_openai_error(str(e), code="upstream_error")}
+
+        history_count = len(_history_from_metadata(dict(skill.metadata or {})))
+        return {
+            "ok": True,
+            "object": "skill",
+            "data": _skill_detail(skill, include_md=True),
+            "restored_from": {
+                "version": str(snapshot.get("version") or ""),
+                "updated_at": str(snapshot.get("updated_at") or ""),
+            },
+            "history_count": int(history_count),
+        }
+
+    def export_skill_api(self, *, path: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
+        skill_id, tail = self._parse_skill_path(path)
+        if not skill_id or tail != "/export":
+            return {"_status": 400, **_openai_error("Invalid skill export path", code="invalid_request")}
+
+        skill = self.sdk.get(skill_id)
+        if skill is None:
+            return {"_status": 404, **_openai_error("Skill not found", code="not_found")}
+
+        fmt = str(_q_first(query, "format", "files") or "files").strip().lower()
+        if fmt in {"md", "skill_md"}:
+            md = self.sdk.export_skill_md(skill_id) or ""
+            return {
+                "object": "skill_export",
+                "format": "md",
+                "skill_id": skill_id,
+                "name": skill.name,
+                "version": skill.version,
+                "skill_md": md,
+            }
+
+        files = self.sdk.export_skill_dir(skill_id) or {}
+        if fmt in {"zip", "zip_base64"}:
+            bio = io.BytesIO()
+            with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for rel, content in files.items():
+                    rel2 = str(rel or "").lstrip("/").replace("..", "_")
+                    if not rel2:
+                        continue
+                    zf.writestr(rel2, str(content or ""))
+            data_b64 = base64.b64encode(bio.getvalue()).decode("ascii")
+            return {
+                "object": "skill_export",
+                "format": "zip_base64",
+                "skill_id": skill_id,
+                "name": skill.name,
+                "version": skill.version,
+                "file_name": f"{skill.name or skill_id}.zip",
+                "zip_base64": data_b64,
+            }
+
+        return {
+            "object": "skill_export",
+            "format": "files",
+            "skill_id": skill_id,
+            "name": skill.name,
+            "version": skill.version,
+            "files": files,
+        }
+
+    def import_skills_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        root_dir = str(body.get("root_dir") or "").strip()
+        zip_path = str(body.get("zip_path") or "").strip()
+        if not root_dir and not zip_path:
+            return {
+                "_status": 400,
+                **_openai_error("root_dir or zip_path is required", code="invalid_request"),
+            }
+
+        overwrite = _parse_bool(body.get("overwrite"), default=True)
+        include_files = _parse_bool(body.get("include_files"), default=True)
+        max_file_bytes = max(1024, int(_safe_int(body.get("max_file_bytes"), 1_000_000) or 1_000_000))
+        max_depth = max(1, int(_safe_int(body.get("max_depth"), 6) or 6))
+        reassign_ids = _parse_bool(body.get("reassign_ids"), default=True)
+
+        if zip_path:
+            abs_zip = os.path.abspath(os.path.expanduser(zip_path))
+            if not os.path.isfile(abs_zip):
+                return {"_status": 404, **_openai_error("zip_path not found", code="not_found")}
+            with tempfile.TemporaryDirectory(prefix="autoskill-import-") as tmp:
+                _safe_extract_zip(abs_zip, tmp)
+                imported = self.sdk.import_agent_skill_dirs(
+                    root_dir=tmp,
+                    user_id=user_id,
+                    overwrite=overwrite,
+                    include_files=include_files,
+                    max_file_bytes=max_file_bytes,
+                    max_depth=max_depth,
+                    reassign_ids=reassign_ids,
+                )
+        else:
+            imported = self.sdk.import_agent_skill_dirs(
+                root_dir=root_dir,
+                user_id=user_id,
+                overwrite=overwrite,
+                include_files=include_files,
+                max_file_bytes=max_file_bytes,
+                max_depth=max_depth,
+                reassign_ids=reassign_ids,
+            )
+
+        return {
+            "ok": True,
+            "object": "list",
+            "imported_count": len(imported or []),
+            "data": [_skill_summary(s) for s in (imported or [])],
+        }
+
+    def vector_status_api(self, *, user_id: str, scope: str) -> Dict[str, Any]:
+        store = self._local_store()
+        if store is None:
+            return {
+                "_status": 400,
+                **_openai_error("vector status is only available for local store", code="unsupported"),
+            }
+        return {
+            "object": "vector_status",
+            "data": store.vector_status(user_id=user_id, scope=scope),
+        }
+
+    def vector_rebuild_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        store = self._local_store()
+        if store is None:
+            return {
+                "_status": 400,
+                **_openai_error("vector rebuild is only available for local store", code="unsupported"),
+            }
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        scope_raw = str(body.get("scope") or "").strip()
+        scope = _normalize_scope(scope_raw) if scope_raw else self._resolve_scope(headers=headers)
+        force = _parse_bool(body.get("force"), default=False)
+        blocking = _parse_bool(body.get("blocking"), default=True)
+        rebuilt = int(store.rebuild_vectors(user_id=user_id, scope=scope, force=force, blocking=blocking))
+        return {
+            "ok": True,
+            "object": "vector_rebuild",
+            "data": {
+                "user": user_id,
+                "scope": scope,
+                "force": force,
+                "blocking": blocking,
+                "rebuilt": rebuilt,
+                "status": store.vector_status(user_id=user_id, scope=scope),
+            },
+        }
+
+    def delete_skill_api(self, *, path: str, headers: Any) -> Dict[str, Any]:
+        skill_id, tail = self._parse_skill_path(path)
+        if not skill_id or tail not in {"", "/"}:
+            return {"_status": 400, **_openai_error("Invalid skill delete path", code="invalid_request")}
+
+        skill = self.sdk.get(skill_id)
+        if skill is None:
+            return {"_status": 404, **_openai_error("Skill not found", code="not_found")}
+
+        user_id = self._resolve_user_id(body={}, headers=headers)
+        owner_err = self._skill_owner_guard(skill=skill, user_id=user_id)
+        if owner_err is not None:
+            return owner_err
+
+        deleted = bool(self.sdk.delete(skill_id))
+        if not deleted:
+            return {"_status": 500, **_openai_error("Delete failed", code="upstream_error")}
+        return {"ok": True, "deleted": True, "skill_id": skill_id}
+
+    def _parse_skill_path(self, path: str) -> Tuple[str, str]:
+        prefix = "/v1/autoskill/skills/"
+        raw = str(path or "")
+        if not raw.startswith(prefix):
+            return "", ""
+        rest = raw[len(prefix) :]
+        if not rest:
+            return "", ""
+        if "/" not in rest:
+            return rest.strip(), ""
+        skill_id, tail = rest.split("/", 1)
+        return skill_id.strip(), "/" + tail.strip()
+
+    def _skill_owner_guard(self, *, skill: Skill, user_id: str) -> Optional[Dict[str, Any]]:
+        owner = str(getattr(skill, "user_id", "") or "").strip()
+        if _is_library_skill(skill):
+            return {"_status": 403, **_openai_error("Library skills are read-only", code="forbidden")}
+        if owner and owner != str(user_id or "").strip():
+            return {"_status": 403, **_openai_error("Skill does not belong to this user", code="forbidden")}
+        return None
+
+    def _record_extraction_event(self, *, user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+        uid = str(user_id or "").strip() or self.config.user_id
+        ev = dict(event or {})
+        ev["user_id"] = uid
+        ev["event_time"] = int(ev.get("event_time") or int(time.time() * 1000))
+        ev["event_id"] = str(ev.get("event_id") or uuid.uuid4().hex)
+        job_id = str(ev.get("job_id") or "").strip()
+        if job_id:
+            ev["job_id"] = job_id
+
+        with self._extract_events_lock:
+            arr = self._extract_events_by_user.get(uid)
+            if arr is None:
+                arr = []
+                self._extract_events_by_user[uid] = arr
+            arr.append(ev)
+            if len(arr) > int(_EXTRACT_EVENT_LIMIT):
+                arr[:] = arr[-int(_EXTRACT_EVENT_LIMIT) :]
+            if job_id:
+                self._extract_latest_by_job[job_id] = ev
+        return dict(ev)
+
+    def _list_extraction_events(self, *, user_id: str, limit: int) -> List[Dict[str, Any]]:
+        uid = str(user_id or "").strip() or self.config.user_id
+        lim = max(1, min(200, int(limit or 20)))
+        with self._extract_events_lock:
+            arr = list(self._extract_events_by_user.get(uid) or [])
+        return list(reversed(arr[-lim:]))
+
+    def _get_latest_extraction_event(self, *, user_id: str) -> Optional[Dict[str, Any]]:
+        uid = str(user_id or "").strip() or self.config.user_id
+        with self._extract_events_lock:
+            arr = self._extract_events_by_user.get(uid) or []
+            if not arr:
+                return None
+            return dict(arr[-1])
+
+    def _get_extraction_event_by_job(self, *, job_id: str) -> Optional[Dict[str, Any]]:
+        jid = str(job_id or "").strip()
+        if not jid:
+            return None
+        with self._extract_events_lock:
+            ev = self._extract_latest_by_job.get(jid)
+            return dict(ev) if isinstance(ev, dict) else None
+
+    def stream_extraction_events(
+        self,
+        handler: BaseHTTPRequestHandler,
+        *,
+        job_id: str,
+        timeout_s: float = 30.0,
+    ) -> None:
+        jid = str(job_id or "").strip()
+        if not jid:
+            return _json_response(
+                handler,
+                _openai_error("Missing job_id", code="invalid_request"),
+                status=400,
+            )
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Connection", "keep-alive")
+        handler.send_header("X-Accel-Buffering", "no")
+        handler.end_headers()
+
+        def _send(event: str, payload: Dict[str, Any]) -> None:
+            data = json.dumps(payload, ensure_ascii=False)
+            handler.wfile.write(f"event: {event}\n".encode("utf-8"))
+            handler.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+
+        started = time.time()
+        last_event_id = ""
+        try:
+            while (time.time() - started) < float(timeout_s):
+                ev = self._get_extraction_event_by_job(job_id=jid)
+                if ev is not None:
+                    eid = str(ev.get("event_id") or "")
+                    if eid and eid != last_event_id:
+                        _send("update", ev)
+                        last_event_id = eid
+                        if str(ev.get("status") or "").strip().lower() in _EXTRACT_TERMINAL:
+                            break
+                time.sleep(0.2)
+            latest = self._get_extraction_event_by_job(job_id=jid)
+            if latest is not None:
+                _send("done", latest)
+            else:
+                _send("done", {"job_id": jid, "status": "not_found"})
+            handler.wfile.write(b"data: [DONE]\n\n")
+            handler.wfile.flush()
+        except BrokenPipeError:
+            return
+        except Exception:
+            return
+
+    def _local_store(self) -> Optional[LocalSkillStore]:
+        store = getattr(self.sdk, "store", None)
+        if isinstance(store, LocalSkillStore):
+            return store
+        return None
+
+    def _schedule_extraction_job(
+        self,
+        *,
+        user_id: str,
+        messages: List[Dict[str, str]],
+        trigger: str,
+        hint: Optional[str] = None,
+    ) -> str:
+        uid = str(user_id or "").strip() or self.config.user_id
+        window = list(messages or [])
+        job_id = str(uuid.uuid4())
+        if not self.config.extract_enabled:
+            self._record_extraction_event(
+                user_id=uid,
+                event={
+                    "job_id": job_id,
+                    "trigger": str(trigger or "proxy_extract"),
+                    "status": "failed",
+                    "error": "extraction disabled",
+                    "upserted": [],
+                },
+            )
+            return job_id
+        if not window:
+            self._record_extraction_event(
+                user_id=uid,
+                event={
+                    "job_id": job_id,
+                    "trigger": str(trigger or "proxy_extract"),
+                    "status": "failed",
+                    "error": "empty extraction window",
+                    "upserted": [],
+                },
+            )
+            return job_id
+
+        self._record_extraction_event(
+            user_id=uid,
+            event={
+                "job_id": job_id,
+                "trigger": str(trigger or "proxy_extract"),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+            },
+        )
+
+        if not self._extract_sema.acquire(blocking=False):
+            self._record_extraction_event(
+                user_id=uid,
+                event={
+                    "job_id": job_id,
+                    "trigger": str(trigger or "proxy_extract"),
+                    "status": "failed",
+                    "error": "too many background extraction jobs",
+                    "upserted": [],
+                },
+            )
+            return job_id
+
+        def _run() -> None:
+            self._record_extraction_event(
+                user_id=uid,
+                event={
+                    "job_id": job_id,
+                    "trigger": str(trigger or "proxy_extract"),
+                    "status": "running",
+                    "error": "",
+                    "upserted": [],
+                },
+            )
+            try:
+                updated = self.sdk.ingest(
+                    user_id=uid,
+                    messages=window,
+                    metadata={"channel": "proxy_api", "trigger": str(trigger)},
+                    hint=hint,
+                )
+                upserted = [_skill_summary(s) for s in (updated or [])]
+                self._record_extraction_event(
+                    user_id=uid,
+                    event={
+                        "job_id": job_id,
+                        "trigger": str(trigger or "proxy_extract"),
+                        "status": "completed",
+                        "error": "",
+                        "upserted": upserted,
+                    },
+                )
+                if updated:
+                    print(
+                        f"[proxy] extraction upserted={len(updated)} user={uid} trigger={trigger} job={job_id}"
+                    )
+            except Exception as e:
+                self._record_extraction_event(
+                    user_id=uid,
+                    event={
+                        "job_id": job_id,
+                        "trigger": str(trigger or "proxy_extract"),
+                        "status": "failed",
+                        "error": str(e),
+                        "upserted": [],
+                    },
+                )
+                print(f"[proxy] extraction failed user={uid} trigger={trigger} job={job_id}: {e}")
+            finally:
+                try:
+                    self._extract_sema.release()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run, daemon=True).start()
+        return job_id
 
     def _build_chat_llm(self, *, model: str, max_tokens: Optional[int]) -> LLM:
         cfg = dict(self.llm_config)
@@ -675,45 +2000,6 @@ class AutoSkillProxyRuntime:
         user = f"Conversation:\n{history}\n\nRespond to the latest user message."
         return system, user
 
-    def _schedule_background_extraction(
-        self,
-        *,
-        user_id: str,
-        messages: List[Dict[str, str]],
-        assistant_text: str,
-        trigger: str,
-    ) -> None:
-        if not self.config.extract_enabled:
-            return
-        if not assistant_text.strip():
-            return
-        if not self._extract_sema.acquire(blocking=False):
-            return
-
-        window = list(messages[-int(self.config.ingest_window) :])
-        window.append({"role": "assistant", "content": str(assistant_text)})
-
-        def _run() -> None:
-            try:
-                updated = self.sdk.ingest(
-                    user_id=str(user_id),
-                    messages=window,
-                    metadata={"channel": "proxy_api", "trigger": str(trigger)},
-                )
-                if updated:
-                    print(
-                        f"[proxy] extraction upserted={len(updated)} user={user_id} trigger={trigger}"
-                    )
-            except Exception as e:
-                print(f"[proxy] extraction failed user={user_id} trigger={trigger}: {e}")
-            finally:
-                try:
-                    self._extract_sema.release()
-                except Exception:
-                    pass
-
-        threading.Thread(target=_run, daemon=True).start()
-
     def _normalize_embedding_input(self, inp: Any) -> List[str]:
         if inp is None:
             return []
@@ -734,4 +2020,3 @@ class AutoSkillProxyRuntime:
                     out.append(str(x))
             return out
         return [str(inp)]
-

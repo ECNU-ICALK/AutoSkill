@@ -126,10 +126,9 @@ def main() -> None:
     server = runtime.create_server(host=str(args.host), port=int(args.port))
     host, port = server.server_address[:2]
     print(f"AutoSkill OpenAI Proxy: http://{host}:{port}")
-    print("Endpoints: /v1/chat/completions, /v1/embeddings, /v1/models, /health")
+    print("Endpoints: /v1/chat/completions, /v1/embeddings, /v1/models, /v1/autoskill/capabilities, /health")
     server.serve_forever()
 
 
 if __name__ == "__main__":
     main()
-

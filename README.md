@@ -330,7 +330,48 @@ export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.openai_proxy --llm-provider dashscope --embeddings-provider dashscope
 ```
 
-Chat completion (standard shape):
+Discoverability:
+
+```bash
+curl http://127.0.0.1:9000/v1/autoskill/capabilities
+curl http://127.0.0.1:9000/v1/autoskill/openapi.json
+```
+
+OpenAI-compatible:
+
+- `POST /v1/chat/completions`
+- `POST /v1/embeddings`
+- `GET /v1/models`
+
+Skill APIs:
+
+- `GET /v1/autoskill/skills`
+- `GET /v1/autoskill/skills/{skill_id}`
+- `GET /v1/autoskill/skills/{skill_id}/md`
+- `PUT /v1/autoskill/skills/{skill_id}/md`
+- `DELETE /v1/autoskill/skills/{skill_id}`
+- `POST /v1/autoskill/skills/{skill_id}/rollback`
+- `GET /v1/autoskill/skills/{skill_id}/versions`
+- `GET /v1/autoskill/skills/{skill_id}/export`
+- `POST /v1/autoskill/skills/search`
+- `POST /v1/autoskill/skills/import`
+
+Retrieval and extraction:
+
+- `POST /v1/autoskill/retrieval/preview`
+- `POST /v1/autoskill/extractions`
+- `POST /v1/autoskill/extractions/simulate`
+- `GET /v1/autoskill/extractions/latest`
+- `GET /v1/autoskill/extractions`
+- `GET /v1/autoskill/extractions/{job_id}`
+- `GET /v1/autoskill/extractions/{job_id}/events` (SSE)
+
+Vector admin:
+
+- `GET /v1/autoskill/vectors/status`
+- `POST /v1/autoskill/vectors/rebuild`
+
+Chat completion example:
 
 ```bash
 curl http://127.0.0.1:9000/v1/chat/completions \
@@ -344,29 +385,34 @@ curl http://127.0.0.1:9000/v1/chat/completions \
   }'
 ```
 
-Streaming:
+Retrieval preview example:
 
 ```bash
-curl http://127.0.0.1:9000/v1/chat/completions \
+curl http://127.0.0.1:9000/v1/autoskill/retrieval/preview \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "YOUR_MODEL_NAME",
     "user": "u1",
-    "stream": true,
-    "messages": [
-      {"role": "user", "content": "Summarize this plan in 5 bullets."}
-    ]
+    "query": "Write a concise government report with no hallucinations."
   }'
 ```
 
-Embeddings:
+Extraction event stream example:
 
 ```bash
-curl http://127.0.0.1:9000/v1/embeddings \
+curl -N http://127.0.0.1:9000/v1/autoskill/extractions/<job_id>/events \
+  -H "Accept: text/event-stream"
+```
+
+Vector rebuild example:
+
+```bash
+curl http://127.0.0.1:9000/v1/autoskill/vectors/rebuild \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "text-embedding-v4",
-    "input": ["alpha", "beta"]
+    "user": "u1",
+    "scope": "all",
+    "force": true,
+    "blocking": true
   }'
 ```
 
