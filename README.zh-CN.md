@@ -7,6 +7,8 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 与只保存原始记忆片段不同，AutoSkill 保存的是可迁移、可执行的 **Agent Skill 制品**（`SKILL.md` + 可选资源）。
 
+![AutoSkill Framework](imgs/Framework.png)
+
 ## 1. 快速开始：Web UI
 
 ```bash
@@ -99,8 +101,6 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - **标准接口服务化**：通过 OpenAI 兼容代理，可在不改业务调用形态的情况下接入 AutoSkill。
 
 ## 3. 系统工作流
-
-![AutoSkill Framework](imgs/Framework.png)
 
 ### 3.1 学习与进化流程
 
