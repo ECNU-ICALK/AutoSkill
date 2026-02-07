@@ -62,28 +62,26 @@ Per-request user isolation:
 - request body field `user` (recommended)
 - or header `X-AutoSkill-User`
 
-## 1.2 Skill Lifecycle Example (4 Aspects)
+## 1.2 Skill Lifecycle Example (3 Aspects)
 
-### A) Auto Decision: No Extraction for Generic One-shot Tasks
+### A) Auto Decision + Feedback-triggered Extraction & Skill Management (v0.1.0)
 
 If the user only asks to "write a report" and gives no stable preference/correction, AutoSkill does **not** create a new skill
 (it outputs an empty extraction result) to avoid noisy, generic skills.
 
-### B) Feedback-triggered Extraction + Management (v0.1.0)
-
-![Skill Extraction](imgs/skill_extraction.png)
-
 When the user adds durable constraints (for example: "do not hallucinate"), AutoSkill extracts or merges a skill into version `v0.1.0`.
 Skill management is backend-first (automatic add/merge), with optional human edit/save/delete of `SKILL.md`.
 
-### C) Skill Update (v0.1.1)
+![Skill Extraction](imgs/skill_extraction.png)
+
+### B) Skill Update (v0.1.1)
 
 When user feedback adds new constraints or changes priorities in later turns, AutoSkill updates the existing skill (instead of creating duplicates)
 and evolves the version from `v0.1.0` to `v0.1.1`.
 
 ![Skill Update](imgs/skill_update.png)
 
-### D) Skill Usage
+### C) Skill Usage
 
 For the next similar task (for example, writing a **government report about a self-evolving agent**), the updated skill is retrieved and used
 to generate outputs aligned with user expectations.
