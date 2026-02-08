@@ -90,12 +90,9 @@ to generate outputs aligned with user expectations.
 
 ## 2. What Makes AutoSkill Different
 
-- **Experience-native learning**: learns directly from user/assistant interactions and behavior traces.
-- **Continuous skill evolution**: not only adds new skills, but also merges/improves similar existing skills with version bumps.
-- **Feedback-gated extraction**: generic one-shot tasks are filtered out; stable user feedback (e.g., "no hallucination") triggers extraction/update.
-- **Portable skill artifact**: stores skills in Agent Skill format (`SKILL.md`), so existing skills can be imported and extracted skills can be migrated.
-- **Personal + shared knowledge planes**: supports both user-private skills (`Users/<user_id>`) and shared libraries (`Common/`) in one retrieval flow.
-- **Standards-compatible serving**: OpenAI-compatible proxy API lets existing clients use AutoSkill with no business-logic changes.
+- **Experience-driven continuous skill evolution**: extracts reusable capabilities directly from real user interactions and behavior traces, then continuously maintains versioned skills so the system better aligns with user needs over time.
+- **Universal skill format**: uses the Agent Skill artifact (`SKILL.md`) with clear explainability and editability: the structure is transparent, content is reviewable, and humans can revise it as needed; this also enables both importing existing skills and migrating extracted skills to other systems.
+- **Standard API service integration**: integrates into existing LLM stacks in a plug-in style; with an OpenAI-compatible proxy, AutoSkill can be adopted without changing business-side calling patterns.
 
 ## 3. System Workflow
 
