@@ -25,6 +25,7 @@ const state = {
   turnSeq: 0,
   turnById: Object.create(null),
   jobTurnMap: Object.create(null),
+  assistantCollapsed: Object.create(null),
   trace: {
     sessionStartedAt: Date.now(),
     turns: [],
@@ -71,6 +72,35 @@ function latestPayloadFromTrace(traceObj, primaryBucket, fallbackBucket, payload
   return null;
 }
 
+function extractionHasRenderableDetails(extraction) {
+  if (!extraction || typeof extraction !== "object") return false;
+  const upserted = extractionArrayOf(extraction, "upserted", "upserted");
+  if (upserted.length > 0) return true;
+  const skillMds = extractionArrayOf(extraction, "skill_mds", "skillMds");
+  if (skillMds.length > 0) return true;
+  const skills = extractionArrayOf(extraction, "skills", "skills");
+  if (skills.length > 0) return true;
+  return false;
+}
+
+function latestExtractionPayloadForRestore(traceObj) {
+  if (!traceObj || typeof traceObj !== "object") return null;
+  const arrRaw = traceObj.extractionEvents;
+  const arrAlt = traceObj.extraction_events;
+  const arr = Array.isArray(arrRaw) ? arrRaw : Array.isArray(arrAlt) ? arrAlt : [];
+  let latestAny = null;
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    const ev = arr[i];
+    const payload = ev && typeof ev === "object" ? ev.extraction : null;
+    if (!payload || typeof payload !== "object") continue;
+    if (latestAny == null) latestAny = cloneJsonSafe(payload);
+    if (extractionHasRenderableDetails(payload)) {
+      return cloneJsonSafe(payload);
+    }
+  }
+  return latestAny;
+}
+
 function setStatus(ok, text) {
   const badge = el("statusBadge");
   badge.textContent = text;
@@ -93,6 +123,7 @@ function snapshotCurrentSessionRuntime() {
     turnSeq: Number(state.turnSeq || 0),
     turnById: cloneJsonSafe(state.turnById) || {},
     jobTurnMap: cloneJsonSafe(state.jobTurnMap) || {},
+    assistantCollapsed: cloneJsonSafe(state.assistantCollapsed) || {},
     trace: cloneJsonSafe(state.trace) || makeEmptyTrace(),
   };
 }
@@ -114,6 +145,10 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
     state.turnSeq = Number(snap.turnSeq || 0);
     state.turnById = snap.turnById && typeof snap.turnById === "object" ? snap.turnById : Object.create(null);
     state.jobTurnMap = snap.jobTurnMap && typeof snap.jobTurnMap === "object" ? snap.jobTurnMap : Object.create(null);
+    state.assistantCollapsed =
+      snap.assistantCollapsed && typeof snap.assistantCollapsed === "object"
+        ? snap.assistantCollapsed
+        : Object.create(null);
     state.trace = snap.trace && typeof snap.trace === "object" ? snap.trace : makeEmptyTrace();
   } else {
     const traceFromServer = normalizeTraceForExport(serverTrace);
@@ -130,6 +165,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
     state.turnSeq = 0;
     state.turnById = Object.create(null);
     state.jobTurnMap = Object.create(null);
+    state.assistantCollapsed = Object.create(null);
     state.trace = traceFromServer && typeof traceFromServer === "object" ? traceFromServer : makeEmptyTrace();
     if (serverState?.config) rememberConfig(serverState.config, "session/state");
   }
@@ -140,7 +176,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
   renderRetrieval(latestRetrieval);
 
   const latestExtraction =
-    latestPayloadFromTrace(state.trace, "extractionEvents", "extraction_events", "extraction") ||
+    latestExtractionPayloadForRestore(state.trace) ||
     (state.lastResult && state.lastResult.extraction ? cloneJsonSafe(state.lastResult.extraction) : null);
   if (latestExtraction) {
     renderExtraction(latestExtraction);
@@ -387,6 +423,12 @@ function chatActionIcon(action) {
   if (a === "view-turn") {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>`;
   }
+  if (a === "collapse") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14l6-6 6 6"></path><path d="M5 19h14"></path></svg>`;
+  }
+  if (a === "expand") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10l6 6 6-6"></path><path d="M5 19h14"></path></svg>`;
+  }
   return "";
 }
 
@@ -405,6 +447,33 @@ function truncateTextForDisplay(text, maxChars) {
   const chars = Array.from(s);
   if (chars.length <= max) return s;
   return `${chars.slice(0, Math.max(1, max - 3)).join("")}...`;
+}
+
+function shouldEnableAssistantCollapse(content) {
+  const s = String(content || "");
+  if (!s.trim()) return false;
+  const lines = s.split(/\r?\n/).length;
+  if (lines > 6) return true;
+  return Array.from(s).length > 260;
+}
+
+function normalizeAssistantCollapseState() {
+  const src = state.assistantCollapsed && typeof state.assistantCollapsed === "object"
+    ? state.assistantCollapsed
+    : Object.create(null);
+  const next = Object.create(null);
+  for (const [key, raw] of Object.entries(src)) {
+    if (!raw) continue;
+    const idx = Number.parseInt(String(key || ""), 10);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= state.messages.length) continue;
+    const msg = state.messages[idx];
+    if (!msg || typeof msg !== "object") continue;
+    const role = String(msg.role || "").trim().toLowerCase();
+    if (role !== "assistant" || !!msg.pending) continue;
+    if (!shouldEnableAssistantCollapse(msg.content || "")) continue;
+    next[String(idx)] = true;
+  }
+  state.assistantCollapsed = next;
 }
 
 async function copyTextToClipboard(text) {
@@ -696,6 +765,7 @@ function renderChat() {
   const log = el("chatLog");
   const shouldStick =
     log.scrollTop + log.clientHeight >= log.scrollHeight - 140;
+  normalizeAssistantCollapseState();
   const parts = [];
   const msgTurnMap = buildMessageTurnIndexMap();
   let latestAssistantIndex = -1;
@@ -725,19 +795,35 @@ function renderChat() {
       const bubbleCls = pending
         ? "chatbubble chatbubble--assistant chatbubble--pending"
         : "chatbubble chatbubble--assistant";
+      const isCollapsible = !pending && shouldEnableAssistantCollapse(m.content || "");
+      const isCollapsed = isCollapsible && !!state.assistantCollapsed[String(idx)];
+      const contentCls =
+        isCollapsed && !pending
+          ? "chatbubble__content chatbubble__content--collapsed"
+          : "chatbubble__content";
       const canCopy = !pending;
       const canRegenerate = !pending && idx === latestAssistantIndex;
       const canViewTurn = !!turnId;
+      const canToggleCollapse = isCollapsible;
       const actionsHtml =
-        canCopy || canRegenerate || canViewTurn
+        canCopy || canRegenerate || canViewTurn || canToggleCollapse
           ? `<div class="chatbubble__actions">
               ${canCopy ? chatActionButton("copy", ` data-msg-index="${idx}"`, "Copy") : ""}
               ${canRegenerate ? chatActionButton("regenerate", ` data-msg-index="${idx}"`, "Regenerate") : ""}
               ${canViewTurn ? chatActionButton("view-turn", ` data-turn-id="${escapeHtml(turnId)}"`, "View Turn") : ""}
+              ${
+                canToggleCollapse
+                  ? chatActionButton(
+                      isCollapsed ? "expand" : "collapse",
+                      ` data-msg-index="${idx}"`,
+                      isCollapsed ? "Expand" : "Collapse"
+                    )
+                  : ""
+              }
             </div>`
           : "";
       parts.push(
-        `<div class="chatitem chatitem--assistant${turnCls}${activeCls}"${turnAttr}><div class="chatavatar" aria-hidden="true">AS</div><div class="chatassistant-wrap"><div class="${bubbleCls}">${contentHtml}</div>${actionsHtml}</div></div>`
+        `<div class="chatitem chatitem--assistant${turnCls}${activeCls}"${turnAttr}><div class="chatavatar" aria-hidden="true">AS</div><div class="chatassistant-wrap"><div class="${bubbleCls}"><div class="${contentCls}">${contentHtml}</div></div>${actionsHtml}</div></div>`
       );
       continue;
     }
@@ -1039,6 +1125,15 @@ function renderExtraction(extraction, options) {
 
   const upsertedRaw = extractionArrayOf(extraction, "upserted", "upserted");
   const detailSkills = extractionArrayOf(extraction, "skills", "skills");
+  let mdItems = extractionArrayOf(extraction, "skill_mds", "skillMds");
+  if (!mdItems.length && detailSkills.length) {
+    mdItems = detailSkills
+      .map((s) => ({
+        id: String((s && s.id) || ""),
+        md: String((s && (s.skill_md || s.skillMd)) || ""),
+      }))
+      .filter((x) => x.id && x.md);
+  }
   const upserted =
     upsertedRaw.length > 0
       ? upsertedRaw
@@ -1048,6 +1143,14 @@ function renderExtraction(extraction, options) {
           version: String((s && s.version) || ""),
           owner: String((s && (s.owner || s.user_id)) || ""),
         }));
+
+  const hasDetails = upserted.length > 0 || mdItems.length > 0 || detailSkills.length > 0;
+  if (!force && !hasDetails) {
+    // Do not overwrite currently displayed extraction details with a status-only payload.
+    // This prevents UI flicker/loss when scheduled/running/no-op events arrive.
+    return;
+  }
+
   if (!upserted.length) {
     el("upserted").innerHTML = `<div class="muted">(no skills upserted)</div>`;
   } else {
@@ -1063,15 +1166,6 @@ function renderExtraction(extraction, options) {
       .join("");
   }
 
-  let mdItems = extractionArrayOf(extraction, "skill_mds", "skillMds");
-  if (!mdItems.length && detailSkills.length) {
-    mdItems = detailSkills
-      .map((s) => ({
-        id: String((s && s.id) || ""),
-        md: String((s && (s.skill_md || s.skillMd)) || ""),
-      }))
-      .filter((x) => x.id && x.md);
-  }
   if (!mdItems.length) {
     const id = upserted.length ? String((upserted[0] && upserted[0].id) || "").trim() : "";
     el("editingSkill").textContent = id;
@@ -1768,6 +1862,21 @@ function bind() {
       const idx = Number.parseInt(String(btn.getAttribute("data-msg-index") || "-1"), 10);
       if (!Number.isFinite(idx) || idx < 0 || idx >= state.messages.length) return;
       if (state.inFlight) return;
+
+      if (action === "collapse" || action === "expand") {
+        const msg = state.messages[idx];
+        const role = String(msg?.role || "").trim().toLowerCase();
+        if (role !== "assistant" || !!msg?.pending) return;
+        if (!shouldEnableAssistantCollapse(msg?.content || "")) return;
+        if (action === "collapse") {
+          state.assistantCollapsed[String(idx)] = true;
+        } else {
+          delete state.assistantCollapsed[String(idx)];
+        }
+        renderChat();
+        setStatus(true, action === "collapse" ? "collapsed" : "expanded");
+        return;
+      }
 
       if (action === "copy") {
         const msg = state.messages[idx];

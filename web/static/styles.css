@@ -430,6 +430,28 @@ body {
   -webkit-user-select: text;
 }
 
+.chatbubble__content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chatbubble__content--collapsed {
+  max-height: calc(1.75em * 6);
+  overflow: hidden;
+  position: relative;
+}
+
+.chatbubble__content--collapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.8em;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0), rgba(2, 6, 23, 0.92));
+  pointer-events: none;
+}
+
 .chatitem--assistant .chatbubble {
   max-width: 100%;
 }

@@ -790,6 +790,33 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
             self.wfile.flush()
 
+        @staticmethod
+        def _extract_extraction_events(polled: Any) -> List[Dict[str, Any]]:
+            events_obj = polled.get("events") if isinstance(polled, dict) else {}
+            out: List[Dict[str, Any]] = []
+            if isinstance(events_obj, dict):
+                raw = events_obj.get("extraction")
+                if isinstance(raw, list):
+                    out = [ev for ev in raw if isinstance(ev, dict)]
+            return out
+
+        def _drain_extraction_events_for_refresh(self, sid: str, session: InteractiveSession) -> List[Dict[str, Any]]:
+            """
+            Drains background extraction events and persists them to trace.
+
+            This is used by both `/api/session/poll` and `/api/session/state` so that
+            page refresh can recover the latest extraction result immediately instead of
+            showing an old scheduled/running state.
+            """
+
+            polled = session.poll()
+            extraction_events = self._extract_extraction_events(polled)
+            if extraction_events:
+                for ev in extraction_events:
+                    manager.record_extraction(sid, turn_id=None, extraction=ev, source="poll")
+                manager.touch(sid)
+            return extraction_events
+
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path or "/")
             path = parsed.path or "/"
@@ -846,12 +873,16 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 session = manager.get(sid)
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
+                # Refresh-time reconciliation: opportunistically drain background extraction
+                # events so the right panel can restore completed skill details immediately.
+                extraction_events = self._drain_extraction_events_for_refresh(sid, session)
                 return _json_response(
                     self,
                     {
                         "session_id": sid,
                         "state": session.state(),
                         "trace": manager.get_trace(sid),
+                        "events": {"extraction": extraction_events},
                         "sessions": manager.list_sessions(),
                     },
                 )
@@ -862,12 +893,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
                 polled = session.poll()
-                events_obj = polled.get("events") if isinstance(polled, dict) else {}
-                extraction_events = []
-                if isinstance(events_obj, dict):
-                    raw = events_obj.get("extraction")
-                    if isinstance(raw, list):
-                        extraction_events = [ev for ev in raw if isinstance(ev, dict)]
+                extraction_events = self._extract_extraction_events(polled)
                 if extraction_events:
                     for ev in extraction_events:
                         manager.record_extraction(sid, turn_id=None, extraction=ev, source="poll")
