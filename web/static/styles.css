@@ -346,6 +346,23 @@ body {
   align-items: flex-start;
 }
 
+.chatitem--turn .chatbubble {
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.chatitem--user.chatitem--turn .chatbubble {
+  cursor: pointer;
+}
+
+.chatitem--turn:hover .chatbubble {
+  border-color: rgba(96, 165, 250, 0.58);
+}
+
+.chatitem--turn-active .chatbubble {
+  border-color: rgba(96, 165, 250, 0.85);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2), 0 18px 40px rgba(0, 0, 0, 0.24);
+}
+
 .chatitem--user {
   justify-content: flex-end;
 }
@@ -358,11 +375,27 @@ body {
   justify-content: center;
 }
 
+.chatsystem-wrap {
+  max-width: 86%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
 .chatassistant-wrap {
   max-width: 72%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 8px;
+}
+
+.chatuser-wrap {
+  max-width: 84%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
 }
 
@@ -393,9 +426,15 @@ body {
   word-break: break-word;
   line-height: 1.75;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .chatitem--assistant .chatbubble {
+  max-width: 100%;
+}
+
+.chatitem--user .chatbubble {
   max-width: 100%;
 }
 
@@ -430,16 +469,35 @@ body {
   padding-left: 2px;
 }
 
+.chatbubble__actions--center {
+  justify-content: center;
+  width: 100%;
+}
+
 .chatbubble__action {
   border: 1px solid rgba(71, 85, 105, 0.88);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.7);
   color: rgba(203, 213, 225, 0.95);
-  font-size: 11px;
-  line-height: 1;
-  padding: 6px 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.chatbubble__action svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .chatbubble__action:hover {
@@ -1052,5 +1110,13 @@ body {
 
   .side__header {
     top: 56px;
+  }
+
+  .chatassistant-wrap {
+    max-width: 84%;
+  }
+
+  .chatuser-wrap {
+    max-width: 92%;
   }
 }

@@ -423,18 +423,38 @@ class _SessionManager:
         with self._lock:
             if key not in self._sessions:
                 return
+            turn_id_s = str(turn_id or "").strip()
+            if not turn_id_s:
+                job_id = str(rec.get("job_id") or rec.get("jobId") or "").strip()
+                if job_id:
+                    tr_prev = self._trace_for_locked(key)
+                    prev_events = tr_prev.get("extraction_events")
+                    if isinstance(prev_events, list):
+                        for ev in reversed(prev_events):
+                            if not isinstance(ev, dict):
+                                continue
+                            ev_tid = str(ev.get("turn_id") or ev.get("turnId") or "").strip()
+                            if not ev_tid:
+                                continue
+                            ev_ex = ev.get("extraction")
+                            if not isinstance(ev_ex, dict):
+                                continue
+                            ev_job = str(ev_ex.get("job_id") or ev_ex.get("jobId") or "").strip()
+                            if ev_job and ev_job == job_id:
+                                turn_id_s = ev_tid
+                                break
             self._append_event_locked(
                 key,
                 "extraction_events",
                 {
                     "event_time": now,
                     "source": str(source or ""),
-                    "turn_id": (str(turn_id).strip() if turn_id else None),
+                    "turn_id": (turn_id_s or None),
                     "extraction": rec,
                 },
             )
-            if turn_id:
-                turn = self._find_turn_locked(key, turn_id)
+            if turn_id_s:
+                turn = self._find_turn_locked(key, turn_id_s)
                 if turn is not None:
                     turn["extraction"] = rec
             # Keep latest extraction in trace-level last_result so UI restore can always recover it.

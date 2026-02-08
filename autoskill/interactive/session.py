@@ -792,12 +792,40 @@ class InteractiveSession:
         skills = list(updated or [])
         summaries = [{"id": s.id, "name": s.name, "version": s.version, "owner": s.user_id} for s in skills]
         md_items: List[Dict[str, Any]] = []
+        skill_items: List[Dict[str, Any]] = []
         for s in skills[:3]:
             md = self.sdk.export_skill_md(str(s.id)) or ""
             # Web editor should receive full SKILL.md content (no "(truncated)" marker).
             # Keep `max_md_chars` in signature for backward compatibility.
             _ = max_md_chars
             md_items.append({"id": s.id, "md": md})
+            examples_out: List[Dict[str, Any]] = []
+            for ex in list(getattr(s, "examples", []) or [])[:6]:
+                examples_out.append(
+                    {
+                        "input": str(getattr(ex, "input", "") or ""),
+                        "output": (
+                            str(getattr(ex, "output", "")) if getattr(ex, "output", None) is not None else None
+                        ),
+                        "notes": (
+                            str(getattr(ex, "notes", "")) if getattr(ex, "notes", None) is not None else None
+                        ),
+                    }
+                )
+            skill_items.append(
+                {
+                    "id": str(s.id),
+                    "name": str(s.name),
+                    "description": str(s.description),
+                    "version": str(s.version),
+                    "owner": str(s.user_id),
+                    "triggers": [str(t) for t in (s.triggers or [])],
+                    "tags": [str(t) for t in (s.tags or [])],
+                    "instructions": str(s.instructions or ""),
+                    "examples": examples_out,
+                    "skill_md": md,
+                }
+            )
         return {
             "trigger": str(trigger),
             "job_id": str(job_id or ""),
@@ -805,6 +833,7 @@ class InteractiveSession:
             "status": "completed",
             "error": "",
             "upserted": summaries,
+            "skills": skill_items,
             "skill_mds": md_items,
         }
 

@@ -4,12 +4,14 @@ const state = {
   sessionId: null,
   sessionList: [],
   sessionRuntime: Object.create(null),
+  selectedTurnId: null,
   messages: [],
   lastResult: null,
   inFlight: false,
   savingSkill: false,
   deletingSkill: false,
   rollingBackSkill: false,
+  hydratingSkillId: null,
   editingSkillId: null,
   skillEditorDirty: false,
   pollTimer: null,
@@ -80,6 +82,7 @@ function snapshotCurrentSessionRuntime() {
   if (!sid) return;
   state.sessionRuntime[sid] = {
     messages: cloneJsonSafe(state.messages) || [],
+    selectedTurnId: state.selectedTurnId || null,
     lastResult: cloneJsonSafe(state.lastResult),
     extractionJobId: state.extractionJobId || null,
     extractionStatus: state.extractionStatus || "",
@@ -100,6 +103,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
   _clearExtractionTimers();
   if (snap && typeof snap === "object") {
     state.messages = Array.isArray(snap.messages) ? snap.messages : [];
+    state.selectedTurnId = snap.selectedTurnId || null;
     state.lastResult = snap.lastResult || null;
     state.extractionJobId = snap.extractionJobId || null;
     state.extractionStatus = snap.extractionStatus || "";
@@ -115,6 +119,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
     const traceFromServer = normalizeTraceForExport(serverTrace);
     const msgs = Array.isArray(serverState?.messages) ? serverState.messages : [];
     state.messages = msgs;
+    state.selectedTurnId = null;
     state.lastResult = cloneJsonSafe(traceFromServer?.lastResult) || null;
     state.extractionJobId = null;
     state.extractionStatus = "";
@@ -371,6 +376,29 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;");
 }
 
+function chatActionIcon(action) {
+  const a = String(action || "").trim().toLowerCase();
+  if (a === "copy") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><rect x="5" y="5" width="10" height="10" rx="2"></rect></svg>`;
+  }
+  if (a === "regenerate") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3"></path><path d="M20 4v7h-7"></path></svg>`;
+  }
+  if (a === "view-turn") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>`;
+  }
+  return "";
+}
+
+function chatActionButton(action, attrs, label) {
+  const a = String(action || "").trim().toLowerCase();
+  const extra = String(attrs || "");
+  const title = escapeHtml(String(label || a || ""));
+  return `<button class="chatbubble__action" type="button" data-chat-action="${a}" title="${title}" aria-label="${title}"${extra}>${chatActionIcon(
+    a
+  )}</button>`;
+}
+
 function truncateTextForDisplay(text, maxChars) {
   const s = String(text || "");
   const max = Math.max(1, Number(maxChars) || 1);
@@ -417,11 +445,259 @@ function previousUserMessageText(beforeIndex) {
   return "";
 }
 
+function normalizeForMatch(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function traceTurns() {
+  const turns = state.trace && typeof state.trace === "object" ? state.trace.turns : null;
+  return Array.isArray(turns) ? turns : [];
+}
+
+function turnIdOf(turn) {
+  if (!turn || typeof turn !== "object") return "";
+  return String(turn.id || turn.turn_id || "").trim();
+}
+
+function turnInputOf(turn) {
+  if (!turn || typeof turn !== "object") return "";
+  return String(turn.input || "").trim();
+}
+
+function turnChatAppendOf(turn) {
+  if (!turn || typeof turn !== "object") return [];
+  const a = turn.chatAppend;
+  if (Array.isArray(a)) return a;
+  const b = turn.chat_append;
+  if (Array.isArray(b)) return b;
+  return [];
+}
+
+function assistantTextFromTurn(turn) {
+  const append = turnChatAppendOf(turn);
+  for (let i = append.length - 1; i >= 0; i -= 1) {
+    const msg = append[i];
+    if (!msg || typeof msg !== "object") continue;
+    const role = String(msg.role || "").trim().toLowerCase();
+    if (role !== "assistant") continue;
+    const content = String(msg.content || "").trim();
+    if (content) return content;
+  }
+  return "";
+}
+
+function traceTurnById(turnId) {
+  const tid = String(turnId || "").trim();
+  if (!tid) return null;
+  const turns = traceTurns();
+  for (const t of turns) {
+    if (turnIdOf(t) === tid) return t;
+  }
+  return null;
+}
+
+function traceEventTurnId(ev) {
+  if (!ev || typeof ev !== "object") return "";
+  return String(ev.turnId || ev.turn_id || "").trim();
+}
+
+function traceEventPayload(ev, payloadKey) {
+  if (!ev || typeof ev !== "object") return null;
+  const p = ev[payloadKey];
+  if (p && typeof p === "object") return p;
+  return null;
+}
+
+function traceEvents(primaryBucket, fallbackBucket) {
+  if (!state.trace || typeof state.trace !== "object") return [];
+  const a = state.trace[primaryBucket];
+  if (Array.isArray(a)) return a;
+  const b = state.trace[fallbackBucket];
+  if (Array.isArray(b)) return b;
+  return [];
+}
+
+function extractionJobIdOf(extraction) {
+  if (!extraction || typeof extraction !== "object") return "";
+  return String(extraction.job_id || extraction.jobId || "").trim();
+}
+
+function extractionEventTimeOf(extraction) {
+  if (!extraction || typeof extraction !== "object") return Date.now();
+  const raw =
+    extraction.event_time != null ? extraction.event_time : extraction.eventTime != null ? extraction.eventTime : null;
+  return _toMs(raw);
+}
+
+function extractionArrayOf(extraction, snakeKey, camelKey) {
+  if (!extraction || typeof extraction !== "object") return [];
+  const a = extraction[snakeKey];
+  if (Array.isArray(a)) return a;
+  if (camelKey) {
+    const b = extraction[camelKey];
+    if (Array.isArray(b)) return b;
+  }
+  return [];
+}
+
+function extractionPayloadScore(extraction) {
+  if (!extraction || typeof extraction !== "object") return -1;
+  const status = normalizeExtractionStatus(extraction);
+  let score = 0;
+  if (status === "completed") score += 40;
+  else if (status === "failed") score += 30;
+  else if (status === "running") score += 20;
+  else if (status === "scheduled") score += 10;
+
+  const upserted = extractionArrayOf(extraction, "upserted", "upserted");
+  const skillMds = extractionArrayOf(extraction, "skill_mds", "skillMds");
+  const skills = extractionArrayOf(extraction, "skills", "skills");
+  if (upserted.length) score += 20;
+  if (skillMds.length) score += 30;
+  if (skills.length) score += 15;
+  if (String(extraction.error || "").trim()) score += 5;
+  return score;
+}
+
+function latestExtractionPayloadByJobId(jobId) {
+  const jid = String(jobId || "").trim();
+  if (!jid) return null;
+  const events = traceEvents("extractionEvents", "extraction_events");
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i];
+    const payload = traceEventPayload(ev, "extraction");
+    if (!payload || typeof payload !== "object") continue;
+    if (extractionJobIdOf(payload) !== jid) continue;
+    return cloneJsonSafe(payload);
+  }
+  return null;
+}
+
+function bestExtractionPayloadForTurn(turnId, turnObj) {
+  const turn = turnObj && typeof turnObj === "object" ? turnObj : traceTurnById(turnId);
+  const candidates = [];
+
+  const fromTurn = payloadFromTurn(turn, "extraction");
+  if (fromTurn) candidates.push(fromTurn);
+
+  const fromTurnEvent = latestTurnPayload(turnId, "extraction");
+  if (fromTurnEvent) candidates.push(fromTurnEvent);
+
+  const turnJobId = extractionJobIdOf(fromTurn || (turn && turn.extraction));
+  if (turnJobId) {
+    const fromJob = latestExtractionPayloadByJobId(turnJobId);
+    if (fromJob) candidates.push(fromJob);
+  }
+
+  if (!candidates.length) return null;
+
+  let best = candidates[0];
+  let bestScore = extractionPayloadScore(best);
+  let bestTime = extractionEventTimeOf(best);
+  for (let i = 1; i < candidates.length; i += 1) {
+    const cur = candidates[i];
+    const score = extractionPayloadScore(cur);
+    const ts = extractionEventTimeOf(cur);
+    if (score > bestScore || (score === bestScore && ts >= bestTime)) {
+      best = cur;
+      bestScore = score;
+      bestTime = ts;
+    }
+  }
+  return cloneJsonSafe(best);
+}
+
+function latestTurnPayload(turnId, payloadKey) {
+  const tid = String(turnId || "").trim();
+  if (!tid) return null;
+  const eventBuckets =
+    payloadKey === "retrieval"
+      ? ["retrievalEvents", "retrieval_events"]
+      : ["extractionEvents", "extraction_events"];
+  const events = traceEvents(eventBuckets[0], eventBuckets[1]);
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i];
+    if (traceEventTurnId(ev) !== tid) continue;
+    const payload = traceEventPayload(ev, payloadKey);
+    if (payload && typeof payload === "object") {
+      return cloneJsonSafe(payload);
+    }
+  }
+  return null;
+}
+
+function payloadFromTurn(turn, payloadKey) {
+  if (!turn || typeof turn !== "object") return null;
+  const v = turn[payloadKey];
+  if (v && typeof v === "object") return cloneJsonSafe(v);
+  return null;
+}
+
+function buildMessageTurnIndexMap() {
+  const out = Object.create(null);
+  const turns = traceTurns();
+  const msgs = Array.isArray(state.messages) ? state.messages : [];
+  if (!turns.length || !msgs.length) return out;
+
+  let cursor = 0;
+  for (const turn of turns) {
+    const tid = turnIdOf(turn);
+    if (!tid) continue;
+
+    const expectedUser = normalizeForMatch(turnInputOf(turn));
+    if (expectedUser) {
+      for (let i = cursor; i < msgs.length; i += 1) {
+        const m = msgs[i];
+        if (!m || typeof m !== "object") continue;
+        const role = String(m.role || "").trim().toLowerCase();
+        if (role !== "user") continue;
+        const content = normalizeForMatch(m.content || "");
+        if (content !== expectedUser) continue;
+        out[i] = tid;
+        cursor = i + 1;
+        break;
+      }
+    }
+
+    const expectedAssistant = normalizeForMatch(assistantTextFromTurn(turn));
+    if (expectedAssistant) {
+      for (let i = cursor; i < msgs.length; i += 1) {
+        const m = msgs[i];
+        if (!m || typeof m !== "object") continue;
+        const role = String(m.role || "").trim().toLowerCase();
+        if (role !== "assistant") continue;
+        const content = normalizeForMatch(m.content || "");
+        if (content !== expectedAssistant) continue;
+        out[i] = tid;
+        cursor = i + 1;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function loadTurnDiagnostics(turnId) {
+  const tid = String(turnId || "").trim();
+  if (!tid) return;
+  const turn = traceTurnById(tid);
+  const retrieval =
+    payloadFromTurn(turn, "retrieval") ||
+    latestTurnPayload(tid, "retrieval");
+  const extraction = bestExtractionPayloadForTurn(tid, turn);
+
+  state.selectedTurnId = tid;
+  renderChat();
+  renderRetrieval(retrieval);
+  renderExtraction(extraction, { force: true });
+}
+
 function renderChat() {
   const log = el("chatLog");
   const shouldStick =
     log.scrollTop + log.clientHeight >= log.scrollHeight - 140;
   const parts = [];
+  const msgTurnMap = buildMessageTurnIndexMap();
   let latestAssistantIndex = -1;
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
     const cur = state.messages[i];
@@ -436,6 +712,10 @@ function renderChat() {
   for (let idx = 0; idx < state.messages.length; idx += 1) {
     const m = state.messages[idx];
     const role = (m.role || "system").toLowerCase();
+    const turnId = String(msgTurnMap[idx] || "").trim();
+    const turnAttr = turnId ? ` data-turn-id="${escapeHtml(turnId)}" data-msg-index="${idx}"` : "";
+    const turnCls = turnId ? " chatitem--turn" : "";
+    const activeCls = turnId && turnId === String(state.selectedTurnId || "") ? " chatitem--turn-active" : "";
     const pending = !!m.pending;
     const contentHtml = pending
       ? `<span class="typing" aria-label="thinking"><span></span><span></span><span></span></span>`
@@ -445,15 +725,19 @@ function renderChat() {
       const bubbleCls = pending
         ? "chatbubble chatbubble--assistant chatbubble--pending"
         : "chatbubble chatbubble--assistant";
-      const showActions = !pending && idx === latestAssistantIndex;
-      const actionsHtml = showActions
-        ? `<div class="chatbubble__actions">
-            <button class="chatbubble__action" type="button" data-chat-action="copy" data-msg-index="${idx}">复制</button>
-            <button class="chatbubble__action" type="button" data-chat-action="regenerate" data-msg-index="${idx}">重新生成</button>
-          </div>`
-        : "";
+      const canCopy = !pending;
+      const canRegenerate = !pending && idx === latestAssistantIndex;
+      const canViewTurn = !!turnId;
+      const actionsHtml =
+        canCopy || canRegenerate || canViewTurn
+          ? `<div class="chatbubble__actions">
+              ${canCopy ? chatActionButton("copy", ` data-msg-index="${idx}"`, "Copy") : ""}
+              ${canRegenerate ? chatActionButton("regenerate", ` data-msg-index="${idx}"`, "Regenerate") : ""}
+              ${canViewTurn ? chatActionButton("view-turn", ` data-turn-id="${escapeHtml(turnId)}"`, "View Turn") : ""}
+            </div>`
+          : "";
       parts.push(
-        `<div class="chatitem chatitem--assistant"><div class="chatavatar" aria-hidden="true">AS</div><div class="chatassistant-wrap"><div class="${bubbleCls}">${contentHtml}</div>${actionsHtml}</div></div>`
+        `<div class="chatitem chatitem--assistant${turnCls}${activeCls}"${turnAttr}><div class="chatavatar" aria-hidden="true">AS</div><div class="chatassistant-wrap"><div class="${bubbleCls}">${contentHtml}</div>${actionsHtml}</div></div>`
       );
       continue;
     }
@@ -463,7 +747,7 @@ function renderChat() {
         ? "chatbubble chatbubble--user chatbubble--pending"
         : "chatbubble chatbubble--user";
       parts.push(
-        `<div class="chatitem chatitem--user"><div class="${bubbleCls}">${contentHtml}</div></div>`
+        `<div class="chatitem chatitem--user${turnCls}${activeCls}"${turnAttr}><div class="chatuser-wrap"><div class="${bubbleCls}">${contentHtml}</div></div></div>`
       );
       continue;
     }
@@ -471,8 +755,17 @@ function renderChat() {
     const bubbleCls = pending
       ? "chatbubble chatbubble--system chatbubble--pending"
       : "chatbubble chatbubble--system";
+    const canCopy = !pending;
+    const canViewTurn = !!turnId;
+    const actionsHtml =
+      canCopy || canViewTurn
+        ? `<div class="chatbubble__actions chatbubble__actions--center">
+            ${canCopy ? chatActionButton("copy", ` data-msg-index="${idx}"`, "Copy") : ""}
+            ${canViewTurn ? chatActionButton("view-turn", ` data-turn-id="${escapeHtml(turnId)}"`, "View Turn") : ""}
+          </div>`
+        : "";
     parts.push(
-      `<div class="chatitem chatitem--system"><div class="${bubbleCls}">${contentHtml}</div></div>`
+      `<div class="chatitem chatitem--system${turnCls}${activeCls}"${turnAttr}><div class="chatsystem-wrap"><div class="${bubbleCls}">${contentHtml}</div>${actionsHtml}</div></div>`
     );
   }
   log.innerHTML = parts.join("");
@@ -658,9 +951,12 @@ function setExtractionState(status) {
   node.className = `kv__v state-chip state-chip--${s}`;
 }
 
-function renderExtraction(extraction) {
+function renderExtraction(extraction, options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const force = !!opts.force;
   if (!extraction) {
     _clearExtractionTimers();
+    state.hydratingSkillId = null;
     state.extractionJobId = null;
     state.extractionStatus = "";
     state.extractionStartedAtMs = null;
@@ -681,9 +977,16 @@ function renderExtraction(extraction) {
     state.skillEditorDirty = false;
     return;
   }
+  if (force) {
+    _clearExtractionTimers();
+    state.extractionJobId = null;
+    state.extractionStatus = "";
+    state.extractionStartedAtMs = null;
+    state.extractionFinishedAtMs = null;
+  }
   const status = normalizeExtractionStatus(extraction);
-  const jobId = String(extraction?.job_id || "").trim();
-  const eventTime = _toMs(extraction?.event_time);
+  const jobId = extractionJobIdOf(extraction);
+  const eventTime = extractionEventTimeOf(extraction);
   const hasCurrentJob = !!state.extractionJobId;
   const isNewScheduled = status === "scheduled" && !!jobId && jobId !== state.extractionJobId;
 
@@ -698,7 +1001,7 @@ function renderExtraction(extraction) {
     _startElapsedTickerIfNeeded();
     _scheduleRunningTransition(state.extractionJobId);
   } else {
-    if (jobId && hasCurrentJob && jobId !== state.extractionJobId) {
+    if (!force && jobId && hasCurrentJob && jobId !== state.extractionJobId) {
       // Ignore stale events from older extraction jobs.
       return;
     }
@@ -734,7 +1037,17 @@ function renderExtraction(extraction) {
   el("extractTrigger").textContent = extraction.trigger || "";
   el("extractionError").textContent = extraction.error ? String(extraction.error) : "";
 
-  const upserted = Array.isArray(extraction.upserted) ? extraction.upserted : [];
+  const upsertedRaw = extractionArrayOf(extraction, "upserted", "upserted");
+  const detailSkills = extractionArrayOf(extraction, "skills", "skills");
+  const upserted =
+    upsertedRaw.length > 0
+      ? upsertedRaw
+      : detailSkills.map((s) => ({
+          id: String((s && s.id) || ""),
+          name: String((s && s.name) || ""),
+          version: String((s && s.version) || ""),
+          owner: String((s && (s.owner || s.user_id)) || ""),
+        }));
   if (!upserted.length) {
     el("upserted").innerHTML = `<div class="muted">(no skills upserted)</div>`;
   } else {
@@ -750,14 +1063,31 @@ function renderExtraction(extraction) {
       .join("");
   }
 
-  const mdItems = Array.isArray(extraction.skill_mds) ? extraction.skill_mds : [];
+  let mdItems = extractionArrayOf(extraction, "skill_mds", "skillMds");
+  if (!mdItems.length && detailSkills.length) {
+    mdItems = detailSkills
+      .map((s) => ({
+        id: String((s && s.id) || ""),
+        md: String((s && (s.skill_md || s.skillMd)) || ""),
+      }))
+      .filter((x) => x.id && x.md);
+  }
   if (!mdItems.length) {
-    const id = state.editingSkillId || "";
+    const id = upserted.length ? String((upserted[0] && upserted[0].id) || "").trim() : "";
     el("editingSkill").textContent = id;
+    if ((!id || state.editingSkillId !== id) && !state.skillEditorDirty) {
+      el("skillMdEditor").value = "";
+      state.skillEditorDirty = false;
+      state.editingSkillId = id || null;
+      el("saveSkillStatus").textContent = "";
+    }
     const busy = state.savingSkill || state.deletingSkill || state.rollingBackSkill;
     el("saveSkillBtn").disabled = !id || busy;
     el("rollbackSkillBtn").disabled = !id || busy;
     el("deleteSkillBtn").disabled = !id || busy;
+    if (id && !state.skillEditorDirty) {
+      hydrateSkillEditorFromStore(id);
+    }
     return;
   }
   const item0 = mdItems.length ? mdItems[0] : null;
@@ -828,6 +1158,31 @@ function downloadJsonFile(fileName, payload) {
   URL.revokeObjectURL(url);
 }
 
+async function hydrateSkillEditorFromStore(skillId) {
+  const sid = String(state.sessionId || "").trim();
+  const targetId = String(skillId || "").trim();
+  if (!sid || !targetId) return;
+  if (String(state.hydratingSkillId || "").trim() === targetId) return;
+  state.hydratingSkillId = targetId;
+  try {
+    const out = await api("/api/skills/get_many", { session_id: sid, skill_ids: [targetId] });
+    const rows = Array.isArray(out?.skills) ? out.skills : [];
+    const hit = rows.find((x) => String(x?.id || "").trim() === targetId) || null;
+    const md = String((hit && hit.skill_md) || "").trim();
+    if (!md) return;
+    if (String(state.editingSkillId || "").trim() !== targetId) return;
+    if (state.skillEditorDirty) return;
+    el("skillMdEditor").value = md;
+    el("saveSkillStatus").textContent = "";
+  } catch (_e) {
+    // Best-effort hydration; keep UI responsive when API is unavailable.
+  } finally {
+    if (String(state.hydratingSkillId || "").trim() === targetId) {
+      state.hydratingSkillId = null;
+    }
+  }
+}
+
 function normalizeTraceForExport(raw) {
   if (!raw || typeof raw !== "object") {
     return {
@@ -866,8 +1221,13 @@ function collectExtractedSkillIds(traceObj, lastResultObj) {
       const id = String((s && s.id) || "").trim();
       if (id) ids.add(id);
     }
-    const skillMds = Array.isArray(ex.skill_mds) ? ex.skill_mds : [];
+    const skillMds = Array.isArray(ex.skill_mds) ? ex.skill_mds : Array.isArray(ex.skillMds) ? ex.skillMds : [];
     for (const s of skillMds) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+    const skills = Array.isArray(ex.skills) ? ex.skills : [];
+    for (const s of skills) {
       const id = String((s && s.id) || "").trim();
       if (id) ids.add(id);
     }
@@ -879,8 +1239,17 @@ function collectExtractedSkillIds(traceObj, lastResultObj) {
       const id = String((s && s.id) || "").trim();
       if (id) ids.add(id);
     }
-    const skillMds = Array.isArray(lastEx.skill_mds) ? lastEx.skill_mds : [];
+    const skillMds = Array.isArray(lastEx.skill_mds)
+      ? lastEx.skill_mds
+      : Array.isArray(lastEx.skillMds)
+      ? lastEx.skillMds
+      : [];
     for (const s of skillMds) {
+      const id = String((s && s.id) || "").trim();
+      if (id) ids.add(id);
+    }
+    const skills = Array.isArray(lastEx.skills) ? lastEx.skills : [];
+    for (const s of skills) {
       const id = String((s && s.id) || "").trim();
       if (id) ids.add(id);
     }
@@ -1059,6 +1428,7 @@ async function apiStreamNdjson(path, body, onEvent) {
 
 function applySendResult(result, streamAssistantIndex, turnId) {
   state.lastResult = cloneJsonSafe(result);
+  state.selectedTurnId = turnId || null;
   const append = Array.isArray(result?.chat_append) ? result.chat_append : [];
   if (result?.kind === "command" && result?.command === "/clear") {
     state.messages = append.length ? append.slice() : [];
@@ -1366,8 +1736,35 @@ function bind() {
     el("chatLog").addEventListener("click", async (ev) => {
       const btn =
         ev.target && ev.target.closest ? ev.target.closest("[data-chat-action]") : null;
-      if (!btn) return;
+      if (!btn) {
+        const userBubble =
+          ev.target && ev.target.closest
+            ? ev.target.closest(".chatitem--user[data-turn-id] .chatbubble")
+            : null;
+        if (!userBubble) return;
+        const selectedText =
+          typeof window.getSelection === "function"
+            ? String(window.getSelection() || "").trim()
+            : "";
+        if (selectedText) return;
+        const userItem =
+          userBubble.closest && userBubble.closest(".chatitem--user[data-turn-id]");
+        const turnId = String(userItem?.getAttribute("data-turn-id") || "").trim();
+        if (!turnId) return;
+        loadTurnDiagnostics(turnId);
+        setStatus(true, "turn loaded");
+        return;
+      }
       const action = String(btn.getAttribute("data-chat-action") || "").trim().toLowerCase();
+
+      if (action === "view-turn") {
+        const turnId = String(btn.getAttribute("data-turn-id") || "").trim();
+        if (!turnId) return;
+        loadTurnDiagnostics(turnId);
+        setStatus(true, "turn loaded");
+        return;
+      }
+
       const idx = Number.parseInt(String(btn.getAttribute("data-msg-index") || "-1"), 10);
       if (!Number.isFinite(idx) || idx < 0 || idx >= state.messages.length) return;
       if (state.inFlight) return;
