@@ -379,12 +379,62 @@ function truncateTextForDisplay(text, maxChars) {
   return `${chars.slice(0, Math.max(1, max - 3)).join("")}...`;
 }
 
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch (_e) {
+    // Fallback below.
+  }
+  const node = document.createElement("textarea");
+  node.value = value;
+  node.setAttribute("readonly", "readonly");
+  node.style.position = "fixed";
+  node.style.opacity = "0";
+  document.body.appendChild(node);
+  node.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    document.body.removeChild(node);
+  }
+}
+
+function previousUserMessageText(beforeIndex) {
+  const idx = Number.isInteger(beforeIndex) ? beforeIndex : -1;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const m = state.messages[i];
+    if (!m || typeof m !== "object") continue;
+    const role = String(m.role || "").trim().toLowerCase();
+    if (role !== "user") continue;
+    const content = String(m.content || "").trim();
+    if (content) return content;
+  }
+  return "";
+}
+
 function renderChat() {
   const log = el("chatLog");
   const shouldStick =
     log.scrollTop + log.clientHeight >= log.scrollHeight - 140;
   const parts = [];
-  for (const m of state.messages) {
+  let latestAssistantIndex = -1;
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    const cur = state.messages[i];
+    if (!cur || typeof cur !== "object") continue;
+    const role = String(cur.role || "").trim().toLowerCase();
+    if (role === "assistant" && !cur.pending) {
+      latestAssistantIndex = i;
+      break;
+    }
+  }
+
+  for (let idx = 0; idx < state.messages.length; idx += 1) {
+    const m = state.messages[idx];
     const role = (m.role || "system").toLowerCase();
     const pending = !!m.pending;
     const contentHtml = pending
@@ -395,8 +445,15 @@ function renderChat() {
       const bubbleCls = pending
         ? "chatbubble chatbubble--assistant chatbubble--pending"
         : "chatbubble chatbubble--assistant";
+      const showActions = !pending && idx === latestAssistantIndex;
+      const actionsHtml = showActions
+        ? `<div class="chatbubble__actions">
+            <button class="chatbubble__action" type="button" data-chat-action="copy" data-msg-index="${idx}">复制</button>
+            <button class="chatbubble__action" type="button" data-chat-action="regenerate" data-msg-index="${idx}">重新生成</button>
+          </div>`
+        : "";
       parts.push(
-        `<div class="chatitem chatitem--assistant"><div class="chatavatar" aria-hidden="true">AS</div><div class="${bubbleCls}">${contentHtml}</div></div>`
+        `<div class="chatitem chatitem--assistant"><div class="chatavatar" aria-hidden="true">AS</div><div class="chatassistant-wrap"><div class="${bubbleCls}">${contentHtml}</div>${actionsHtml}</div></div>`
       );
       continue;
     }
@@ -1301,6 +1358,44 @@ function bind() {
         setStatus(true, "connected");
       } catch (e) {
         setStatus(false, String(e?.message || e));
+      }
+    });
+  }
+
+  if (el("chatLog")) {
+    el("chatLog").addEventListener("click", async (ev) => {
+      const btn =
+        ev.target && ev.target.closest ? ev.target.closest("[data-chat-action]") : null;
+      if (!btn) return;
+      const action = String(btn.getAttribute("data-chat-action") || "").trim().toLowerCase();
+      const idx = Number.parseInt(String(btn.getAttribute("data-msg-index") || "-1"), 10);
+      if (!Number.isFinite(idx) || idx < 0 || idx >= state.messages.length) return;
+      if (state.inFlight) return;
+
+      if (action === "copy") {
+        const msg = state.messages[idx];
+        const text = String(msg?.content || "");
+        if (!text.trim()) return;
+        try {
+          await copyTextToClipboard(text);
+          setStatus(true, "copied");
+        } catch (e) {
+          setStatus(false, String(e?.message || e));
+        }
+        return;
+      }
+
+      if (action === "regenerate") {
+        const sourceText = previousUserMessageText(idx);
+        if (!sourceText) {
+          setStatus(false, "No previous user query found.");
+          return;
+        }
+        try {
+          await sendText(sourceText);
+        } catch (e) {
+          setStatus(false, String(e?.message || e));
+        }
       }
     });
   }

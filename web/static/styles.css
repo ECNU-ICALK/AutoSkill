@@ -358,6 +358,14 @@ body {
   justify-content: center;
 }
 
+.chatassistant-wrap {
+  max-width: 72%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .chatavatar {
   width: 34px;
   height: 34px;
@@ -387,6 +395,10 @@ body {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
 }
 
+.chatitem--assistant .chatbubble {
+  max-width: 100%;
+}
+
 .chatbubble--assistant {
   border-top-left-radius: 8px;
   background: rgba(2, 6, 23, 0.28);
@@ -409,6 +421,35 @@ body {
 
 .chatbubble--pending {
   opacity: 0.92;
+}
+
+.chatbubble__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 2px;
+}
+
+.chatbubble__action {
+  border: 1px solid rgba(71, 85, 105, 0.88);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  color: rgba(203, 213, 225, 0.95);
+  font-size: 11px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.chatbubble__action:hover {
+  border-color: rgba(96, 165, 250, 0.75);
+  background: rgba(30, 64, 175, 0.22);
+  color: #e2e8f0;
+}
+
+.chatbubble__action:active {
+  transform: translateY(1px);
 }
 
 .typing {

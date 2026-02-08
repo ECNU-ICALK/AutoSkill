@@ -794,7 +794,10 @@ class InteractiveSession:
         md_items: List[Dict[str, Any]] = []
         for s in skills[:3]:
             md = self.sdk.export_skill_md(str(s.id)) or ""
-            md_items.append({"id": s.id, "md": _truncate_text(md, max_chars=max(800, int(max_md_chars)))})
+            # Web editor should receive full SKILL.md content (no "(truncated)" marker).
+            # Keep `max_md_chars` in signature for backward compatibility.
+            _ = max_md_chars
+            md_items.append({"id": s.id, "md": md})
         return {
             "trigger": str(trigger),
             "job_id": str(job_id or ""),
