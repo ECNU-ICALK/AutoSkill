@@ -437,6 +437,13 @@ class _SessionManager:
                 turn = self._find_turn_locked(key, turn_id)
                 if turn is not None:
                     turn["extraction"] = rec
+            # Keep latest extraction in trace-level last_result so UI restore can always recover it.
+            tr = self._trace_for_locked(key)
+            last_result = tr.get("last_result")
+            if not isinstance(last_result, dict):
+                last_result = {}
+            last_result["extraction"] = rec
+            tr["last_result"] = last_result
 
     def complete_turn(self, sid: str, *, turn_id: Optional[str], result: Any, source: str) -> None:
         key = str(sid or "").strip()
@@ -834,7 +841,19 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 session = manager.get(sid)
                 if session is None:
                     return _json_response(self, {"error": "unknown session_id"}, status=404)
-                return _json_response(self, {"session_id": sid, **session.poll()})
+                polled = session.poll()
+                events_obj = polled.get("events") if isinstance(polled, dict) else {}
+                extraction_events = []
+                if isinstance(events_obj, dict):
+                    raw = events_obj.get("extraction")
+                    if isinstance(raw, list):
+                        extraction_events = [ev for ev in raw if isinstance(ev, dict)]
+                if extraction_events:
+                    for ev in extraction_events:
+                        manager.record_extraction(sid, turn_id=None, extraction=ev, source="poll")
+                    # Persist extraction trace updates so refresh can restore the right-side panel.
+                    manager.touch(sid)
+                return _json_response(self, {"session_id": sid, **polled})
 
             if path == "/api/session/input":
                 sid = str(body.get("session_id") or "").strip()
