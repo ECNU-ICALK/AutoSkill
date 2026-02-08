@@ -64,6 +64,17 @@ def main() -> None:
         default=int(_env("AUTOSKILL_MAX_BG_EXTRACT_JOBS", "2")),
     )
     parser.add_argument(
+        "--extract-event-details",
+        default=_env("AUTOSKILL_PROXY_EXTRACT_EVENT_DETAILS", "1"),
+        help="Include detailed extracted skills in extraction events: 1|0",
+    )
+    parser.add_argument(
+        "--extract-event-max-md-chars",
+        type=int,
+        default=int(_env("AUTOSKILL_PROXY_EXTRACT_EVENT_MAX_MD_CHARS", "3000")),
+        help="Max SKILL.md chars included in extraction event details.",
+    )
+    parser.add_argument(
         "--proxy-api-key",
         default=_env("AUTOSKILL_PROXY_API_KEY", ""),
         help="Optional API key checked against Authorization: Bearer <key>",
@@ -103,6 +114,11 @@ def main() -> None:
     )
 
     extract_enabled = str(args.extract_enabled or "1").strip().lower() not in {"0", "false", "no"}
+    extract_event_details = str(args.extract_event_details or "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
 
     proxy_cfg = AutoSkillProxyConfig(
         user_id=str(args.user_id),
@@ -114,6 +130,8 @@ def main() -> None:
         extract_enabled=bool(extract_enabled),
         ingest_window=int(args.ingest_window),
         max_bg_extract_jobs=int(args.max_bg_extract_jobs),
+        extract_event_include_skill_details=bool(extract_event_details),
+        extract_event_max_md_chars=int(args.extract_event_max_md_chars),
         proxy_api_key=(str(args.proxy_api_key).strip() or None),
     ).normalize()
 

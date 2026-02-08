@@ -188,10 +188,11 @@ def _should_merge(
     threshold: float,
 ) -> bool:
     """
-    Unified merge gate:
-    1) fast path by code confidence (very high / very low)
-    2) ambiguous band resolved by LLM judge when available
-    3) fallback to code confidence
+    Unified merge gate.
+
+    Priority:
+    1) LLM semantic judge when available (primary decision source)
+    2) deterministic score only as fallback/safety net
     """
 
     score = _merge_confidence_by_code(
@@ -201,11 +202,6 @@ def _should_merge(
         threshold=threshold,
     )
 
-    if score >= 0.80:
-        return True
-    if score <= 0.22:
-        return False
-
     if llm is not None:
         same, conf, _reason = _judge_merge_with_llm(
             llm,
@@ -214,12 +210,21 @@ def _should_merge(
             similarity=similarity,
             threshold=threshold,
         )
-        if conf >= 0.66:
+        if conf >= 0.55:
             return bool(same)
-        # Low-confidence LLM output: rely on deterministic score.
-        return bool(score >= 0.45)
+        # Low-confidence LLM output: rely on deterministic score as a conservative backup.
+        if score >= 0.82:
+            return True
+        if score <= 0.20:
+            return False
+        return bool(score >= 0.52)
 
-    return bool(score >= 0.45)
+    # LLM unavailable: deterministic fallback.
+    if score >= 0.80:
+        return True
+    if score <= 0.22:
+        return False
+    return bool(score >= 0.50)
 
 
 def _json_from_llm_decision(text: str) -> Dict:
@@ -530,7 +535,7 @@ class SkillMaintainer:
                     dedupe_threshold=float(self._config.dedupe_similarity_threshold),
                 )
             except Exception:
-                action, target_skill_id = "add", None
+                action, target_skill_id = "", None
 
             if action == "discard":
                 return None
@@ -550,8 +555,32 @@ class SkillMaintainer:
                 if target is not None:
                     return _persist_merged(target)
 
+                if best_user and best_user.score >= self._config.dedupe_similarity_threshold and _can_merge_to(
+                    best_user.skill,
+                    float(best_user.score),
+                    threshold=float(self._config.dedupe_similarity_threshold),
+                ):
+                    return _persist_merged(best_user.skill)
                 return _create_new()
 
+            # If LLM action is missing/invalid, fall back to deterministic maintenance.
+            if best_user and best_user.score >= self._config.dedupe_similarity_threshold and _can_merge_to(
+                best_user.skill,
+                float(best_user.score),
+                threshold=float(self._config.dedupe_similarity_threshold),
+            ):
+                return _persist_merged(best_user.skill)
+            if (
+                best_any
+                and best_library
+                and best_library.score >= self._config.dedupe_similarity_threshold
+                and _can_merge_to(
+                best_library.skill,
+                float(best_library.score),
+                threshold=float(self._config.dedupe_similarity_threshold),
+                )
+            ):
+                return None
             return _create_new()
 
         # Fallback / heuristic maintenance:

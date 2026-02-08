@@ -439,6 +439,8 @@ class AutoSkillProxyConfig:
     extract_enabled: bool = True
     ingest_window: int = 6
     max_bg_extract_jobs: int = 2
+    extract_event_include_skill_details: bool = True
+    extract_event_max_md_chars: int = 3000
     proxy_api_key: Optional[str] = None
 
     def normalize(self) -> "AutoSkillProxyConfig":
@@ -453,6 +455,8 @@ class AutoSkillProxyConfig:
         self.history_turns = max(1, int(self.history_turns or 10))
         self.ingest_window = max(2, int(self.ingest_window or 6))
         self.max_bg_extract_jobs = max(1, int(self.max_bg_extract_jobs or 2))
+        self.extract_event_include_skill_details = bool(self.extract_event_include_skill_details)
+        self.extract_event_max_md_chars = max(256, int(self.extract_event_max_md_chars or 3000))
         self.assistant_temperature = _safe_float(self.assistant_temperature, 0.2)
         key = str(self.proxy_api_key or "").strip()
         self.proxy_api_key = key or None
@@ -474,6 +478,15 @@ class _PreparedChat:
     retrieved_hits: List[Dict[str, Any]]
     selected_skills: List[Dict[str, Any]]
     trigger: str
+
+
+@dataclass
+class _ProxyExtractJob:
+    job_id: str
+    user_id: str
+    window: List[Dict[str, str]]
+    trigger: str
+    hint: Optional[str]
 
 
 class AutoSkillProxyRuntime:
@@ -499,6 +512,9 @@ class AutoSkillProxyRuntime:
         self.config = (config or AutoSkillProxyConfig()).normalize()
         self.skill_selector = skill_selector
         self._extract_sema = threading.BoundedSemaphore(self.config.max_bg_extract_jobs)
+        self._extract_sched_lock = threading.Lock()
+        self._extract_running_users: set[str] = set()
+        self._extract_queued_by_user: Dict[str, _ProxyExtractJob] = {}
         self._extract_events_lock = threading.Lock()
         self._extract_events_by_user: Dict[str, List[Dict[str, Any]]] = {}
         self._extract_latest_by_job: Dict[str, Dict[str, Any]] = {}
@@ -759,13 +775,19 @@ class AutoSkillProxyRuntime:
                             _openai_error(str(e), code="invalid_request"),
                             status=400,
                         )
-                    extraction_job_id = runtime._schedule_extraction_job(
-                        user_id=prepared.user_id,
-                        messages=prepared.normalized_messages[-int(runtime.config.ingest_window) :],
-                        trigger=prepared.trigger,
+                    extraction_job_id: Optional[str] = None
+                    extraction_status = "disabled"
+                    extraction_window = runtime._build_auto_extraction_window(
+                        prepared.normalized_messages
                     )
-                    ev = runtime._get_extraction_event_by_job(job_id=extraction_job_id)
-                    extraction_status = str((ev or {}).get("status") or "scheduled")
+                    if extraction_window:
+                        extraction_job_id = runtime._schedule_extraction_job(
+                            user_id=prepared.user_id,
+                            messages=extraction_window,
+                            trigger=prepared.trigger,
+                        )
+                        ev = runtime._get_extraction_event_by_job(job_id=extraction_job_id)
+                        extraction_status = str((ev or {}).get("status") or "scheduled")
                     if stream:
                         return runtime.stream_chat_completion(
                             self,
@@ -1829,6 +1851,25 @@ class AutoSkillProxyRuntime:
             return store
         return None
 
+    def _build_auto_extraction_window(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Builds the automatic extraction window for proxy chat requests.
+
+        Semantics are aligned with interactive mode:
+        - use the recent ingest window
+        - schedule only when the window already contains at least one assistant turn
+        """
+
+        window = list(messages[-int(self.config.ingest_window) :]) if messages else []
+        if not window:
+            return []
+        has_assistant = any(
+            str(m.get("role") or "").strip().lower() == "assistant" for m in window
+        )
+        if not has_assistant:
+            return []
+        return window
+
     def _schedule_extraction_job(
         self,
         *,
@@ -1843,105 +1884,206 @@ class AutoSkillProxyRuntime:
         if not self.config.extract_enabled:
             self._record_extraction_event(
                 user_id=uid,
-                event={
-                    "job_id": job_id,
-                    "trigger": str(trigger or "proxy_extract"),
-                    "status": "failed",
-                    "error": "extraction disabled",
-                    "upserted": [],
-                },
+                event=self._empty_extraction_event(
+                    job_id=job_id,
+                    trigger=str(trigger or "proxy_extract"),
+                    status="failed",
+                    error="extraction disabled",
+                ),
             )
             return job_id
         if not window:
             self._record_extraction_event(
                 user_id=uid,
-                event={
-                    "job_id": job_id,
-                    "trigger": str(trigger or "proxy_extract"),
-                    "status": "failed",
-                    "error": "empty extraction window",
-                    "upserted": [],
-                },
+                event=self._empty_extraction_event(
+                    job_id=job_id,
+                    trigger=str(trigger or "proxy_extract"),
+                    status="failed",
+                    error="empty extraction window",
+                ),
             )
             return job_id
 
+        job = _ProxyExtractJob(
+            job_id=job_id,
+            user_id=uid,
+            window=window,
+            trigger=str(trigger or "proxy_extract"),
+            hint=(str(hint).strip() if hint and str(hint).strip() else None),
+        )
         self._record_extraction_event(
             user_id=uid,
-            event={
-                "job_id": job_id,
-                "trigger": str(trigger or "proxy_extract"),
-                "status": "scheduled",
-                "error": "",
-                "upserted": [],
-            },
+            event=self._empty_extraction_event(
+                job_id=job_id,
+                trigger=str(trigger or "proxy_extract"),
+                status="scheduled",
+                error="",
+            ),
         )
 
-        if not self._extract_sema.acquire(blocking=False):
-            self._record_extraction_event(
-                user_id=uid,
-                event={
-                    "job_id": job_id,
-                    "trigger": str(trigger or "proxy_extract"),
-                    "status": "failed",
-                    "error": "too many background extraction jobs",
-                    "upserted": [],
-                },
-            )
-            return job_id
+        should_start_worker = False
+        superseded: Optional[_ProxyExtractJob] = None
+        with self._extract_sched_lock:
+            if uid in self._extract_running_users:
+                # Coalesce: keep only the most recent queued job for this user.
+                superseded = self._extract_queued_by_user.get(uid)
+                self._extract_queued_by_user[uid] = job
+            else:
+                self._extract_running_users.add(uid)
+                should_start_worker = True
 
-        def _run() -> None:
+        if superseded is not None:
             self._record_extraction_event(
                 user_id=uid,
-                event={
-                    "job_id": job_id,
-                    "trigger": str(trigger or "proxy_extract"),
-                    "status": "running",
-                    "error": "",
-                    "upserted": [],
-                },
+                event=self._empty_extraction_event(
+                    job_id=str(superseded.job_id),
+                    trigger=str(superseded.trigger),
+                    status="failed",
+                    error="superseded by newer extraction job",
+                ),
             )
-            try:
-                updated = self.sdk.ingest(
-                    user_id=uid,
-                    messages=window,
-                    metadata={"channel": "proxy_api", "trigger": str(trigger)},
-                    hint=hint,
-                )
-                upserted = [_skill_summary(s) for s in (updated or [])]
+
+        if should_start_worker:
+            threading.Thread(
+                target=self._background_extraction_worker,
+                args=(job,),
+                daemon=True,
+            ).start()
+        return job_id
+
+    def _empty_extraction_event(
+        self,
+        *,
+        job_id: str,
+        trigger: str,
+        status: str,
+        error: str,
+        event_time: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "job_id": str(job_id or ""),
+            "trigger": str(trigger or "proxy_extract"),
+            "event_time": int(event_time or int(time.time() * 1000)),
+            "status": str(status or ""),
+            "error": str(error or ""),
+            "upserted": [],
+            "skills": [],
+            "skill_mds": [],
+        }
+
+    def _build_completed_extraction_event(
+        self,
+        *,
+        updated: List[Skill],
+        job_id: str,
+        trigger: str,
+        event_time: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        event = self._empty_extraction_event(
+            job_id=job_id,
+            trigger=trigger,
+            status="completed",
+            error="",
+            event_time=event_time,
+        )
+        skills = list(updated or [])
+        event["upserted"] = [_skill_summary(s) for s in skills]
+
+        if not bool(self.config.extract_event_include_skill_details):
+            return event
+
+        max_md_chars = int(self.config.extract_event_max_md_chars or 3000)
+        if str(trigger or "").strip() == "proxy_extract_now":
+            max_md_chars = max(max_md_chars, 8000)
+
+        md_items: List[Dict[str, Any]] = []
+        skill_items: List[Dict[str, Any]] = []
+        for s in skills[:3]:
+            md_full = str(self.sdk.export_skill_md(str(s.id)) or "")
+            md = md_full
+            if max_md_chars > 0 and len(md) > max_md_chars:
+                md = md[:max_md_chars].rstrip() + "\n\n...[truncated]...\n"
+            md_items.append({"id": str(s.id), "md": md})
+            skill_items.append(
+                {
+                    "id": str(s.id),
+                    "name": str(s.name),
+                    "description": str(s.description),
+                    "version": str(s.version),
+                    "owner": str(s.user_id),
+                    "triggers": [str(t) for t in (s.triggers or [])],
+                    "tags": [str(t) for t in (s.tags or [])],
+                    "instructions": str(s.instructions or ""),
+                    "examples": _examples_to_raw(list(s.examples or [])),
+                    "skill_md": md,
+                }
+            )
+        event["skills"] = skill_items
+        event["skill_mds"] = md_items
+        return event
+
+    def _background_extraction_worker(self, job: _ProxyExtractJob) -> None:
+        uid = str(getattr(job, "user_id", "") or "").strip() or self.config.user_id
+        acquired = False
+        current = job
+        try:
+            self._extract_sema.acquire()
+            acquired = True
+            while True:
                 self._record_extraction_event(
                     user_id=uid,
-                    event={
-                        "job_id": job_id,
-                        "trigger": str(trigger or "proxy_extract"),
-                        "status": "completed",
-                        "error": "",
-                        "upserted": upserted,
-                    },
+                    event=self._empty_extraction_event(
+                        job_id=str(current.job_id),
+                        trigger=str(current.trigger),
+                        status="running",
+                        error="",
+                    ),
                 )
-                if updated:
-                    print(
-                        f"[proxy] extraction upserted={len(updated)} user={uid} trigger={trigger} job={job_id}"
+                try:
+                    updated = self.sdk.ingest(
+                        user_id=uid,
+                        messages=list(current.window or []),
+                        metadata={"channel": "proxy_api", "trigger": str(current.trigger)},
+                        hint=current.hint,
                     )
-            except Exception as e:
-                self._record_extraction_event(
-                    user_id=uid,
-                    event={
-                        "job_id": job_id,
-                        "trigger": str(trigger or "proxy_extract"),
-                        "status": "failed",
-                        "error": str(e),
-                        "upserted": [],
-                    },
-                )
-                print(f"[proxy] extraction failed user={uid} trigger={trigger} job={job_id}: {e}")
-            finally:
+                    event = self._build_completed_extraction_event(
+                        updated=list(updated or []),
+                        job_id=str(current.job_id),
+                        trigger=str(current.trigger),
+                    )
+                    self._record_extraction_event(user_id=uid, event=event)
+                    if updated:
+                        print(
+                            f"[proxy] extraction upserted={len(updated)} user={uid} "
+                            f"trigger={current.trigger} job={current.job_id}"
+                        )
+                except Exception as e:
+                    self._record_extraction_event(
+                        user_id=uid,
+                        event=self._empty_extraction_event(
+                            job_id=str(current.job_id),
+                            trigger=str(current.trigger),
+                            status="failed",
+                            error=str(e),
+                        ),
+                    )
+                    print(
+                        f"[proxy] extraction failed user={uid} "
+                        f"trigger={current.trigger} job={current.job_id}: {e}"
+                    )
+
+                with self._extract_sched_lock:
+                    next_job = self._extract_queued_by_user.pop(uid, None)
+                    if next_job is None:
+                        self._extract_running_users.discard(uid)
+                        break
+                current = next_job
+        finally:
+            if acquired:
                 try:
                     self._extract_sema.release()
                 except Exception:
                     pass
-
-        threading.Thread(target=_run, daemon=True).start()
-        return job_id
 
     def _build_chat_llm(self, *, model: str, max_tokens: Optional[int]) -> LLM:
         cfg = dict(self.llm_config)
