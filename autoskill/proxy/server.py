@@ -487,6 +487,7 @@ class _ProxyExtractJob:
     window: List[Dict[str, str]]
     trigger: str
     hint: Optional[str]
+    retrieval_reference: Optional[Dict[str, Any]] = None
 
 
 class AutoSkillProxyRuntime:
@@ -781,10 +782,15 @@ class AutoSkillProxyRuntime:
                         prepared.normalized_messages
                     )
                     if extraction_window:
+                        top_ref = runtime._top_reference_from_retrieval_hits(
+                            retrieval_hits=list(prepared.retrieved_hits or []),
+                            user_id=prepared.user_id,
+                        )
                         extraction_job_id = runtime._schedule_extraction_job(
                             user_id=prepared.user_id,
                             messages=extraction_window,
                             trigger=prepared.trigger,
+                            retrieval_reference=top_ref,
                         )
                         ev = runtime._get_extraction_event_by_job(job_id=extraction_job_id)
                         extraction_status = str((ev or {}).get("status") or "scheduled")
@@ -1427,12 +1433,27 @@ class AutoSkillProxyRuntime:
             raise ValueError("messages or query is required")
         hint_raw = body.get("hint")
         hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
+        scope_raw = str(body.get("scope") or "").strip()
+        scope = _normalize_scope(scope_raw) if scope_raw else self._resolve_scope(headers=headers)
+        min_score = _safe_float(body.get("min_score"), self.config.min_score)
+        retrieval = self._retrieve_context(
+            messages=messages,
+            user_id=user_id,
+            scope=scope,
+            limit=1,
+            min_score=min_score,
+        )
+        top_ref = self._top_reference_from_retrieval_hits(
+            retrieval_hits=list(retrieval.get("hits") or []),
+            user_id=user_id,
+        )
 
         job_id = self._schedule_extraction_job(
             user_id=user_id,
             messages=messages[-int(self.config.ingest_window) :],
             trigger="proxy_extract_now",
             hint=hint,
+            retrieval_reference=top_ref,
         )
         ev = self._get_extraction_event_by_job(job_id=job_id)
         return {
@@ -1452,12 +1473,27 @@ class AutoSkillProxyRuntime:
         hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
 
         max_candidates = max(0, min(1, int(self.sdk.config.max_candidates_per_ingest)))
-        extracted = self.sdk.extractor.extract(
+        scope_raw = str(body.get("scope") or "").strip()
+        scope = _normalize_scope(scope_raw) if scope_raw else self._resolve_scope(headers=headers)
+        min_score = _safe_float(body.get("min_score"), self.config.min_score)
+        retrieval = self._retrieve_context(
+            messages=messages,
+            user_id=user_id,
+            scope=scope,
+            limit=1,
+            min_score=min_score,
+        )
+        top_ref = self._top_reference_from_retrieval_hits(
+            retrieval_hits=list(retrieval.get("hits") or []),
+            user_id=user_id,
+        )
+        extracted = self.sdk.extract_candidates(
             user_id=user_id,
             messages=messages[-int(self.config.ingest_window) :],
             events=None,
-            max_candidates=max_candidates,
             hint=hint,
+            max_candidates=max_candidates,
+            retrieved_reference=top_ref,
         )
         return {
             "object": "extraction_simulation",
@@ -1870,6 +1906,30 @@ class AutoSkillProxyRuntime:
             return []
         return window
 
+    def _top_reference_from_retrieval_hits(
+        self,
+        *,
+        retrieval_hits: List[Dict[str, Any]],
+        user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        if not retrieval_hits:
+            return None
+        top = retrieval_hits[0] if isinstance(retrieval_hits[0], dict) else None
+        if not isinstance(top, dict):
+            return None
+        skill = top.get("skill") if isinstance(top.get("skill"), dict) else None
+        if skill is None:
+            return None
+        owner = str(skill.get("owner") or "").strip()
+        scope = "library" if owner.startswith("library:") else ("user" if owner == str(user_id or "").strip() else "other")
+        return {
+            "id": str(skill.get("id") or "").strip(),
+            "name": str(skill.get("name") or "").strip(),
+            "description": str(skill.get("description") or "").strip(),
+            "scope": scope,
+            "score": float(top.get("score") or 0.0),
+        }
+
     def _schedule_extraction_job(
         self,
         *,
@@ -1877,6 +1937,7 @@ class AutoSkillProxyRuntime:
         messages: List[Dict[str, str]],
         trigger: str,
         hint: Optional[str] = None,
+        retrieval_reference: Optional[Dict[str, Any]] = None,
     ) -> str:
         uid = str(user_id or "").strip() or self.config.user_id
         window = list(messages or [])
@@ -1910,6 +1971,7 @@ class AutoSkillProxyRuntime:
             window=window,
             trigger=str(trigger or "proxy_extract"),
             hint=(str(hint).strip() if hint and str(hint).strip() else None),
+            retrieval_reference=(dict(retrieval_reference) if isinstance(retrieval_reference, dict) else None),
         )
         self._record_extraction_event(
             user_id=uid,
@@ -2043,7 +2105,15 @@ class AutoSkillProxyRuntime:
                     updated = self.sdk.ingest(
                         user_id=uid,
                         messages=list(current.window or []),
-                        metadata={"channel": "proxy_api", "trigger": str(current.trigger)},
+                        metadata={
+                            "channel": "proxy_api",
+                            "trigger": str(current.trigger),
+                            "extraction_reference": (
+                                dict(current.retrieval_reference)
+                                if isinstance(current.retrieval_reference, dict)
+                                else None
+                            ),
+                        },
                         hint=current.hint,
                     )
                     event = self._build_completed_extraction_event(

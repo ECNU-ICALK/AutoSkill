@@ -42,6 +42,7 @@ class _BgExtractJob:
     trigger: str
     hint: Optional[str]
     epoch: int
+    retrieval_reference: Optional[Dict[str, Any]] = None
 
 
 def _skill_source_label(skill: Skill) -> str:
@@ -71,6 +72,24 @@ def _format_hit(hit: SkillHit, *, rank: int) -> Dict[str, Any]:
         "source": _skill_source_label(skill),
         "owner": str(getattr(skill, "user_id", "") or ""),
         "version": str(getattr(skill, "version", "") or ""),
+    }
+
+
+def _top_reference_from_hits(hits: List[SkillHit], *, user_id: str) -> Optional[Dict[str, Any]]:
+    if not hits:
+        return None
+    top = hits[0]
+    skill = getattr(top, "skill", None)
+    if skill is None:
+        return None
+    owner = str(getattr(skill, "user_id", "") or "").strip()
+    scope = "library" if owner.startswith("library:") else ("user" if owner == str(user_id or "").strip() else "other")
+    return {
+        "id": str(getattr(skill, "id", "") or "").strip(),
+        "name": str(getattr(skill, "name", "") or "").strip(),
+        "description": str(getattr(skill, "description", "") or "").strip(),
+        "scope": scope,
+        "score": float(getattr(top, "score", 0.0) or 0.0),
     }
 
 
@@ -438,8 +457,8 @@ class InteractiveSession:
 
         Stages:
         1) drain background extraction result
-        2) (auto mode) schedule extraction as soon as user input arrives
-        3) rewrite query + retrieve/select skills
+        2) rewrite query + retrieve/select skills
+        3) (auto mode) schedule extraction using retrieval query/top1 reference
         4) generate assistant response
         5) stage latest window for the next-turn extraction
         """
@@ -455,9 +474,8 @@ class InteractiveSession:
 
         self.messages.append({"role": "user", "content": latest_user})
 
-        # Schedule extraction immediately on user input so extraction can run in parallel with
-        # response generation. Prefer the pending feedback window; otherwise use the current
-        # recent context if it already contains assistant turns.
+        # Build extraction window early, but schedule only after rewrite+retrieval so the
+        # extraction input can use the same rewritten query and top-1 retrieval reference.
         early_window = (
             list(extract_window)
             if extract_window is not None
@@ -466,23 +484,6 @@ class InteractiveSession:
         has_assistant_in_window = any(
             str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
         )
-        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            job_id = self._start_background_extraction(early_window, trigger="auto")
-            extraction_scheduled = {
-                "trigger": "auto",
-                "job_id": str(job_id or ""),
-                "event_time": _now_ms(),
-                "status": "scheduled",
-                "error": "",
-                "upserted": [],
-                "skill_mds": [],
-            }
 
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         original_query = latest_user
@@ -513,6 +514,29 @@ class InteractiveSession:
         min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
         if hits and min_score > 0:
             hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            top_ref = _top_reference_from_hits(hits, user_id=self.config.user_id)
+            job_id = self._start_background_extraction(
+                early_window,
+                trigger="auto",
+                retrieval_reference=top_ref,
+            )
+            extraction_scheduled = {
+                "trigger": "auto",
+                "job_id": str(job_id or ""),
+                "event_time": _now_ms(),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+                "skill_mds": [],
+            }
 
         skills_for_use = [h.skill for h in hits]
         selected_for_use = list(skills_for_use)
@@ -592,9 +616,8 @@ class InteractiveSession:
 
         self.messages.append({"role": "user", "content": latest_user})
 
-        # Schedule extraction immediately on user input so extraction can run in parallel with
-        # response generation. Prefer the pending feedback window; otherwise use the current
-        # recent context if it already contains assistant turns.
+        # Build extraction window early, but schedule only after rewrite+retrieval so the
+        # extraction input can use the same rewritten query and top-1 retrieval reference.
         early_window = (
             list(extract_window)
             if extract_window is not None
@@ -603,30 +626,10 @@ class InteractiveSession:
         has_assistant_in_window = any(
             str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
         )
-        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            job_id = self._start_background_extraction(early_window, trigger="auto")
-            extraction_scheduled = {
-                "trigger": "auto",
-                "job_id": str(job_id or ""),
-                "event_time": _now_ms(),
-                "status": "scheduled",
-                "error": "",
-                "upserted": [],
-                "skill_mds": [],
-            }
 
-        # Emit extraction updates early so Web UI progress can update without waiting for
-        # full assistant generation to finish.
+        # Emit completed extraction updates from previous jobs early so Web UI can refresh.
         if extraction_event is not None:
             yield {"type": "extraction", "extraction": extraction_event}
-        if extraction_scheduled is not None:
-            yield {"type": "extraction", "extraction": extraction_scheduled}
 
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         original_query = latest_user
@@ -657,6 +660,29 @@ class InteractiveSession:
         min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
         if hits and min_score > 0:
             hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            top_ref = _top_reference_from_hits(hits, user_id=self.config.user_id)
+            job_id = self._start_background_extraction(
+                early_window,
+                trigger="auto",
+                retrieval_reference=top_ref,
+            )
+            extraction_scheduled = {
+                "trigger": "auto",
+                "job_id": str(job_id or ""),
+                "event_time": _now_ms(),
+                "status": "scheduled",
+                "error": "",
+                "upserted": [],
+                "skill_mds": [],
+            }
 
         skills_for_use = [h.skill for h in hits]
         selected_for_use = list(skills_for_use)
@@ -694,6 +720,8 @@ class InteractiveSession:
         )
         # Emit retrieval diagnostics as soon as retrieval is complete.
         yield {"type": "retrieval", "retrieval": retrieval}
+        if extraction_scheduled is not None:
+            yield {"type": "extraction", "extraction": extraction_scheduled}
 
         # 2) Generate assistant response (streaming).
         assistant_parts: List[str] = []
@@ -995,6 +1023,7 @@ class InteractiveSession:
         *,
         trigger: str,
         hint: Optional[str] = None,
+        retrieval_reference: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         Schedules asynchronous extraction work.
@@ -1013,6 +1042,7 @@ class InteractiveSession:
             trigger=str(trigger or "auto"),
             hint=(str(hint).strip() if hint and str(hint).strip() else None),
             epoch=int(self._epoch),
+            retrieval_reference=(dict(retrieval_reference) if isinstance(retrieval_reference, dict) else None),
         )
 
         with self._bg_lock:
@@ -1059,7 +1089,16 @@ class InteractiveSession:
                     updated = self.sdk.ingest(
                         user_id=self.config.user_id,
                         messages=list(current.window or []),
-                        metadata={"channel": "chat", "trigger": str(current.trigger)},
+                        metadata={
+                            "channel": "chat",
+                            "trigger": str(current.trigger),
+                            # Explicitly pass top-1 retrieval reference (or None).
+                            "extraction_reference": (
+                                dict(current.retrieval_reference)
+                                if isinstance(current.retrieval_reference, dict)
+                                else None
+                            ),
+                        },
                         hint=current.hint,
                     )
                     if not updated:

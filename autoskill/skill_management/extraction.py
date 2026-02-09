@@ -77,6 +77,7 @@ class SkillExtractor(Protocol):
         events: Optional[List[Dict[str, Any]]],
         max_candidates: int,
         hint: Optional[str] = None,
+        retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
         ...
 
@@ -101,6 +102,7 @@ class HeuristicSkillExtractor:
         events: Optional[List[Dict[str, Any]]],
         max_candidates: int,
         hint: Optional[str] = None,
+        retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
         text = _flatten_sources(messages=messages, events=events)
         if hint and str(hint).strip():
@@ -151,6 +153,7 @@ class LLMSkillExtractor:
         events: Optional[List[Dict[str, Any]]],
         max_candidates: int,
         hint: Optional[str] = None,
+        retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
         payload = {
             "user_id": user_id,
@@ -158,6 +161,9 @@ class LLMSkillExtractor:
             "events": events or [],
             "max_candidates": max_candidates,
             "hint": (str(hint).strip() if hint and str(hint).strip() else None),
+            "retrieved_reference": (
+                dict(retrieved_reference) if isinstance(retrieved_reference, dict) else None
+            ),
         }
         if self._config.redact_sources_before_llm:
             # Encourage general skills by removing accounts/URLs/dates/etc before calling the LLM.
@@ -192,6 +198,17 @@ class LLMSkillExtractor:
             "- Invalid evidence: assistant-invented quality checklists, thresholds, role assignments, policy labels, taxonomy terms, or detailed expansion not explicitly requested by user.\n"
             "- If a candidate skill relies mainly on assistant-authored specifics and lacks strong user evidence, output {\"skills\": []}.\n"
             "- If uncertain whether a detail is user-originated, drop that detail.\n"
+            "\n"
+            "### RETRIEVED REFERENCE SKILL (AUXILIARY ONLY)\n"
+            "- DATA.retrieved_reference may include the top retrieved skill name/description.\n"
+            "- Use it ONLY as context for capability identity (whether extracted skill likely updates an existing capability or should remain distinct).\n"
+            "- If DATA.retrieved_reference is null/None, treat this as no selected prior skill and draft a standalone new-skill candidate when extraction gates are satisfied.\n"
+            "- NEVER use retrieved_reference as evidence that extraction is needed.\n"
+            "- If user evidence fails extraction gates, output {\"skills\": []} regardless of retrieved_reference similarity.\n"
+            "- Do not copy topic-specific content from retrieved_reference; use only capability-level alignment.\n"
+            "- Judge SAME capability only when recent turns and retrieved_reference align on: objective, deliverable/channel, operation class, and output acceptance criteria.\n"
+            "- If any of the above dimensions materially differs in recent turns, treat as different capability (new-skill direction, not update wording).\n"
+            "- On ambiguity between merge-like update vs new capability, prefer distinct capability wording over forced update wording.\n"
             "\n"
             "### CRITICAL FILTER: WHEN TO EXTRACT\n"
             "To avoid noise, you must distinguish between 'Standard LLM Capabilities' (DO NOT EXTRACT) and 'Specialized Skills' (EXTRACT).\n"
@@ -280,6 +297,7 @@ class LLMSkillExtractor:
             "- Final evidence-check before output: each major constraint in prompt must come from user evidence; remove assistant-only details.\n"
             "- Final recency-check before output: major constraints should be supported by recent user turns unless explicitly reaffirmed.\n"
             "- Final continuity-check before output: all major constraints should belong to ONE coherent current work item, not mixed from different tasks.\n"
+            "- Final identity-check before output: if retrieved_reference exists but recent intent shows different objective/deliverable/channel/audience, keep this extraction as a distinct capability.\n"
             "\n"
             "### FIELD DEFINITIONS\n"
             "- name: Concise, specific, kebab-case (e.g., 'report-writing-style-guide', '政府报告撰写'). Prefer capability terms; avoid one-off subject/topic nouns.\n"
@@ -419,6 +437,9 @@ class LLMSkillExtractor:
             f"Return at most {max_candidates} skills; if extraction fails output {{\"skills\": []}}.\n"
             "Apply the same constraints:\n"
             "- Skills are onboarding guides (SKILL.md): keep only reusable, non-obvious procedure/preferences.\n"
+            "- DATA.retrieved_reference is auxiliary for capability identity (update-vs-new), NOT evidence to force extraction.\n"
+            "- If DATA.retrieved_reference is null/None, treat as no selected prior skill; do not force update-oriented wording.\n"
+            "- If user evidence is insufficient, still output {\"skills\": []} even when retrieved_reference is similar.\n"
             "- name: concise and specific; prefer kebab-case for English; use capability terms and avoid one-off topic nouns.\n"
             "- description: 1-2 sentences, third person; include WHEN to use; avoid current-instance subject-matter facts.\n"
             "- prompt: ALWAYS English; imperative/infinitive form; numbered steps + checks + output format; no conversation references.\n"
@@ -428,6 +449,8 @@ class LLMSkillExtractor:
             "- prompt must capture BOTH user must-do requirements and must-not-do constraints.\n"
             "- prioritize constraints evidenced by user messages; do not introduce assistant-only constraints unless user-confirmed.\n"
             "- prioritize recent user turns; use older turns mainly for topic continuity/switch judgment.\n"
+            "- SAME-capability requires alignment on objective + deliverable/channel + operation class + acceptance criteria.\n"
+            "- If recent turns indicate a different objective/deliverable/channel/audience from DATA.retrieved_reference, keep distinct-capability wording (do not force update framing).\n"
             "- weak acknowledgements ('ok', 'continue', etc.) do not validate all assistant details.\n"
             "- If DATA includes revision feedback that changes generation policy (quality/detail/style/audience/structure), retain those rules in the prompt.\n"
             "- If DATA includes reusable implementation/output policy (preferred language/tooling, allowed/disallowed tech, code-vs-explanation ratio, comment density, strict output form), retain those constraints as portable rules.\n"

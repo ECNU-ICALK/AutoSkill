@@ -10,6 +10,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from dataclasses import asdict
 from typing import Any, Dict, Iterable, List, Optional
@@ -90,18 +91,96 @@ class AutoSkill:
         if not messages and not events:
             raise ValueError("ingest requires either messages or events")
 
+        md = dict(metadata or {})
+        # Extraction consumes only caller-provided retrieval reference (top1 or None).
+        # SDK does not run a second retrieval to avoid duplicate/lagging behavior.
+        raw_ref = md.get("extraction_reference")
+        retrieved_reference = dict(raw_ref) if isinstance(raw_ref, dict) else None
+
         # 1) Extract candidates (LLM or heuristic)
         # Extract at most one Skill per ingest to keep quality high and avoid noisy skill spam.
         max_candidates = max(0, min(1, int(self.config.max_candidates_per_ingest)))
-        extracted = self.extractor.extract(
+        extracted = self._extract_candidates(
+            user_id=user_id,
+            messages=messages,
+            events=events,
+            max_candidates=max_candidates,
+            hint=hint,
+            retrieved_reference=retrieved_reference,
+        )
+        # 2) Maintain (dedupe/merge/version) and persist to store
+        return self.maintainer.apply(extracted, user_id=user_id, metadata=metadata)
+
+    def extract_candidates(
+        self,
+        *,
+        user_id: str,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        events: Optional[List[Dict[str, Any]]] = None,
+        hint: Optional[str] = None,
+        max_candidates: Optional[int] = None,
+        retrieved_reference: Optional[Dict[str, Any]] = None,
+    ) -> List[Any]:
+        """
+        Extracts candidate skills without persisting (for simulation/debug APIs).
+        """
+
+        if not messages and not events:
+            raise ValueError("extract_candidates requires either messages or events")
+        limit = (
+            max(0, int(max_candidates))
+            if max_candidates is not None
+            else max(0, min(1, int(self.config.max_candidates_per_ingest)))
+        )
+        return self._extract_candidates(
+            user_id=user_id,
+            messages=messages,
+            events=events,
+            max_candidates=limit,
+            hint=hint,
+            retrieved_reference=(
+                dict(retrieved_reference) if isinstance(retrieved_reference, dict) else None
+            ),
+        )
+
+    def _extract_candidates(
+        self,
+        *,
+        user_id: str,
+        messages: Optional[List[Dict[str, Any]]],
+        events: Optional[List[Dict[str, Any]]],
+        max_candidates: int,
+        hint: Optional[str],
+        retrieved_reference: Optional[Dict[str, Any]],
+    ) -> List[Any]:
+        """
+        Calls extractor with backward compatibility for custom extractors that do not yet
+        accept `retrieved_reference`.
+        """
+
+        fn = self.extractor.extract
+        supports_reference = False
+        try:
+            supports_reference = "retrieved_reference" in inspect.signature(fn).parameters
+        except Exception:
+            supports_reference = False
+
+        if supports_reference:
+            return fn(
+                user_id=user_id,
+                messages=messages,
+                events=events,
+                max_candidates=max_candidates,
+                hint=hint,
+                retrieved_reference=retrieved_reference,
+            )
+        return fn(
             user_id=user_id,
             messages=messages,
             events=events,
             max_candidates=max_candidates,
             hint=hint,
         )
-        # 2) Maintain (dedupe/merge/version) and persist to store
-        return self.maintainer.apply(extracted, user_id=user_id, metadata=metadata)
 
     def add(
         self,

@@ -38,6 +38,25 @@ class _BgExtractJob:
     trigger: str
     hint: Optional[str]
     epoch: int
+    retrieval_reference: Optional[Dict[str, Any]] = None
+
+
+def _top_reference_from_hits(hits: List[Any], *, user_id: str) -> Optional[Dict[str, Any]]:
+    if not hits:
+        return None
+    top = hits[0]
+    skill = getattr(top, "skill", None)
+    if skill is None:
+        return None
+    owner = str(getattr(skill, "user_id", "") or "").strip()
+    scope = "library" if owner.startswith("library:") else ("user" if owner == str(user_id or "").strip() else "other")
+    return {
+        "id": str(getattr(skill, "id", "") or "").strip(),
+        "name": str(getattr(skill, "name", "") or "").strip(),
+        "description": str(getattr(skill, "description", "") or "").strip(),
+        "scope": scope,
+        "score": float(getattr(top, "score", 0.0) or 0.0),
+    }
 
 
 class InteractiveChatApp:
@@ -401,8 +420,8 @@ class InteractiveChatApp:
 
         Stages:
         1) drain background extraction result
-        2) schedule extraction as soon as user input arrives (parallel with chat)
-        3) rewrite query + retrieve/select skills
+        2) rewrite query + retrieve/select skills
+        3) schedule extraction with retrieval query/top1 reference (parallel with chat generation)
         4) stream assistant response
         5) stage latest window for next-turn feedback
         """
@@ -418,8 +437,8 @@ class InteractiveChatApp:
 
         self.messages.append({"role": "user", "content": latest_user})
 
-        # Schedule extraction immediately on user input so extraction can run in parallel with
-        # response generation. Prefer pending feedback window; otherwise use current context.
+        # Build extraction window early, but schedule only after rewrite+retrieval so extraction
+        # can consume the same rewritten query and top-1 retrieval reference.
         early_window = (
             list(extract_window)
             if extract_window is not None
@@ -428,15 +447,6 @@ class InteractiveChatApp:
         has_assistant_in_window = any(
             str(m.get("role") or "").strip().lower() == "assistant" for m in (early_window or [])
         )
-        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
-            total_turns_abs = sum(
-                1
-                for m in (self.messages or [])
-                if str(m.get("role") or "").strip().lower() == "assistant"
-            )
-            self._turns_at_last_extract_check = int(total_turns_abs)
-            self._start_background_extraction(early_window, trigger="auto")
-
         # 1) Rewrite query (optional) then retrieve Skills for this turn.
         search_query = latest_user
         rewrite_mode = (self.config.rewrite_mode or "auto").strip().lower()
@@ -460,6 +470,19 @@ class InteractiveChatApp:
         min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
         if hits and min_score > 0:
             hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
+            total_turns_abs = sum(
+                1
+                for m in (self.messages or [])
+                if str(m.get("role") or "").strip().lower() == "assistant"
+            )
+            self._turns_at_last_extract_check = int(total_turns_abs)
+            top_ref = _top_reference_from_hits(hits, user_id=self.config.user_id)
+            self._start_background_extraction(
+                early_window,
+                trigger="auto",
+                retrieval_reference=top_ref,
+            )
         self._print_retrieval(hits)
 
         skills_for_use = [h.skill for h in hits]
@@ -706,6 +729,7 @@ class InteractiveChatApp:
         *,
         trigger: str,
         hint: Optional[str] = None,
+        retrieval_reference: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Schedules asynchronous extraction work.
@@ -722,6 +746,7 @@ class InteractiveChatApp:
             trigger=str(trigger or "auto"),
             hint=(str(hint).strip() if hint and str(hint).strip() else None),
             epoch=int(self._epoch),
+            retrieval_reference=(dict(retrieval_reference) if isinstance(retrieval_reference, dict) else None),
         )
 
         with self._bg_lock:
@@ -755,7 +780,15 @@ class InteractiveChatApp:
                     updated = self.sdk.ingest(
                         user_id=self.config.user_id,
                         messages=list(current.window or []),
-                        metadata={"channel": "chat", "trigger": str(current.trigger)},
+                        metadata={
+                            "channel": "chat",
+                            "trigger": str(current.trigger),
+                            "extraction_reference": (
+                                dict(current.retrieval_reference)
+                                if isinstance(current.retrieval_reference, dict)
+                                else None
+                            ),
+                        },
                         hint=current.hint,
                     )
                     if epoch == int(self._epoch):
