@@ -401,7 +401,7 @@ class LLMSkillExtractor:
             "- Remove case-specific entities (org/team/person, addresses, project/product/repo, ticket/account IDs, URLs/emails/phones, exact dates/budgets/contracts).\n"
             "- Keep only portable capability constraints; if generic after de-identification, return {\"skills\": []}.\n"
             "- [E] Output language and JSON validity\n"
-            "- Language: name/description/triggers/tags/examples match dominant input language; prompt is ALWAYS English.\n"
+            "- Language: name/description/prompt/triggers/tags/examples match dominant input language.\n"
             "- JSON validity: escape newlines inside strings as \\n.\n"
         )
         user = (
