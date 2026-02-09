@@ -39,8 +39,8 @@ class GLMChatLLM(LLM):
     api_key_secret: Optional[str] = None
     base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     timeout_s: int = 60
-    max_tokens: int = 4096
-    max_input_chars: int = 10000
+    max_tokens: int = 30000
+    max_input_chars: int = 100000
     token_ttl_s: int = 3600
     token_time_unit: str = "ms"  # "ms" | "s"
     auth_mode: str = "auto"  # "jwt" | "api_key" | "auto"

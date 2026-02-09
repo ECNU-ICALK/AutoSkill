@@ -31,8 +31,8 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.openai.com")),
             timeout_s=int(config.get("timeout_s", 60)),
-            max_input_chars=int(config.get("max_input_chars", 10000)),
-            max_tokens=int(config.get("max_tokens", 4096)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
         )
 
     if provider in {"dashscope", "qwen"}:
@@ -44,8 +44,8 @@ def build_llm(config: Dict[str, Any]) -> LLM:
                 config.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode")
             ),
             timeout_s=int(config.get("timeout_s", 60)),
-            max_input_chars=int(config.get("max_input_chars", 10000)),
-            max_tokens=int(config.get("max_tokens", 4096)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
         )
 
     if provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}:
@@ -54,8 +54,8 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             api_key=(config.get("api_key") or os.getenv("INTERNLM_API_KEY")),
             base_url=str(config.get("base_url", "https://chat.intern-ai.org.cn/api/v1")),
             timeout_s=int(config.get("timeout_s", 60)),
-            max_input_chars=int(config.get("max_input_chars", 10000)),
-            max_tokens=int(config.get("max_tokens", 4096)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
             extra_body=(config.get("extra_body") or config.get("extra_payload")),
             thinking_mode=config.get("thinking_mode", True),
         )
@@ -68,8 +68,8 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             api_key_secret=config.get("api_key_secret"),
             base_url=str(config.get("base_url", "https://open.bigmodel.cn/api/paas/v4")),
             timeout_s=int(config.get("timeout_s", 60)),
-            max_tokens=int(config.get("max_tokens", 4096)),
-            max_input_chars=int(config.get("max_input_chars", 10000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
             token_ttl_s=int(config.get("token_ttl_s", 3600)),
             token_time_unit=str(config.get("token_time_unit", "ms")),
             auth_mode=str(config.get("auth_mode", "auto")),
@@ -82,8 +82,8 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.anthropic.com")),
             timeout_s=int(config.get("timeout_s", 60)),
-            max_input_chars=int(config.get("max_input_chars", 10000)),
-            max_tokens=int(config.get("max_tokens", 4096)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
         )
 
     raise ValueError(f"Unknown LLM provider: {provider}")

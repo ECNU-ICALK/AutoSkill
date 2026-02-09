@@ -449,7 +449,7 @@ class AutoSkillProxyConfig:
     rewrite_mode: str = "always"  # never|auto|always
     min_score: float = 0.4
     top_k: int = 1
-    history_turns: int = 10
+    history_turns: int = 20
     assistant_temperature: float = 0.2
     extract_enabled: bool = True
     ingest_window: int = 6
@@ -467,7 +467,7 @@ class AutoSkillProxyConfig:
         self.rewrite_mode = mode
         self.min_score = _safe_float(self.min_score, 0.4)
         self.top_k = max(1, int(self.top_k or 1))
-        self.history_turns = max(1, int(self.history_turns or 10))
+        self.history_turns = max(1, int(self.history_turns or 20))
         self.ingest_window = max(2, int(self.ingest_window or 6))
         self.max_bg_extract_jobs = max(1, int(self.max_bg_extract_jobs or 2))
         self.extract_event_include_skill_details = bool(self.extract_event_include_skill_details)
@@ -531,7 +531,8 @@ class AutoSkillProxyRuntime:
         self._extract_sema = threading.BoundedSemaphore(self.config.max_bg_extract_jobs)
         self._extract_sched_lock = threading.Lock()
         self._extract_running_users: set[str] = set()
-        self._extract_queued_by_user: Dict[str, _ProxyExtractJob] = {}
+        # Per-user FIFO queue for extraction jobs that arrive while a user already has a running worker.
+        self._extract_queued_by_user: Dict[str, List[_ProxyExtractJob]] = {}
         self._extract_events_lock = threading.Lock()
         self._extract_events_by_user: Dict[str, List[Dict[str, Any]]] = {}
         self._extract_latest_by_job: Dict[str, Dict[str, Any]] = {}
@@ -2021,26 +2022,17 @@ class AutoSkillProxyRuntime:
         )
 
         should_start_worker = False
-        superseded: Optional[_ProxyExtractJob] = None
         with self._extract_sched_lock:
             if uid in self._extract_running_users:
-                # Coalesce: keep only the most recent queued job for this user.
-                superseded = self._extract_queued_by_user.get(uid)
-                self._extract_queued_by_user[uid] = job
+                # A job is already running for this user: queue for FIFO background processing.
+                q = self._extract_queued_by_user.get(uid)
+                if q is None:
+                    q = []
+                    self._extract_queued_by_user[uid] = q
+                q.append(job)
             else:
                 self._extract_running_users.add(uid)
                 should_start_worker = True
-
-        if superseded is not None:
-            self._record_extraction_event(
-                user_id=uid,
-                event=self._empty_extraction_event(
-                    job_id=str(superseded.job_id),
-                    trigger=str(superseded.trigger),
-                    status="failed",
-                    error="superseded by newer extraction job",
-                ),
-            )
 
         if should_start_worker:
             threading.Thread(
@@ -2180,7 +2172,10 @@ class AutoSkillProxyRuntime:
                     )
 
                 with self._extract_sched_lock:
-                    next_job = self._extract_queued_by_user.pop(uid, None)
+                    q = self._extract_queued_by_user.get(uid)
+                    next_job = q.pop(0) if q else None
+                    if q is not None and not q:
+                        self._extract_queued_by_user.pop(uid, None)
                     if next_job is None:
                         self._extract_running_users.discard(uid)
                         break

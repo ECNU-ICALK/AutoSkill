@@ -34,8 +34,8 @@ class InternLMChatLLM(OpenAIChatLLM):
     api_key: Optional[str] = None
     base_url: str = "https://chat.intern-ai.org.cn/api/v1"
     timeout_s: int = 60
-    max_input_chars: int = 10000
-    max_tokens: int = 4096
+    max_input_chars: int = 100000
+    max_tokens: int = 30000
     extra_body: Optional[Dict[str, Any]] = None
     # Intern-S1 defaults to think mode. Set to False to disable.
     # If the upstream rejects this parameter, AutoSkill will auto-fallback once.

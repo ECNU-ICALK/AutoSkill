@@ -118,7 +118,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "base_url": _env("INTERNLM_BASE_URL", "https://chat.intern-ai.org.cn/api/v1"),
             # Intern-S1 defaults to think mode; disable by setting INTERNLM_THINKING_MODE=0.
             "thinking_mode": _env_bool("INTERNLM_THINKING_MODE", True),
-            "max_tokens": int(_env("INTERNLM_MAX_TOKENS", "4096")),
+            "max_tokens": int(_env("INTERNLM_MAX_TOKENS", "30000")),
             "extra_body": _env_json("INTERNLM_LLM_EXTRA_BODY"),
             "timeout_s": timeout_s,
         }
@@ -149,7 +149,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "auth_mode": _env("BIGMODEL_AUTH_MODE", "auto"),
             "token_time_unit": _env("BIGMODEL_TOKEN_TIME_UNIT", "ms"),
             "base_url": _env("BIGMODEL_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
-            "max_tokens": int(_env("BIGMODEL_MAX_TOKENS", "4096")),
+            "max_tokens": int(_env("BIGMODEL_MAX_TOKENS", "30000")),
             "extra_body": _env_json("BIGMODEL_LLM_EXTRA_BODY"),
             "timeout_s": timeout_s,
         }
@@ -286,7 +286,7 @@ def main() -> None:
         help="Additional read-only library root (can be passed multiple times).",
     )
     parser.add_argument("--top-k", type=int, default=int(_env("AUTOSKILL_TOP_K", "1")))
-    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "10")))
+    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "20")))
     parser.add_argument("--ingest-window", type=int, default=int(_env("AUTOSKILL_INGEST_WINDOW", "6")))
     parser.add_argument(
         "--extract-turn-limit",
@@ -357,9 +357,9 @@ def main() -> None:
         rewrite_cfg = dict(llm_cfg)
         if str(rewrite_cfg.get("provider") or "").lower() in {"glm", "bigmodel", "zhipu"}:
             try:
-                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 4096)), 4096)
+                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 30000)), 30000)
             except Exception:
-                rewrite_cfg["max_tokens"] = 4096
+                rewrite_cfg["max_tokens"] = 30000
         query_rewriter = LLMQueryRewriter(
             build_llm(rewrite_cfg),
             max_history_turns=int(interactive_cfg.rewrite_history_turns),

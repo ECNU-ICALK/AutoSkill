@@ -118,8 +118,8 @@ class OpenAIChatLLM(LLM):
     api_key: Optional[str] = None
     base_url: str = "https://api.openai.com"
     timeout_s: int = 60
-    max_input_chars: int = 10000
-    max_tokens: int = 4096
+    max_input_chars: int = 100000
+    max_tokens: int = 30000
 
     def complete(
         self,

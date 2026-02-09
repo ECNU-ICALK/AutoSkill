@@ -15,7 +15,7 @@ Environment variables:
 - `BIGMODEL_BASE_URL`: default https://open.bigmodel.cn/api/paas/v4
 - `BIGMODEL_GLM_MODEL`: default glm-4.7
 - `BIGMODEL_EMBED_MODEL`: default embedding-3
-- `BIGMODEL_MAX_TOKENS`: default 4096
+- `BIGMODEL_MAX_TOKENS`: default 30000
 - `BIGMODEL_LLM_EXTRA_BODY` / `BIGMODEL_EMB_EXTRA_BODY`: extra request body passthrough (JSON string)
 """
 
@@ -65,7 +65,7 @@ def main() -> None:
     token_time_unit = _env("BIGMODEL_TOKEN_TIME_UNIT", "ms")
     glm_model = _env("BIGMODEL_GLM_MODEL", "glm-4.7")
     emb_model = _env("BIGMODEL_EMBED_MODEL", "embedding-3")
-    max_tokens = int(_env("BIGMODEL_MAX_TOKENS", "4096"))
+    max_tokens = int(_env("BIGMODEL_MAX_TOKENS", "30000"))
     llm_extra = _env_json("BIGMODEL_LLM_EXTRA_BODY")
     emb_extra = _env_json("BIGMODEL_EMB_EXTRA_BODY")
 

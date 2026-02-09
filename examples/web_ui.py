@@ -1373,9 +1373,9 @@ def main() -> None:
         rewrite_cfg = dict(llm_cfg)
         if str(rewrite_cfg.get("provider") or "").lower() in {"glm", "bigmodel", "zhipu"}:
             try:
-                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 4096)), 4096)
+                rewrite_cfg["max_tokens"] = min(int(rewrite_cfg.get("max_tokens", 30000)), 30000)
             except Exception:
-                rewrite_cfg["max_tokens"] = 4096
+                rewrite_cfg["max_tokens"] = 30000
         query_rewriter = LLMQueryRewriter(build_llm(rewrite_cfg))
 
     manager = _SessionManager(

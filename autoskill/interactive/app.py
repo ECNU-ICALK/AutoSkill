@@ -85,7 +85,8 @@ class InteractiveChatApp:
         self._epoch: int = 0
         self._bg_extract_sema = threading.BoundedSemaphore(1)
         self._bg_lock = threading.Lock()
-        self._queued_extract: Optional[_BgExtractJob] = None
+        # FIFO queue for extraction jobs that arrive while a worker is running.
+        self._queued_extract: List[_BgExtractJob] = []
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
     def run(self) -> None:
@@ -174,7 +175,7 @@ class InteractiveChatApp:
             self._epoch += 1
             self._events = queue.Queue()
             with self._bg_lock:
-                self._queued_extract = None
+                self._queued_extract = []
             self.io.print("Conversation cleared.")
             return False
 
@@ -736,7 +737,7 @@ class InteractiveChatApp:
 
         Concurrency strategy:
         - at most one running extraction worker
-        - while busy, only the latest queued job is retained (coalescing)
+        - while busy, enqueue jobs and process them in FIFO order
         """
 
         if not window:
@@ -758,14 +759,14 @@ class InteractiveChatApp:
                 )
                 thread.start()
                 return
-            # A background extraction is already running: keep only the latest scheduled job.
-            self._queued_extract = job
+            # A background extraction is already running: queue this job for FIFO processing.
+            self._queued_extract.append(job)
 
     def _background_extraction_worker(self, job: _BgExtractJob) -> None:
         """
         Worker loop for extraction tasks.
 
-        Processes the current job and then one latest queued job at a time; stale epochs are
+        Processes the current job and then queued jobs in FIFO order; stale epochs are
         discarded so `/clear` can safely reset session state.
         """
 
@@ -802,8 +803,7 @@ class InteractiveChatApp:
                         )
 
                 with self._bg_lock:
-                    next_job = self._queued_extract
-                    self._queued_extract = None
+                    next_job = self._queued_extract.pop(0) if self._queued_extract else None
                 if next_job is None:
                     break
                 current = next_job
