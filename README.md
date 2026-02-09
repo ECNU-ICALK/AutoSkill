@@ -122,13 +122,14 @@ User Query (+ recent history)
 - Retrieval runs every turn.
 - Similarity threshold and `top_k` control precision/recall.
 - Retrieved skills are filtered again before context injection.
+- The top-1 retrieved skill (only if it passes `min_score`) is passed to extraction as auxiliary identity context; extraction does not run a second retrieval internally.
 
 ### 3.3 Interactive Extraction Policy
 
 - `extract_mode=auto`: attempt extraction every `extract_turn_limit` turns.
 - `extract_mode=always`: attempt every turn.
 - `extract_mode=never`: disable auto extraction.
-- `extract_now [hint]`: force immediate background extraction for current context.
+- `/extract_now [hint]`: force immediate background extraction for current context (alias: `extract_now [hint]`).
 - Generic requests without user correction (for example, one-time report writing) should return no skill extraction.
 - User feedback that encodes durable preferences/constraints (for example, "do not hallucinate") should trigger extraction or update.
 - If a similar user skill already exists, prefer merge/update over creating a duplicate skill.
@@ -222,10 +223,16 @@ Notes:
 
 - `examples/web_ui.py`: local Web UI server.
 - `examples/interactive_chat.py`: CLI interactive chat.
+- `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
+- `examples/proxy_health_check.py`: proxy endpoint and streaming health check.
 - `examples/import_agent_skills.py`: bulk import existing skills.
 - `examples/normalize_skill_ids.py`: normalize missing IDs in `SKILL.md`.
+- `examples/dashscope_qwen_chat.py`: DashScope chat API demo.
+- `examples/dashscope_qwen_embeddings.py`: DashScope embeddings API demo.
+- `examples/bigmodel_glm_embed_extract.py`: GLM + embedding online extraction demo.
+- `examples/bigmodel_glm_persistent_store.py`: GLM + local persistent store demo.
+- `examples/basic_ingest_search.py`: minimal offline SDK loop.
 - `examples/local_persistent_store.py`: offline local persistence demo.
-- `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 
 ## 7. Quick SDK Usage
 
@@ -359,6 +366,12 @@ Retrieval and extraction:
 - `GET /v1/autoskill/extractions`
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events` (SSE)
+
+### 9.6 Proxy Health Check Script
+
+```bash
+python3 -m examples.proxy_health_check --base-url http://127.0.0.1:9000
+```
 
 Vector admin:
 

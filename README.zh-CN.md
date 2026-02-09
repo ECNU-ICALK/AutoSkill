@@ -121,13 +121,14 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - 检索每轮执行。
 - 通过相似度阈值与 `top_k` 控制召回质量。
 - 检索后仍可二次筛选，避免无关技能注入。
+- 检索 Top-1 技能（需通过 `min_score`）会作为抽取阶段的辅助身份参考输入；抽取内部不再二次检索。
 
 ### 3.3 交互抽取策略
 
 - `extract_mode=auto`：每 `extract_turn_limit` 轮尝试抽取。
 - `extract_mode=always`：每轮都尝试抽取。
 - `extract_mode=never`：关闭自动抽取。
-- `extract_now [hint]`：对当前上下文立即发起后台抽取。
+- `/extract_now [hint]`：对当前上下文立即发起后台抽取（别名：`extract_now [hint]`）。
 - 对“仅完成一次通用任务且无用户纠偏”的场景（如一次性写报告），应返回不抽取。
 - 当用户反馈形成稳定可复用约束（如“不要幻觉”）时，触发抽取或更新。
 - 若已有相似用户技能，优先合并更新，而非新建重复技能。
@@ -221,10 +222,16 @@ Skills/
 
 - `examples/web_ui.py`：本地 Web UI 服务。
 - `examples/interactive_chat.py`：终端交互式对话。
+- `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
+- `examples/proxy_health_check.py`：代理端点与流式健康检查。
 - `examples/import_agent_skills.py`：导入已有技能。
 - `examples/normalize_skill_ids.py`：补齐/规范化技能 ID。
+- `examples/dashscope_qwen_chat.py`：百炼聊天 API 示例。
+- `examples/dashscope_qwen_embeddings.py`：百炼向量 API 示例。
+- `examples/bigmodel_glm_embed_extract.py`：GLM + 向量在线抽取示例。
+- `examples/bigmodel_glm_persistent_store.py`：GLM + 本地持久化示例。
+- `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
 - `examples/local_persistent_store.py`：离线本地持久化示例。
-- `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
 
 ## 7. SDK 最小使用示例
 
@@ -358,6 +365,12 @@ OpenAI 兼容端点：
 - `GET /v1/autoskill/extractions`
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events`（SSE）
+
+### 9.6 代理健康检查脚本
+
+```bash
+python3 -m examples.proxy_health_check --base-url http://127.0.0.1:9000
+```
 
 向量管理端点：
 
