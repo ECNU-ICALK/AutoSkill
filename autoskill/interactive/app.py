@@ -54,6 +54,7 @@ def _top_reference_from_hits(hits: List[Any], *, user_id: str) -> Optional[Dict[
         "id": str(getattr(skill, "id", "") or "").strip(),
         "name": str(getattr(skill, "name", "") or "").strip(),
         "description": str(getattr(skill, "description", "") or "").strip(),
+        "triggers": [str(t).strip() for t in (getattr(skill, "triggers", []) or []) if str(t).strip()][:20],
         "scope": scope,
         "score": float(getattr(top, "score", 0.0) or 0.0),
     }

@@ -12,12 +12,13 @@ and continuously evolves existing Skills through merge + version updates.
 
 ```bash
 python3 -m pip install -e .
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.web_ui \
   --host 127.0.0.1 \
   --port 8000 \
-  --llm-provider dashscope \
-  --embeddings-provider dashscope \
+  --llm-provider internlm \
+  --embeddings-provider qwen \
   --store-dir Skills \
   --user-id u1 \
   --skill-scope all \
@@ -38,12 +39,13 @@ AutoSkill can also be deployed as a reverse proxy that exposes OpenAI-compatible
 
 ```bash
 python3 -m pip install -e .
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.openai_proxy \
   --host 127.0.0.1 \
   --port 9000 \
-  --llm-provider dashscope \
-  --embeddings-provider dashscope \
+  --llm-provider internlm \
+  --embeddings-provider qwen \
   --store-dir Skills \
   --user-id u1 \
   --skill-scope all \
@@ -315,8 +317,9 @@ Useful commands:
 ### 9.2 Web UI
 
 ```bash
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
-python3 -m examples.web_ui --llm-provider dashscope
+python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ```
 
 ### 9.3 Import Existing Agent Skills
@@ -334,8 +337,9 @@ python3 -m examples.normalize_skill_ids --store-dir Skills
 ### 9.5 OpenAI-Compatible Proxy API
 
 ```bash
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
-python3 -m examples.openai_proxy --llm-provider dashscope --embeddings-provider dashscope
+python3 -m examples.openai_proxy --llm-provider internlm --embeddings-provider qwen
 ```
 
 Discoverability:

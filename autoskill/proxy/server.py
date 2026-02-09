@@ -274,6 +274,34 @@ def _is_library_skill(skill: Skill) -> bool:
     return owner.startswith("library:")
 
 
+def _skill_source_label(skill: Skill) -> str:
+    owner = str(getattr(skill, "user_id", "") or "").strip()
+    if owner.startswith("library:"):
+        return owner
+    if owner:
+        return f"user:{owner}"
+    return "user"
+
+
+def _format_retrieval_hit(hit: Any, *, rank: int) -> Dict[str, Any]:
+    skill = getattr(hit, "skill", None)
+    score = float(getattr(hit, "score", 0.0) or 0.0)
+    if skill is None:
+        return {"rank": int(rank), "score": score}
+    summary = _skill_summary(skill)
+    return {
+        "rank": int(rank),
+        "score": score,
+        "id": str(getattr(skill, "id", "") or ""),
+        "name": str(getattr(skill, "name", "") or ""),
+        "description": str(getattr(skill, "description", "") or ""),
+        "source": _skill_source_label(skill),
+        "owner": str(getattr(skill, "user_id", "") or ""),
+        "version": str(getattr(skill, "version", "") or ""),
+        "skill": summary,
+    }
+
+
 def _skill_summary(skill: Skill) -> Dict[str, Any]:
     return {
         "id": str(skill.id),
@@ -455,7 +483,8 @@ class AutoSkillProxyConfig:
     ingest_window: int = 6
     max_bg_extract_jobs: int = 2
     extract_event_include_skill_details: bool = True
-    extract_event_max_md_chars: int = 3000
+    # 0 means no truncation (preferred for editable UI workflows).
+    extract_event_max_md_chars: int = 0
     proxy_api_key: Optional[str] = None
 
     def normalize(self) -> "AutoSkillProxyConfig":
@@ -471,7 +500,7 @@ class AutoSkillProxyConfig:
         self.ingest_window = max(2, int(self.ingest_window or 6))
         self.max_bg_extract_jobs = max(1, int(self.max_bg_extract_jobs or 2))
         self.extract_event_include_skill_details = bool(self.extract_event_include_skill_details)
-        self.extract_event_max_md_chars = max(256, int(self.extract_event_max_md_chars or 3000))
+        self.extract_event_max_md_chars = max(0, int(self.extract_event_max_md_chars or 0))
         self.assistant_temperature = _safe_float(self.assistant_temperature, 0.2)
         key = str(self.proxy_api_key or "").strip()
         self.proxy_api_key = key or None
@@ -488,11 +517,7 @@ class _PreparedChat:
     normalized_messages: List[Dict[str, str]]
     system_prompt: str
     user_prompt: str
-    latest_user_query: str
-    search_query: str
-    scope: str
-    retrieved_hits: List[Dict[str, Any]]
-    selected_skills: List[Dict[str, Any]]
+    retrieval: Dict[str, Any]
     trigger: str
 
 
@@ -800,7 +825,7 @@ class AutoSkillProxyRuntime:
                     )
                     if extraction_window:
                         top_ref = runtime._top_reference_from_retrieval_hits(
-                            retrieval_hits=list(prepared.retrieved_hits or []),
+                            retrieval_hits=list((prepared.retrieval or {}).get("hits") or []),
                             user_id=prepared.user_id,
                         )
                         extraction_job_id = runtime._schedule_extraction_job(
@@ -1095,6 +1120,7 @@ class AutoSkillProxyRuntime:
         latest_user = _latest_user_query(messages)
         search_query = latest_user
         rewritten_query = ""
+        retrieval_error: Optional[str] = None
         if (
             self.query_rewriter is not None
             and self.config.rewrite_mode in {"always", "auto"}
@@ -1109,25 +1135,23 @@ class AutoSkillProxyRuntime:
                 search_query = rewritten_query
 
         lim = max(1, int(limit or self.config.top_k))
-        hits = self.sdk.search(
-            search_query,
-            user_id=user_id,
-            limit=lim,
-            filters={"scope": scope, "allow_partial_vectors": False},
-        )
         min_score_v = float(self.config.min_score if min_score is None else min_score)
+        try:
+            hits = self.sdk.search(
+                search_query,
+                user_id=user_id,
+                limit=lim,
+                filters={"scope": scope, "allow_partial_vectors": False},
+            )
+        except Exception as e:
+            hits = []
+            retrieval_error = str(e)
         if hits and min_score_v > 0:
             hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score_v]
 
         retrieval_hits: List[Dict[str, Any]] = []
         for idx, h in enumerate(hits, start=1):
-            retrieval_hits.append(
-                {
-                    "rank": int(idx),
-                    "score": float(getattr(h, "score", 0.0) or 0.0),
-                    "skill": _skill_summary(h.skill),
-                }
-            )
+            retrieval_hits.append(_format_retrieval_hit(h, rank=idx))
 
         skills_for_use = [h.skill for h in hits]
         if self.skill_selector is not None and skills_for_use:
@@ -1158,15 +1182,56 @@ class AutoSkillProxyRuntime:
         )
 
         return {
+            "original_query": latest_user,
             "latest_user_query": latest_user,
             "search_query": search_query,
             "rewritten_query": rewritten_query,
+            "event_time": int(time.time() * 1000),
             "scope": scope,
+            "top_k": int(lim),
+            "min_score": float(min_score_v),
             "hits": retrieval_hits,
+            "selected_for_use_ids": [str(getattr(s, "id", "") or "") for s in skills_for_use],
+            "selected_for_context_ids": [str(getattr(s, "id", "") or "") for s in selected],
+            "context_injected": bool(use_skills),
+            "error": (retrieval_error if retrieval_error else None),
             "selected_skills": selected,
             "selected_summaries": [_skill_summary(s) for s in selected],
             "context": context,
+            # Compatibility aliases expected by existing proxy consumers.
+            "query": latest_user,
         }
+
+    def _retrieval_response_payload(self, retrieval: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Builds a JSON-safe retrieval payload aligned with interactive session schema.
+        """
+
+        out = {
+            "original_query": str(retrieval.get("original_query") or retrieval.get("latest_user_query") or ""),
+            "rewritten_query": (
+                str(retrieval.get("rewritten_query") or "").strip() or None
+            ),
+            "search_query": str(retrieval.get("search_query") or ""),
+            "event_time": int(retrieval.get("event_time") or int(time.time() * 1000)),
+            "scope": str(retrieval.get("scope") or ""),
+            "top_k": int(
+                retrieval["top_k"] if retrieval.get("top_k") is not None else self.config.top_k
+            ),
+            "min_score": float(
+                retrieval["min_score"] if retrieval.get("min_score") is not None else self.config.min_score
+            ),
+            "hits": list(retrieval.get("hits") or []),
+            "selected_for_use_ids": [str(x) for x in (retrieval.get("selected_for_use_ids") or [])],
+            "selected_for_context_ids": [str(x) for x in (retrieval.get("selected_for_context_ids") or [])],
+            "context_injected": bool(retrieval.get("context_injected")),
+            "error": (str(retrieval.get("error")) if retrieval.get("error") else None),
+        }
+        # Backward-compatible aliases.
+        out["query"] = str(out["original_query"])
+        out["latest_user_query"] = str(out["original_query"])
+        out["selected_skills"] = list(retrieval.get("selected_summaries") or [])
+        return out
 
     def prepare_chat(
         self,
@@ -1209,11 +1274,7 @@ class AutoSkillProxyRuntime:
             normalized_messages=messages,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            latest_user_query=str(retrieval["latest_user_query"] or ""),
-            search_query=str(retrieval["search_query"] or ""),
-            scope=str(retrieval["scope"] or scope),
-            retrieved_hits=list(retrieval["hits"] or []),
-            selected_skills=list(retrieval["selected_summaries"] or []),
+            retrieval=self._retrieval_response_payload(retrieval),
             trigger="proxy_chat_completion",
         )
 
@@ -1258,13 +1319,7 @@ class AutoSkillProxyRuntime:
                 "total_tokens": 0,
             },
             "autoskill": {
-                "retrieval": {
-                    "query": prepared.latest_user_query,
-                    "search_query": prepared.search_query,
-                    "scope": prepared.scope,
-                    "hits": prepared.retrieved_hits,
-                    "selected_skills": prepared.selected_skills,
-                },
+                "retrieval": dict(prepared.retrieval or {}),
                 "extraction": {
                     "job_id": extraction_job_id,
                     "status": str(extraction_status or ("scheduled" if extraction_job_id else "disabled")),
@@ -1306,13 +1361,7 @@ class AutoSkillProxyRuntime:
                 "model": prepared.model,
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                 "autoskill": {
-                    "retrieval": {
-                        "query": prepared.latest_user_query,
-                        "search_query": prepared.search_query,
-                        "scope": prepared.scope,
-                        "hits": prepared.retrieved_hits,
-                        "selected_skills": prepared.selected_skills,
-                    },
+                    "retrieval": dict(prepared.retrieval or {}),
                     "extraction": {
                         "job_id": extraction_job_id,
                         "status": str(extraction_status or ("scheduled" if extraction_job_id else "disabled")),
@@ -1414,12 +1463,7 @@ class AutoSkillProxyRuntime:
 
         data: List[Dict[str, Any]] = []
         for i, h in enumerate(hits, start=1):
-            rec = {
-                "rank": int(i),
-                "score": float(getattr(h, "score", 0.0) or 0.0),
-                "skill": _skill_summary(h.skill),
-            }
-            data.append(rec)
+            data.append(_format_retrieval_hit(h, rank=i))
         return {
             "object": "list",
             "query": query,
@@ -1449,15 +1493,12 @@ class AutoSkillProxyRuntime:
             limit=limit,
             min_score=min_score,
         )
+        payload = self._retrieval_response_payload(retrieval)
         return {
             "object": "retrieval_preview",
             "user": user_id,
             "scope": scope,
-            "query": retrieval["latest_user_query"],
-            "search_query": retrieval["search_query"],
-            "rewritten_query": retrieval["rewritten_query"],
-            "hits": retrieval["hits"],
-            "selected_skills": retrieval["selected_summaries"],
+            **payload,
             "context": retrieval["context"],
         }
 
@@ -1931,16 +1972,20 @@ class AutoSkillProxyRuntime:
 
         Semantics are aligned with interactive mode:
         - use the recent ingest window
-        - schedule only when the window already contains at least one assistant turn
+        - latest message should be user feedback
+        - schedule only when the window already contains at least one prior assistant turn
         """
 
         window = list(messages[-int(self.config.ingest_window) :]) if messages else []
         if not window:
             return []
-        has_assistant = any(
-            str(m.get("role") or "").strip().lower() == "assistant" for m in window
+        latest_role = str((window[-1] or {}).get("role") or "").strip().lower()
+        if latest_role != "user":
+            return []
+        has_assistant_before_latest = any(
+            str((m or {}).get("role") or "").strip().lower() == "assistant" for m in window[:-1]
         )
-        if not has_assistant:
+        if not has_assistant_before_latest:
             return []
         return window
 
@@ -1956,14 +2001,34 @@ class AutoSkillProxyRuntime:
         if not isinstance(top, dict):
             return None
         skill = top.get("skill") if isinstance(top.get("skill"), dict) else None
-        if skill is None:
+        if isinstance(skill, dict):
+            ref_id = str(skill.get("id") or "").strip()
+            ref_name = str(skill.get("name") or "").strip()
+            ref_desc = str(skill.get("description") or "").strip()
+            ref_triggers = [
+                str(t).strip() for t in (skill.get("triggers") or []) if str(t).strip()
+            ][:20]
+            owner = str(skill.get("owner") or "").strip()
+        else:
+            ref_id = str(top.get("id") or "").strip()
+            ref_name = str(top.get("name") or "").strip()
+            ref_desc = str(top.get("description") or "").strip()
+            ref_triggers = [
+                str(t).strip() for t in (top.get("triggers") or []) if str(t).strip()
+            ][:20]
+            owner = str(top.get("owner") or "").strip()
+        if not ref_id and not ref_name and not ref_desc:
             return None
-        owner = str(skill.get("owner") or "").strip()
-        scope = "library" if owner.startswith("library:") else ("user" if owner == str(user_id or "").strip() else "other")
+        scope = (
+            "library"
+            if owner.startswith("library:")
+            else ("user" if owner == str(user_id or "").strip() else "other")
+        )
         return {
-            "id": str(skill.get("id") or "").strip(),
-            "name": str(skill.get("name") or "").strip(),
-            "description": str(skill.get("description") or "").strip(),
+            "id": ref_id,
+            "name": ref_name,
+            "description": ref_desc,
+            "triggers": ref_triggers,
             "scope": scope,
             "score": float(top.get("score") or 0.0),
         }
@@ -2083,18 +2148,18 @@ class AutoSkillProxyRuntime:
         if not bool(self.config.extract_event_include_skill_details):
             return event
 
-        max_md_chars = int(self.config.extract_event_max_md_chars or 3000)
-        if str(trigger or "").strip() == "proxy_extract_now":
-            max_md_chars = max(max_md_chars, 8000)
+        max_md_chars = int(self.config.extract_event_max_md_chars or 0)
 
         md_items: List[Dict[str, Any]] = []
         skill_items: List[Dict[str, Any]] = []
         for s in skills[:3]:
             md_full = str(self.sdk.export_skill_md(str(s.id)) or "")
             md = md_full
-            if max_md_chars > 0 and len(md) > max_md_chars:
-                md = md[:max_md_chars].rstrip() + "\n\n...[truncated]...\n"
-            md_items.append({"id": str(s.id), "md": md})
+            truncated = False
+            if max_md_chars > 0 and len(md_full) > max_md_chars:
+                md = md_full[:max_md_chars]
+                truncated = True
+            md_items.append({"id": str(s.id), "md": md, "truncated": bool(truncated)})
             skill_items.append(
                 {
                     "id": str(s.id),
@@ -2107,6 +2172,7 @@ class AutoSkillProxyRuntime:
                     "instructions": str(s.instructions or ""),
                     "examples": _examples_to_raw(list(s.examples or [])),
                     "skill_md": md,
+                    "skill_md_truncated": bool(truncated),
                 }
             )
         event["skills"] = skill_items

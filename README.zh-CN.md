@@ -11,12 +11,13 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 ```bash
 python3 -m pip install -e .
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.web_ui \
   --host 127.0.0.1 \
   --port 8000 \
-  --llm-provider dashscope \
-  --embeddings-provider dashscope \
+  --llm-provider internlm \
+  --embeddings-provider qwen \
   --store-dir Skills \
   --user-id u1 \
   --skill-scope all \
@@ -37,12 +38,13 @@ AutoSkill 也可以作为反向代理部署，对外暴露 OpenAI 兼容接口�
 
 ```bash
 python3 -m pip install -e .
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.openai_proxy \
   --host 127.0.0.1 \
   --port 9000 \
-  --llm-provider dashscope \
-  --embeddings-provider dashscope \
+  --llm-provider internlm \
+  --embeddings-provider qwen \
   --store-dir Skills \
   --user-id u1 \
   --skill-scope all \
@@ -314,8 +316,9 @@ python3 -m examples.interactive_chat --llm-provider dashscope
 ### 9.2 Web UI
 
 ```bash
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
-python3 -m examples.web_ui --llm-provider dashscope
+python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ```
 
 ### 9.3 导入已有 Agent Skills
@@ -333,8 +336,9 @@ python3 -m examples.normalize_skill_ids --store-dir Skills
 ### 9.5 OpenAI 兼容代理 API
 
 ```bash
+export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
 export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
-python3 -m examples.openai_proxy --llm-provider dashscope --embeddings-provider dashscope
+python3 -m examples.openai_proxy --llm-provider internlm --embeddings-provider qwen
 ```
 
 能力发现：

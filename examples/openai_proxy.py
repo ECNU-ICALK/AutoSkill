@@ -71,8 +71,8 @@ def main() -> None:
     parser.add_argument(
         "--extract-event-max-md-chars",
         type=int,
-        default=int(_env("AUTOSKILL_PROXY_EXTRACT_EVENT_MAX_MD_CHARS", "3000")),
-        help="Max SKILL.md chars included in extraction event details.",
+        default=int(_env("AUTOSKILL_PROXY_EXTRACT_EVENT_MAX_MD_CHARS", "0")),
+        help="Max SKILL.md chars included in extraction event details (0 means no truncation).",
     )
     parser.add_argument(
         "--proxy-api-key",
