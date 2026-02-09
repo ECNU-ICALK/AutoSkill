@@ -64,6 +64,27 @@ Per-request user isolation:
 - request body field `user` (recommended)
 - or header `X-AutoSkill-User`
 
+Streaming chat curl example (`stream=true`):
+
+```bash
+curl -N http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "intern-s1-pro",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "Write a concise summary of skill self-evolution."}
+    ]
+  }'
+```
+
+If proxy auth is enabled (`--proxy-api-key`), add:
+
+```bash
+-H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
+```
+
 ## 1.2 Skill Lifecycle Example (3 Aspects)
 
 ### A) Auto Decision + Feedback-triggered Extraction & Skill Management (v0.1.0)
@@ -354,6 +375,21 @@ OpenAI-compatible:
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings`
 - `GET /v1/models`
+
+Streaming chat example (`/v1/chat/completions`, SSE):
+
+```bash
+curl -N http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "intern-s1-pro",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "Give me 3 points about AutoSkill."}
+    ]
+  }'
+```
 
 Skill APIs:
 

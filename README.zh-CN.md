@@ -63,6 +63,27 @@ python3 -m examples.openai_proxy \
 - 请求体字段 `user`（推荐）
 - 或请求头 `X-AutoSkill-User`
 
+流式聊天调用示例（`stream=true`）：
+
+```bash
+curl -N http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "intern-s1-pro",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "请简要总结技能自进化的核心思路。"}
+    ]
+  }'
+```
+
+如果启用了代理鉴权（`--proxy-api-key`），请额外添加：
+
+```bash
+-H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
+```
+
 ## 1.2 技能生命周期示例（三个方面）
 
 ### A) 自动判断 + 反馈触发抽取与技能管理（v0.1.0）
@@ -353,6 +374,21 @@ OpenAI 兼容端点：
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings`
 - `GET /v1/models`
+
+流式聊天示例（`/v1/chat/completions`，SSE）：
+
+```bash
+curl -N http://127.0.0.1:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "intern-s1-pro",
+    "user": "u1",
+    "stream": true,
+    "messages": [
+      {"role": "user", "content": "请给出 AutoSkill 的 3 点价值。"}
+    ]
+  }'
+```
 
 技能管理端点：
 
