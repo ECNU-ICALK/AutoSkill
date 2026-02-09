@@ -211,7 +211,7 @@ class HTTPClient:
 
 class OpenAICompatLLMClient:
     """
-    Lightweight OpenAI-compatible chat caller for simulator/judge models.
+    Lightweight OpenAI-compatible chat caller for simulator models.
     """
 
     def __init__(self, *, base_url: str, api_key: str, model: str, timeout_s: float) -> None:
@@ -1078,44 +1078,6 @@ def _sample_scenarios(
     return out
 
 
-def _judge_skill_with_llm(
-    *,
-    judge_llm: OpenAICompatLLMClient,
-    scenario: EvalScenario,
-    skill: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    system = (
-        "You are an evaluator for AutoSkill extraction quality.\n"
-        "Return strict JSON only:\n"
-        "{\"pass\": true|false, \"score\": 1-5, \"reason\": \"...\"}\n"
-        "Judge whether the skill is reusable, user-centric, and not polluted by one-off task specifics."
-    )
-    user = (
-        "SCENARIO:\n"
-        f"{json.dumps({'topic': scenario.topic, 'objective': scenario.objective, 'turns': scenario.turns_final}, ensure_ascii=False)}\n"
-        "SKILL:\n"
-        f"{json.dumps(skill, ensure_ascii=False)}"
-    )
-    out = judge_llm.chat_text(
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        temperature=0.0,
-        max_tokens=512,
-    )
-    parsed = _json_from_text(out)
-    if not isinstance(parsed, dict):
-        return None
-    score_raw = parsed.get("score")
-    try:
-        score = int(score_raw)
-    except Exception:
-        score = 0
-    return {
-        "pass": bool(parsed.get("pass")),
-        "score": max(0, min(5, score)),
-        "reason": str(parsed.get("reason") or "").strip(),
-    }
-
-
 def _run_eval_case(
     *,
     client: HTTPClient,
@@ -1126,7 +1088,6 @@ def _run_eval_case(
     turn_timeout_s: float,
     extraction_timeout_s: float,
     poll_interval_s: float,
-    judge_llm: Optional[OpenAICompatLLMClient],
     verbose: bool,
 ) -> Dict[str, Any]:
     user_id = f"{user_prefix}_{scenario.scenario_id}"
@@ -1341,23 +1302,6 @@ def _run_eval_case(
         "pass": False,
     }
 
-    # 4) Optional LLM judge for extracted skill quality.
-    judge = None
-    if judge_llm is not None and extracted_skill_details:
-        try:
-            judge = _judge_skill_with_llm(
-                judge_llm=judge_llm,
-                scenario=scenario,
-                skill=extracted_skill_details[0],
-            )
-            if isinstance(judge, dict):
-                print(
-                    f"[eval][judge] case={scenario.scenario_id} pass={int(bool(judge.get('pass')))} "
-                    f"score={judge.get('score')} reason={_short_text(judge.get('reason'), 120)}"
-                )
-        except Exception:
-            judge = None
-
     expect_extract = bool(scenario.expect_extract)
     tp = int(expect_extract and extracted)
     fn = int(expect_extract and (not extracted))
@@ -1406,7 +1350,6 @@ def _run_eval_case(
             "checks": reuse_checks,
             "pass_count": sum(1 for x in reuse_checks if bool(x.get("pass"))),
         },
-        "judge": judge,
         "confusion": {"tp": tp, "fn": fn, "fp": fp, "tn": tn},
     }
 
@@ -1423,7 +1366,6 @@ def run_eval(
     extraction_timeout_s: float,
     poll_interval_s: float,
     simulator: Optional[OpenAICompatLLMClient],
-    judge_llm: Optional[OpenAICompatLLMClient],
     verbose: bool,
 ) -> Dict[str, Any]:
     scenarios = _sample_scenarios(
@@ -1450,7 +1392,6 @@ def run_eval(
                 turn_timeout_s=turn_timeout_s,
                 extraction_timeout_s=extraction_timeout_s,
                 poll_interval_s=poll_interval_s,
-                judge_llm=judge_llm,
                 verbose=verbose,
             )
             case["ok"] = True
@@ -1502,9 +1443,10 @@ def run_eval(
     tp = fn = fp = tn = 0
     completed_jobs = failed_jobs = upserted_total = 0
     reuse_pass = 0
+    reuse_hit = 0
+    reuse_selected = 0
     extracted_count = 0
     ok_cases = 0
-    judge_scores: List[int] = []
     for c in cases:
         if bool(c.get("ok")):
             ok_cases += 1
@@ -1522,17 +1464,18 @@ def run_eval(
                 if bool(ext.get("extracted")):
                     extracted_count += 1
             rr = c.get("reuse_retrieval")
-            if isinstance(rr, dict) and bool(rr.get("pass")):
-                reuse_pass += 1
-            j = c.get("judge")
-            if isinstance(j, dict):
-                try:
-                    judge_scores.append(int(j.get("score") or 0))
-                except Exception:
-                    pass
+            if isinstance(rr, dict):
+                if int(rr.get("hit_count") or 0) > 0:
+                    reuse_hit += 1
+                sel = rr.get("selected_for_context_ids")
+                if isinstance(sel, list) and len(sel) > 0:
+                    reuse_selected += 1
+                if bool(rr.get("pass")):
+                    reuse_pass += 1
 
     total_cases = len(cases)
     template_counts: Dict[str, int] = {}
+    family_counts: Dict[str, int] = {}
     complexity_counts: Dict[str, int] = {}
     for c in cases:
         sc = c.get("scenario") if isinstance(c, dict) else {}
@@ -1540,14 +1483,158 @@ def run_eval(
             tid = str(sc.get("template_id") or "").strip()
             if tid:
                 template_counts[tid] = int(template_counts.get(tid, 0)) + 1
+                fam = tid.split("__s", 1)[0]
+                family_counts[fam] = int(family_counts.get(fam, 0)) + 1
             comp = str(sc.get("complexity") or "basic").strip() or "basic"
             complexity_counts[comp] = int(complexity_counts.get(comp, 0)) + 1
     expected_positive = tp + fn
     expected_negative = fp + tn
+    predicted_positive = tp + fp
+    predicted_negative = fn + tn
+    total_labeled = expected_positive + expected_negative
     extraction_recall = (float(tp) / expected_positive) if expected_positive > 0 else None
     extraction_fp_rate = (float(fp) / expected_negative) if expected_negative > 0 else None
+    extraction_precision = (float(tp) / predicted_positive) if predicted_positive > 0 else None
+    extraction_accuracy = (float(tp + tn) / total_labeled) if total_labeled > 0 else None
+    extraction_f1 = None
+    if isinstance(extraction_precision, (int, float)) and isinstance(extraction_recall, (int, float)):
+        denom = float(extraction_precision) + float(extraction_recall)
+        if denom > 0:
+            extraction_f1 = (2.0 * float(extraction_precision) * float(extraction_recall)) / denom
     reuse_pass_rate = (float(reuse_pass) / max(1, ok_cases))
-    avg_judge_score = (sum(judge_scores) / len(judge_scores)) if judge_scores else None
+    reuse_hit_rate = (float(reuse_hit) / max(1, ok_cases))
+    reuse_selected_rate = (float(reuse_selected) / max(1, ok_cases))
+    avg_judge_score = None
+    avg_upserted_per_ok_case = (float(upserted_total) / max(1, ok_cases))
+    case_level_extracted_rate = (float(extracted_count) / max(1, ok_cases))
+
+    confusion_total = tp + fn + fp + tn
+    coverage_template_total = sum(int(v) for v in template_counts.values())
+    coverage_family_total = sum(int(v) for v in family_counts.values())
+    coverage_complexity_total = sum(int(v) for v in complexity_counts.values())
+    positive_ratio = (float(expected_positive) / total_labeled) if total_labeled > 0 else None
+    negative_ratio = (float(expected_negative) / total_labeled) if total_labeled > 0 else None
+    warnings: List[str] = []
+    if total_cases < 30:
+        warnings.append("Small sample size (<30). Metrics may be unstable.")
+    if ok_cases < total_cases:
+        warnings.append("Some cases failed. Aggregate metrics are computed only from ok_cases.")
+    if expected_positive < 5:
+        warnings.append("Very few expected-positive cases. Recall may be unstable.")
+    if expected_negative < 5:
+        warnings.append("Very few expected-negative cases. FP-rate may be unstable.")
+    if isinstance(positive_ratio, (int, float)) and (positive_ratio < 0.2 or positive_ratio > 0.8):
+        warnings.append("Class distribution is highly imbalanced. Interpret accuracy with caution.")
+    if confusion_total != ok_cases:
+        warnings.append("Confusion matrix does not match ok_cases. Check evaluation pipeline consistency.")
+    if coverage_template_total != total_cases:
+        warnings.append("Template coverage count does not match total_cases. Check scenario accounting.")
+
+    metric_guide = {
+        "confusion": {
+            "tp": {
+                "meaning": "Expected extraction and extraction happened.",
+                "formula": "count(expect_extract=true AND extracted=true)",
+            },
+            "fn": {
+                "meaning": "Expected extraction but extraction did not happen.",
+                "formula": "count(expect_extract=true AND extracted=false)",
+            },
+            "fp": {
+                "meaning": "Did not expect extraction but extraction happened.",
+                "formula": "count(expect_extract=false AND extracted=true)",
+            },
+            "tn": {
+                "meaning": "Did not expect extraction and extraction did not happen.",
+                "formula": "count(expect_extract=false AND extracted=false)",
+            },
+        },
+        "metrics": {
+            "extraction_recall_on_expected": {
+                "meaning": "How many expected-positive cases were extracted.",
+                "formula": "tp / (tp + fn)",
+                "range": "[0,1] or null",
+                "direction": "higher_better",
+            },
+            "false_positive_rate_on_unexpected": {
+                "meaning": "How often extraction was incorrectly triggered on expected-negative cases.",
+                "formula": "fp / (fp + tn)",
+                "range": "[0,1] or null",
+                "direction": "lower_better",
+            },
+            "extraction_precision_on_predicted": {
+                "meaning": "Among extracted cases, how many were truly expected-positive.",
+                "formula": "tp / (tp + fp)",
+                "range": "[0,1] or null",
+                "direction": "higher_better",
+            },
+            "extraction_f1_on_expected": {
+                "meaning": "Balance between extraction recall and precision.",
+                "formula": "2 * P * R / (P + R)",
+                "range": "[0,1] or null",
+                "direction": "higher_better",
+            },
+            "extraction_accuracy": {
+                "meaning": "Overall correctness of extraction-vs-no-extraction decisions.",
+                "formula": "(tp + tn) / (tp + fn + fp + tn)",
+                "range": "[0,1] or null",
+                "direction": "higher_better",
+            },
+            "case_level_extracted_rate": {
+                "meaning": "How often extraction happened among successful cases.",
+                "formula": "extracted_ok_cases / ok_cases",
+                "range": "[0,1]",
+                "direction": "context_dependent",
+            },
+            "retrieval_reuse_pass_rate": {
+                "meaning": "Fraction of successful cases where retrieval selected at least one skill for context.",
+                "formula": "reuse_pass_cases / ok_cases",
+                "range": "[0,1]",
+                "direction": "higher_better",
+            },
+            "retrieval_hit_rate": {
+                "meaning": "Fraction of successful cases where retrieval returned at least one hit.",
+                "formula": "reuse_hit_cases / ok_cases",
+                "range": "[0,1]",
+                "direction": "higher_better",
+            },
+            "retrieval_selected_rate": {
+                "meaning": "Fraction of successful cases where at least one hit was selected into context.",
+                "formula": "reuse_selected_cases / ok_cases",
+                "range": "[0,1]",
+                "direction": "higher_better",
+            },
+            "avg_upserted_per_ok_case": {
+                "meaning": "Average number of upserted skills per successful case.",
+                "formula": "upserted_total / ok_cases",
+                "range": "[0,+inf)",
+                "direction": "context_dependent",
+            },
+            "avg_judge_score": {
+                "meaning": "LLM-judge average score (disabled in current script).",
+                "formula": "mean(judge_score)",
+                "range": "null when judge disabled",
+                "direction": "higher_better",
+            },
+        },
+    }
+
+    rationality = {
+        "consistency_checks": {
+            "confusion_sum_equals_ok_cases": bool(confusion_total == ok_cases),
+            "template_coverage_sum_equals_total_cases": bool(coverage_template_total == total_cases),
+            "family_coverage_sum_equals_total_cases": bool(coverage_family_total == total_cases),
+            "complexity_coverage_sum_equals_total_cases": bool(coverage_complexity_total == total_cases),
+        },
+        "sample_quality": {
+            "ok_case_ratio": (float(ok_cases) / max(1, total_cases)),
+            "positive_ratio": positive_ratio,
+            "negative_ratio": negative_ratio,
+            "expected_positive": expected_positive,
+            "expected_negative": expected_negative,
+        },
+        "warnings": warnings,
+    }
 
     summary = {
         "total_cases": total_cases,
@@ -1560,17 +1647,32 @@ def run_eval(
             "upserted_total": upserted_total,
         },
         "confusion": {"tp": tp, "fn": fn, "fp": fp, "tn": tn},
+        "counts": {
+            "expected_positive": expected_positive,
+            "expected_negative": expected_negative,
+            "predicted_positive": predicted_positive,
+            "predicted_negative": predicted_negative,
+        },
         "metrics": {
             "extraction_recall_on_expected": extraction_recall,
             "false_positive_rate_on_unexpected": extraction_fp_rate,
-            "case_level_extracted_rate": (float(extracted_count) / max(1, ok_cases)),
+            "extraction_precision_on_predicted": extraction_precision,
+            "extraction_f1_on_expected": extraction_f1,
+            "extraction_accuracy": extraction_accuracy,
+            "case_level_extracted_rate": case_level_extracted_rate,
             "retrieval_reuse_pass_rate": reuse_pass_rate,
+            "retrieval_hit_rate": reuse_hit_rate,
+            "retrieval_selected_rate": reuse_selected_rate,
+            "avg_upserted_per_ok_case": avg_upserted_per_ok_case,
             "avg_judge_score": avg_judge_score,
         },
         "coverage": {
+            "scenario_families": family_counts,
             "templates": template_counts,
             "complexity": complexity_counts,
         },
+        "metric_guide": metric_guide,
+        "rationality": rationality,
     }
     return {"summary": summary, "cases": cases}
 
@@ -1596,115 +1698,6 @@ def _build_simulator_client(
         )
     except Exception:
         return None
-
-
-def _build_judge_client(
-    *,
-    judge_enabled: bool,
-    judge_base_url: str,
-    judge_api_key: str,
-    judge_model: str,
-    timeout_s: float,
-) -> Optional[OpenAICompatLLMClient]:
-    if not bool(judge_enabled):
-        return None
-    if not str(judge_api_key or "").strip():
-        return None
-    try:
-        return OpenAICompatLLMClient(
-            base_url=str(judge_base_url),
-            api_key=str(judge_api_key),
-            model=str(judge_model),
-            timeout_s=float(timeout_s),
-        )
-    except Exception:
-        return None
-
-
-def _judge_overall_with_llm(
-    *,
-    judge_llm: OpenAICompatLLMClient,
-    eval_result: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    summary = eval_result.get("summary") if isinstance(eval_result, dict) else {}
-    cases = eval_result.get("cases") if isinstance(eval_result, dict) else []
-    if not isinstance(summary, dict):
-        summary = {}
-    if not isinstance(cases, list):
-        cases = []
-
-    failed_examples: List[Dict[str, Any]] = []
-    for c in cases:
-        if not isinstance(c, dict):
-            continue
-        if bool(c.get("ok")):
-            continue
-        sc = c.get("scenario") if isinstance(c.get("scenario"), dict) else {}
-        failed_examples.append(
-            {
-                "scenario_id": str(sc.get("id") or ""),
-                "template_id": str(sc.get("template_id") or ""),
-                "topic": str(sc.get("topic") or ""),
-                "complexity": str(sc.get("complexity") or ""),
-                "error": str(c.get("error") or ""),
-            }
-        )
-        if len(failed_examples) >= 8:
-            break
-
-    system = (
-        "You are an evaluation judge for AutoSkill benchmark reports.\n"
-        "Return ONLY strict JSON with this schema:\n"
-        "{"
-        "\"overall_score\": 1-5,"
-        "\"status\": \"good\"|\"warning\"|\"critical\","
-        "\"strengths\": [\"...\"],"
-        "\"risks\": [\"...\"],"
-        "\"recommendations\": [\"...\"]"
-        "}\n"
-        "Judge the whole benchmark quality and extraction reliability."
-    )
-    user_payload = {
-        "summary": summary,
-        "failed_examples": failed_examples,
-    }
-    user = f"BENCHMARK_RESULT:\n{json.dumps(user_payload, ensure_ascii=False)}"
-    out = judge_llm.chat_text(
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        temperature=0.0,
-        max_tokens=700,
-    )
-    parsed = _json_from_text(out)
-    if not isinstance(parsed, dict):
-        return None
-    score_raw = parsed.get("overall_score")
-    try:
-        score = int(score_raw)
-    except Exception:
-        score = 0
-    status = str(parsed.get("status") or "").strip().lower()
-    if status not in {"good", "warning", "critical"}:
-        status = "warning"
-
-    def _to_list(v: Any, *, limit: int = 8) -> List[str]:
-        if not isinstance(v, list):
-            return []
-        out2: List[str] = []
-        for x in v:
-            s = str(x or "").strip()
-            if s:
-                out2.append(s)
-            if len(out2) >= int(limit):
-                break
-        return out2
-
-    return {
-        "overall_score": max(1, min(5, score)) if score else None,
-        "status": status,
-        "strengths": _to_list(parsed.get("strengths"), limit=8),
-        "risks": _to_list(parsed.get("risks"), limit=8),
-        "recommendations": _to_list(parsed.get("recommendations"), limit=8),
-    }
 
 
 def main() -> None:
@@ -1738,16 +1731,6 @@ def main() -> None:
         default=os.getenv("EVAL_SIM_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
     )
     parser.add_argument("--sim-model", default=os.getenv("EVAL_SIM_MODEL", "qwen-plus"))
-    parser.add_argument("--judge-enable", action="store_true")
-    parser.add_argument(
-        "--judge-base-url",
-        default=os.getenv("EVAL_JUDGE_BASE_URL", os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode")),
-    )
-    parser.add_argument(
-        "--judge-api-key",
-        default=os.getenv("EVAL_JUDGE_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
-    )
-    parser.add_argument("--judge-model", default=os.getenv("EVAL_JUDGE_MODEL", "qwen-plus"))
     parser.add_argument("--report-json", default="")
     parser.add_argument(
         "--verbose",
@@ -1817,25 +1800,11 @@ def main() -> None:
             sim_model=str(args.sim_model),
             timeout_s=float(args.timeout_s),
         )
-        judge_llm = _build_judge_client(
-            judge_enabled=bool(args.judge_enable),
-            judge_base_url=str(args.judge_base_url),
-            judge_api_key=str(args.judge_api_key),
-            judge_model=str(args.judge_model),
-            timeout_s=float(args.timeout_s),
-        )
-        if judge_llm is None and bool(args.judge_enable) and simulator is not None:
-            # Backward-compatible fallback: reuse simulator client when explicit judge config is absent.
-            judge_llm = simulator
 
         if simulator is None:
             print("[eval] simulator: disabled (using template turns)")
         else:
             print(f"[eval] simulator: enabled model={args.sim_model}")
-        if judge_llm is not None:
-            print(f"[eval] judge: enabled model={args.judge_model}")
-        elif bool(args.judge_enable):
-            print("[eval] judge: enabled but client init failed (check judge api key/model/base url)")
 
         eval_result = run_eval(
             client=client,
@@ -1848,18 +1817,8 @@ def main() -> None:
             extraction_timeout_s=float(args.eval_extraction_timeout_s),
             poll_interval_s=float(args.eval_poll_interval_s),
             simulator=simulator,
-            judge_llm=judge_llm,
             verbose=bool(args.verbose),
         )
-        if judge_llm is not None:
-            try:
-                overall_judge = _judge_overall_with_llm(
-                    judge_llm=judge_llm,
-                    eval_result=eval_result,
-                )
-            except Exception as e:
-                overall_judge = {"error": str(e)}
-            eval_result["overall_judge"] = overall_judge
 
         report["evaluation"] = eval_result
 
@@ -1882,7 +1841,6 @@ def main() -> None:
                     "confusion": conf,
                     "metrics": metrics,
                     "coverage": coverage,
-                    "overall_judge": (eval_result.get("overall_judge") if isinstance(eval_result, dict) else None),
                 },
                 ensure_ascii=False,
                 indent=2,
