@@ -29,6 +29,18 @@ def _env(name: str, default: str) -> str:
     return value if value is not None and value.strip() else default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return bool(default)
+    s = value.strip().lower()
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
 def _env_json(name: str) -> Optional[Dict[str, Any]]:
     raw = os.getenv(name)
     if not raw or not raw.strip():
@@ -49,6 +61,8 @@ def _pick_default_provider() -> str:
         return "dashscope"
     if os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY"):
         return "glm"
+    if os.getenv("INTERNLM_API_KEY") or os.getenv("INTERN_API_KEY"):
+        return "internlm"
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -70,6 +84,13 @@ def _bigmodel_key() -> str:
     return v
 
 
+def _internlm_key() -> str:
+    v = os.getenv("INTERNLM_API_KEY") or os.getenv("INTERN_API_KEY") or os.getenv("INTERNLM_TOKEN")
+    if not v or not v.strip():
+        raise SystemExit("Missing API key. Set INTERNLM_API_KEY (or INTERN_API_KEY).")
+    return v
+
+
 def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
     provider = (provider or "mock").lower()
     if provider == "mock":
@@ -86,6 +107,19 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
                 "DASHSCOPE_BASE_URL",
                 "https://dashscope.aliyuncs.com/compatible-mode",
             ),
+            "timeout_s": timeout_s,
+        }
+
+    if provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}:
+        return {
+            "provider": "internlm",
+            "model": model or _env("INTERNLM_MODEL", "intern-s1-pro"),
+            "api_key": _internlm_key(),
+            "base_url": _env("INTERNLM_BASE_URL", "https://chat.intern-ai.org.cn/api/v1"),
+            # Intern-S1 defaults to think mode; disable by setting INTERNLM_THINKING_MODE=0.
+            "thinking_mode": _env_bool("INTERNLM_THINKING_MODE", True),
+            "max_tokens": int(_env("INTERNLM_MAX_TOKENS", "4096")),
+            "extra_body": _env_json("INTERNLM_LLM_EXTRA_BODY"),
             "timeout_s": timeout_s,
         }
 
@@ -128,6 +162,8 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
     if not provider:
         if llm_provider in {"glm", "bigmodel", "zhipu"}:
             provider = "glm"
+        elif llm_provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}:
+            provider = "hashing"
         elif llm_provider in {"dashscope", "qwen"}:
             provider = "dashscope"
         elif llm_provider == "openai":
@@ -188,7 +224,7 @@ def main() -> None:
     parser.add_argument(
         "--llm-provider",
         default=_pick_default_provider(),
-        help="mock|glm|dashscope|openai|anthropic",
+        help="mock|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=None)
     parser.add_argument(

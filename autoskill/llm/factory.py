@@ -13,6 +13,7 @@ from typing import Any, Dict
 from .anthropic import AnthropicLLM
 from .base import LLM
 from .glm import GLMChatLLM
+from .internlm import InternLMChatLLM
 from .mock import MockLLM
 from .openai import OpenAIChatLLM
 
@@ -45,6 +46,18 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             timeout_s=int(config.get("timeout_s", 60)),
             max_input_chars=int(config.get("max_input_chars", 10000)),
             max_tokens=int(config.get("max_tokens", 4096)),
+        )
+
+    if provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}:
+        return InternLMChatLLM(
+            model=str(config.get("model", "intern-s1-pro")),
+            api_key=(config.get("api_key") or os.getenv("INTERNLM_API_KEY")),
+            base_url=str(config.get("base_url", "https://chat.intern-ai.org.cn/api/v1")),
+            timeout_s=int(config.get("timeout_s", 60)),
+            max_input_chars=int(config.get("max_input_chars", 10000)),
+            max_tokens=int(config.get("max_tokens", 4096)),
+            extra_body=(config.get("extra_body") or config.get("extra_payload")),
+            thinking_mode=config.get("thinking_mode", True),
         )
 
     if provider in {"glm", "bigmodel", "zhipu"}:

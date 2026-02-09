@@ -35,7 +35,7 @@ def main() -> None:
     parser.add_argument(
         "--llm-provider",
         default=_pick_default_provider(),
-        help="mock|glm|dashscope|openai|anthropic",
+        help="mock|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=None)
     parser.add_argument(

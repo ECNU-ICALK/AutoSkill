@@ -2,7 +2,7 @@
 id: "97279749-41b0-4d50-94ad-1824f8de19bb"
 name: "govt-report-standard"
 description: "生成符合中国政府公文规范、无技术幻觉、纯文本Word兼容格式的政策类报告，禁用Markdown、图标、强调符号及主观修辞；聚焦大语言模型持续演进治理，强调问题导向、责任明确、依据扎实、建议可操作。"
-version: "0.1.1"
+version: "0.1.3"
 tags:
   - "政府公文"
   - "零幻觉"
@@ -14,6 +14,12 @@ tags:
   - "政策建议"
   - "技术现实主义"
   - "合规报告"
+  - "事实核查"
+  - "govt"
+  - "report"
+  - "compliance"
+  - "word-format"
+  - "no-hallucination"
 triggers:
   - "用word格式"
   - "不要花里胡哨"
@@ -25,7 +31,25 @@ triggers:
   - "避免幻觉"
   - "要具体"
   - "问题犀利"
+  - "格式为word"
+  - "官方风格"
+  - "政府报告"
+  - "政策报告"
+  - "Word格式报告"
+  - "技术治理报告"
 ---
+
+# govt-report-standard
+
+生成符合中国政府公文规范、无技术幻觉、纯文本Word兼容格式的政策类报告，禁用Markdown、图标、强调符号及主观修辞；聚焦大语言模型持续演进治理，强调问题导向、责任明确、依据扎实、建议可操作。
+
+## Prompt
+
+# govt-report-standard
+
+生成符合中国政府公文规范、无技术幻觉、纯文本Word兼容格式的政策类报告，禁用Markdown、图标、强调符号及主观修辞；聚焦大语言模型持续演进治理，强调问题导向、责任明确、依据扎实、建议可操作。
+
+## Prompt
 
 # govt-report-standard
 
@@ -55,6 +79,32 @@ triggers:
 
 # Triggers
 None
+
+## Triggers
+
+- 用word格式
+- 不要花里胡哨
+- 不用markdown
+- 正式公文风格
+- 政府报告标准
+- 写政府报告
+- 大模型治理
+- 避免幻觉
+- 要具体
+- 问题犀利
+
+## Triggers
+
+- 用word格式
+- 不要花里胡哨
+- 不用markdown
+- 正式公文风格
+- 政府报告标准
+- 写政府报告
+- 大模型治理
+- 避免幻觉
+- 要具体
+- 问题犀利
 
 ## Triggers
 

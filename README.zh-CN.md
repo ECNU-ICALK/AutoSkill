@@ -285,6 +285,13 @@ export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_KEY"
 python3 -m examples.interactive_chat --llm-provider anthropic
 ```
 
+### 8.4 InternLM（Intern-S1 Pro）
+
+```bash
+export INTERNLM_API_KEY="YOUR_INTERNLM_TOKEN"
+python3 -m examples.interactive_chat --llm-provider internlm --llm-model intern-s1-pro
+```
+
 ## 9. 常用工作流
 
 ### 9.1 终端交互（每轮检索）

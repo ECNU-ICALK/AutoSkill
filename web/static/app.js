@@ -26,6 +26,7 @@ const state = {
   turnById: Object.create(null),
   jobTurnMap: Object.create(null),
   assistantCollapsed: Object.create(null),
+  runtimeInfo: null,
   trace: {
     sessionStartedAt: Date.now(),
     turns: [],
@@ -124,11 +125,12 @@ function snapshotCurrentSessionRuntime() {
     turnById: cloneJsonSafe(state.turnById) || {},
     jobTurnMap: cloneJsonSafe(state.jobTurnMap) || {},
     assistantCollapsed: cloneJsonSafe(state.assistantCollapsed) || {},
+    runtimeInfo: cloneJsonSafe(state.runtimeInfo),
     trace: cloneJsonSafe(state.trace) || makeEmptyTrace(),
   };
 }
 
-function restoreSessionRuntime(sid, serverState, serverTrace = null) {
+function restoreSessionRuntime(sid, serverState, serverTrace = null, serverRuntime = null) {
   const key = String(sid || "").trim();
   const snap = state.sessionRuntime[key];
   _clearExtractionTimers();
@@ -149,6 +151,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
       snap.assistantCollapsed && typeof snap.assistantCollapsed === "object"
         ? snap.assistantCollapsed
         : Object.create(null);
+    state.runtimeInfo = snap.runtimeInfo || null;
     state.trace = snap.trace && typeof snap.trace === "object" ? snap.trace : makeEmptyTrace();
   } else {
     const traceFromServer = normalizeTraceForExport(serverTrace);
@@ -166,8 +169,12 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
     state.turnById = Object.create(null);
     state.jobTurnMap = Object.create(null);
     state.assistantCollapsed = Object.create(null);
+    state.runtimeInfo = serverRuntime || null;
     state.trace = traceFromServer && typeof traceFromServer === "object" ? traceFromServer : makeEmptyTrace();
     if (serverState?.config) rememberConfig(serverState.config, "session/state");
+  }
+  if (serverRuntime && typeof serverRuntime === "object") {
+    state.runtimeInfo = cloneJsonSafe(serverRuntime);
   }
   renderChat();
   const latestRetrieval =
@@ -197,6 +204,7 @@ function restoreSessionRuntime(sid, serverState, serverTrace = null) {
     }
   }
   if (serverState?.config) renderConfig(serverState.config);
+  renderRuntime(state.runtimeInfo || serverRuntime || null);
 }
 
 function formatSessionTime(ms) {
@@ -267,7 +275,7 @@ async function createNewSession(overrides) {
   state.sessionId = sid;
   const serverState = out?.state || null;
   state.sessionList = Array.isArray(out?.sessions) ? out.sessions : [];
-  restoreSessionRuntime(sid, serverState, out?.trace || null);
+  restoreSessionRuntime(sid, serverState, out?.trace || null, out?.runtime || null);
   renderSessionList();
   el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
   return sid;
@@ -282,7 +290,7 @@ async function switchSession(sid) {
   const out = await api("/api/session/state", { session_id: nextId });
   state.sessionId = nextId;
   const serverState = out?.state || null;
-  restoreSessionRuntime(nextId, serverState, out?.trace || null);
+  restoreSessionRuntime(nextId, serverState, out?.trace || null, out?.runtime || null);
   state.sessionList = Array.isArray(out?.sessions) ? out.sessions : state.sessionList;
   renderSessionList();
   el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
@@ -313,7 +321,7 @@ async function deleteSession(sid) {
   const nextId = String(out?.next_session_id || "").trim();
   if (nextId) {
     state.sessionId = nextId;
-    restoreSessionRuntime(nextId, out?.state || null, out?.trace || null);
+    restoreSessionRuntime(nextId, out?.state || null, out?.trace || null, out?.runtime || null);
     renderSessionList();
     el("sessionBadge").textContent = `session: ${state.sessionId.slice(0, 8)}`;
     return;
@@ -1204,6 +1212,36 @@ function renderExtraction(extraction, options) {
   }
 }
 
+function renderRuntime(runtime) {
+  const provider = runtime?.llm_provider ? String(runtime.llm_provider) : "-";
+  const model = runtime?.llm_model ? String(runtime.llm_model) : "-";
+  const thinking = runtime?.thinking && typeof runtime.thinking === "object" ? runtime.thinking : null;
+
+  let thinkText = "-";
+  if (thinking && thinking.supported) {
+    const requested = thinking.requested;
+    const effective = thinking.effective;
+    const autoDisabled = !!thinking.auto_disabled;
+    if (requested === false) {
+      thinkText = "off";
+    } else if (effective === true) {
+      thinkText = "on";
+    } else if (requested === true && autoDisabled) {
+      thinkText = "off (fallback)";
+    } else if (requested === true) {
+      thinkText = "on";
+    } else {
+      thinkText = "auto";
+    }
+  }
+
+  if (el("llmProvider")) el("llmProvider").textContent = provider;
+  if (el("llmModel")) el("llmModel").textContent = model;
+  if (el("llmThink")) el("llmThink").textContent = thinkText;
+
+  state.runtimeInfo = runtime && typeof runtime === "object" ? cloneJsonSafe(runtime) : null;
+}
+
 function renderConfig(cfg) {
   if (!cfg) return;
   el("minScore").textContent = cfg.min_score != null ? String(cfg.min_score) : "-";
@@ -1413,6 +1451,7 @@ async function exportSessionJson(sessionId) {
     ui_state: uiStateForExport,
     session_state: {
       config: cloneJsonSafe(sessionState?.config) || null,
+      runtime: isCurrent ? cloneJsonSafe(state.runtimeInfo) : cloneJsonSafe(runtime?.runtimeInfo || null),
       pending: !!sessionState?.pending,
       messages: cloneJsonSafe(sessionState?.messages) || [],
     },
@@ -1449,6 +1488,7 @@ async function pollSession() {
   if (!state.sessionId) return;
   try {
     const out = await api("/api/session/poll", { session_id: state.sessionId });
+    if (out?.runtime) renderRuntime(out.runtime);
     const events = out?.events?.extraction;
     if (Array.isArray(events) && events.length) {
       for (const ev of events) {
@@ -1568,6 +1608,9 @@ function applySendResult(result, streamAssistantIndex, turnId) {
     renderConfig(result.config);
     rememberConfig(result.config, "result");
   }
+  if (result?.runtime) {
+    renderRuntime(result.runtime);
+  }
 
   const patch = {
     kind: String(result?.kind || "unknown"),
@@ -1627,6 +1670,7 @@ async function sendText(text) {
           const t = String(ev?.type || "").trim().toLowerCase();
           if (t === "meta") {
             streamStarted = true;
+            if (ev?.runtime) renderRuntime(ev.runtime);
             return;
           }
           if (t === "assistant_delta") {
@@ -1668,6 +1712,9 @@ async function sendText(text) {
       if (!streamStarted) {
         const out = await api("/api/session/input", { session_id: sid, text });
         result = out?.result || {};
+        if (out?.runtime && result && typeof result === "object") {
+          result.runtime = out.runtime;
+        }
       } else {
         throw e;
       }

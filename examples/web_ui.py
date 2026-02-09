@@ -240,6 +240,21 @@ def _content_type_for(path: str) -> str:
     return "application/octet-stream"
 
 
+def _coerce_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
 class _SessionManager:
     def __init__(
         self,
@@ -248,11 +263,13 @@ class _SessionManager:
         interactive_cfg: InteractiveConfig,
         chat_llm: Optional[Any],
         query_rewriter: Optional[LLMQueryRewriter],
+        llm_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.sdk = sdk
         self.interactive_cfg = interactive_cfg
         self.chat_llm = chat_llm
         self.query_rewriter = query_rewriter
+        self.llm_config = dict(llm_config or {})
 
         self._lock = threading.Lock()
         self._sessions: Dict[str, InteractiveSession] = {}
@@ -265,6 +282,50 @@ class _SessionManager:
         user_key = str(getattr(self.interactive_cfg, "user_id", "") or "u1").strip() or "u1"
         self._persist_file = os.path.join(store_root, "web_sessions", f"{user_key}.json")
         self._load_from_disk()
+
+    def runtime_info(self) -> Dict[str, Any]:
+        provider = str(self.llm_config.get("provider") or "mock").strip().lower() or "mock"
+        model = str(self.llm_config.get("model") or "").strip()
+
+        thinking: Dict[str, Any] = {
+            "supported": False,
+            "requested": None,
+            "effective": None,
+            "auto_disabled": False,
+        }
+        if provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}:
+            requested = _coerce_bool(self.llm_config.get("thinking_mode"))
+            if requested is None:
+                requested = True
+            effective = requested
+            auto_disabled = False
+            if self.chat_llm is not None and hasattr(self.chat_llm, "thinking_mode_status"):
+                try:
+                    st = self.chat_llm.thinking_mode_status()
+                except Exception:
+                    st = None
+                if isinstance(st, dict):
+                    requested2 = _coerce_bool(st.get("requested"))
+                    effective2 = _coerce_bool(st.get("effective"))
+                    auto_disabled2 = _coerce_bool(st.get("auto_disabled"))
+                    if requested2 is not None:
+                        requested = requested2
+                    if effective2 is not None:
+                        effective = effective2
+                    if auto_disabled2 is not None:
+                        auto_disabled = auto_disabled2
+            thinking = {
+                "supported": True,
+                "requested": requested,
+                "effective": effective,
+                "auto_disabled": bool(auto_disabled),
+            }
+
+        return {
+            "llm_provider": provider,
+            "llm_model": model,
+            "thinking": thinking,
+        }
 
     @staticmethod
     def _now_ms() -> int:
@@ -749,7 +810,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             path = parsed.path or "/"
 
             if path == "/api/health":
-                return _json_response(self, {"ok": True})
+                return _json_response(self, {"ok": True, "runtime": manager.runtime_info()})
 
             if path == "/" or path == "/index.html":
                 index = web / "index.html"
@@ -836,6 +897,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                         "session_id": sid,
                         "state": session.state(),
                         "trace": manager.get_trace(sid),
+                        "runtime": manager.runtime_info(),
                         "sessions": manager.list_sessions(),
                     },
                 )
@@ -864,6 +926,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                         "next_session_id": next_sid,
                         "state": next_state,
                         "trace": next_trace,
+                        "runtime": manager.runtime_info(),
                         "sessions": manager.list_sessions(),
                     },
                 )
@@ -883,6 +946,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                         "state": session.state(),
                         "trace": manager.get_trace(sid),
                         "events": {"extraction": extraction_events},
+                        "runtime": manager.runtime_info(),
                         "sessions": manager.list_sessions(),
                     },
                 )
@@ -899,7 +963,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                         manager.record_extraction(sid, turn_id=None, extraction=ev, source="poll")
                     # Persist extraction trace updates so refresh can restore the right-side panel.
                     manager.touch(sid)
-                return _json_response(self, {"session_id": sid, **polled})
+                return _json_response(self, {"session_id": sid, "runtime": manager.runtime_info(), **polled})
 
             if path == "/api/session/input":
                 sid = str(body.get("session_id") or "").strip()
@@ -917,7 +981,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 except Exception as e:
                     manager.fail_turn(sid, turn_id=turn_id, error=str(e))
                     return _json_response(self, {"error": str(e)}, status=500)
-                return _json_response(self, {"session_id": sid, "result": out})
+                return _json_response(self, {"session_id": sid, "result": out, "runtime": manager.runtime_info()})
 
             if path == "/api/session/input_stream":
                 sid = str(body.get("session_id") or "").strip()
@@ -929,7 +993,9 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                 try:
                     manager.touch(sid, user_text=text)
                     self._start_ndjson()
-                    self._write_ndjson({"type": "meta", "session_id": sid})
+                    self._write_ndjson(
+                        {"type": "meta", "session_id": sid, "runtime": manager.runtime_info()}
+                    )
                     for ev in session.handle_input_stream(text):
                         if not isinstance(ev, dict):
                             continue
@@ -943,6 +1009,12 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
                                 sid, turn_id=turn_id, extraction=ev.get("extraction"), source="stream"
                             )
                         elif ev_type == "result":
+                            result_payload = ev.get("result")
+                            if isinstance(result_payload, dict):
+                                result_payload = dict(result_payload)
+                                result_payload["runtime"] = manager.runtime_info()
+                                ev = dict(ev)
+                                ev["result"] = result_payload
                             manager.complete_turn(sid, turn_id=turn_id, result=ev.get("result"), source="stream")
                         self._write_ndjson(ev)
                     # Persist after stream completes so refresh always sees the final turn.
@@ -1211,7 +1283,7 @@ def main() -> None:
     parser.add_argument(
         "--llm-provider",
         default=_pick_default_provider(),
-        help="mock|glm|dashscope|openai|anthropic",
+        help="mock|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=None)
     parser.add_argument(
@@ -1311,6 +1383,7 @@ def main() -> None:
         interactive_cfg=interactive_cfg,
         chat_llm=chat_llm,
         query_rewriter=query_rewriter,
+        llm_config=llm_cfg,
     )
 
     handler_cls = make_handler(manager)

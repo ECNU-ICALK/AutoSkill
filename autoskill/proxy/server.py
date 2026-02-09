@@ -82,6 +82,21 @@ def _safe_int(v: Any, default: Optional[int]) -> Optional[int]:
         return default
 
 
+def _safe_optional_bool(v: Any) -> Optional[bool]:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if not s:
+        return None
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
 def _normalize_scope(scope: str) -> str:
     s = str(scope or "all").strip().lower()
     if s == "common":
@@ -468,6 +483,7 @@ class _PreparedChat:
     model: str
     temperature: float
     max_tokens: Optional[int]
+    thinking_mode: Optional[bool]
     user_id: str
     normalized_messages: List[Dict[str, str]]
     system_prompt: str
@@ -969,6 +985,7 @@ class AutoSkillProxyRuntime:
         return {
             "object": "autoskill.capabilities",
             "data": {
+                "llm": self._runtime_llm_info(),
                 "chat": {"path": "/v1/chat/completions", "stream": True},
                 "embeddings": {"path": "/v1/embeddings"},
                 "skills": {
@@ -1000,6 +1017,22 @@ class AutoSkillProxyRuntime:
                     "capabilities": "/v1/autoskill/capabilities",
                     "openapi": "/v1/autoskill/openapi.json",
                 },
+            },
+        }
+
+    def _runtime_llm_info(self) -> Dict[str, Any]:
+        provider = str(self.llm_config.get("provider") or "mock").strip().lower() or "mock"
+        model = str(self.llm_config.get("model") or "").strip()
+        thinking_supported = provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}
+        requested = _safe_optional_bool(self.llm_config.get("thinking_mode"))
+        if thinking_supported and requested is None:
+            requested = True
+        return {
+            "provider": provider,
+            "model": model,
+            "thinking_mode": {
+                "supported": bool(thinking_supported),
+                "requested": requested,
             },
         }
 
@@ -1147,6 +1180,7 @@ class AutoSkillProxyRuntime:
         model = str(body.get("model") or self.llm_config.get("model") or "autoskill-model")
         temperature = _safe_float(body.get("temperature"), self.config.assistant_temperature)
         max_tokens = _safe_int(body.get("max_tokens"), None)
+        thinking_mode = _safe_optional_bool(body.get("thinking_mode")) if "thinking_mode" in body else None
 
         user_id = self._resolve_user_id(body=body, headers=headers)
         scope = self._resolve_scope(headers=headers)
@@ -1169,6 +1203,7 @@ class AutoSkillProxyRuntime:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            thinking_mode=thinking_mode,
             user_id=user_id,
             normalized_messages=messages,
             system_prompt=system_prompt,
@@ -1191,6 +1226,7 @@ class AutoSkillProxyRuntime:
         chat_llm = self._build_chat_llm(
             model=prepared.model,
             max_tokens=prepared.max_tokens,
+            thinking_mode=prepared.thinking_mode,
         )
         text = chat_llm.complete(
             system=prepared.system_prompt,
@@ -1287,6 +1323,7 @@ class AutoSkillProxyRuntime:
             chat_llm = self._build_chat_llm(
                 model=prepared.model,
                 max_tokens=prepared.max_tokens,
+                thinking_mode=prepared.thinking_mode,
             )
 
             for chunk in chat_llm.stream_complete(
@@ -2155,12 +2192,20 @@ class AutoSkillProxyRuntime:
                 except Exception:
                     pass
 
-    def _build_chat_llm(self, *, model: str, max_tokens: Optional[int]) -> LLM:
+    def _build_chat_llm(
+        self,
+        *,
+        model: str,
+        max_tokens: Optional[int],
+        thinking_mode: Optional[bool] = None,
+    ) -> LLM:
         cfg = dict(self.llm_config)
         if model:
             cfg["model"] = model
         if max_tokens is not None and int(max_tokens) > 0:
             cfg["max_tokens"] = int(max_tokens)
+        if thinking_mode is not None:
+            cfg["thinking_mode"] = bool(thinking_mode)
         return build_llm(cfg)
 
     def _build_embeddings_model(self, *, model: str) -> EmbeddingModel:
