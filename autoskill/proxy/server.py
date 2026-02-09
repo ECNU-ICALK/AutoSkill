@@ -445,12 +445,20 @@ def _openai_error(message: str, *, code: str = "bad_request", err_type: str = "i
 
 def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int = 200) -> None:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(int(status))
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Content-Length", str(len(data)))
-    handler.end_headers()
-    handler.wfile.write(data)
+    try:
+        handler.send_response(int(status))
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        # Client closed the connection before receiving the full response.
+        # This is expected for interrupted/cancelled requests and should not crash logs.
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
 
 
 def _read_json(handler: BaseHTTPRequestHandler, *, max_bytes: int = 10_000_000) -> Dict[str, Any]:

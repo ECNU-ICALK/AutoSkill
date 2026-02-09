@@ -79,6 +79,11 @@ def _short_text(text: Any, limit: int = 120) -> str:
     return s[: max(1, int(limit) - 3)] + "..."
 
 
+def _has_cjk(text: Any) -> bool:
+    s = str(text or "")
+    return any(("\u4e00" <= ch <= "\u9fff") for ch in s)
+
+
 class HTTPClient:
     def __init__(self, *, base_url: str, api_key: str, timeout_s: float) -> None:
         self.base_url = str(base_url or "").rstrip("/")
@@ -502,198 +507,471 @@ def run_health_checks(
 
 
 def _build_eval_templates() -> List[EvalTemplate]:
-    return [
-        EvalTemplate(
-            template_id="skill_switch_policy_to_social",
-            topic="topic switch: policy report to social post",
-            objective=(
-                "In one dialogue, the user first requests a formal policy report and then switches to a "
-                "public-facing social post with different completion criteria."
-            ),
-            turns_seed=[
-                "Draft a formal government report on autonomous AI operations risk management.",
-                "Use formal Word-style prose, no tables, no fancy symbols, and avoid hallucinations.",
-                "Make it concrete with accountability, measurable indicators, and sharp problem framing.",
-                "Now switch task: rewrite the same core ideas as a public WeChat-style article for general readers.",
-                "Use a readable and engaging tone, but still no tables and no fabricated facts.",
-                "Add a strong title and a short 3-part structure with section headings.",
-                "Keep arguments evidence-oriented and easy to follow.",
+    variants_pos_zh: List[Tuple[str, str, str]] = [
+        ("budget", "预算再压缩10%，给不降核心质量的替代方案。", "并附预算压缩版替代方案。"),
+        ("timeline", "把时间压缩一周，说明哪些步骤不能删。", "并附时间压缩一周的执行版本。"),
+        ("roles", "明确家庭成员/参与者分工和交接节点。", "并附角色分工与交接清单。"),
+        ("risk", "补充前三大风险和对应预案。", "并附Top3风险及应对。"),
+        ("checklist", "再给一个可以直接执行的每日清单版本。", "并附每日执行清单。"),
+        ("constraints", "保持不用表格，表达更清晰，便于直接复制使用。", "并保持纯文本可直接使用。"),
+        ("review", "增加每周复盘步骤和调整规则。", "并附每周复盘与调整机制。"),
+        ("emergency", "加入突发情况分支：临时取消、延迟或超预算。", "并附突发分支决策流。"),
+        ("family", "输出一份给家人看的简版和一份执行版。", "并附家人简版与执行版。"),
+        ("final", "最终版要求：简洁、可执行、检查点不遗漏。", "并附最终精简执行版。"),
+    ]
+    variants_pos_en: List[Tuple[str, str, str]] = [
+        ("budget", "Reduce budget by 10% and keep core outcomes stable.", "Include a 10%-budget-cut variant."),
+        ("timeline", "Compress timeline by one week and mark non-removable steps.", "Include a one-week-compressed plan."),
+        ("roles", "Add explicit role ownership and handoff checkpoints.", "Include role ownership and handoff checklist."),
+        ("risk", "Add top-3 risks and mitigations.", "Include top-3 risks with mitigations."),
+        ("checklist", "Provide a day-by-day operational checklist.", "Include a day-by-day checklist."),
+        ("constraints", "Keep plain text output and avoid table formatting.", "Keep plain text, no tables."),
+        ("review", "Add weekly review loop and adjustment rules.", "Include weekly review and adjustment loop."),
+        ("emergency", "Add emergency branch for cancellations, delays, or budget overruns.", "Include emergency branch decisions."),
+        ("dual_view", "Provide both stakeholder summary and executor view.", "Include stakeholder and executor views."),
+        ("final", "Final version must be concise, actionable, and checkpoint-complete.", "Include final concise execution version."),
+    ]
+    variants_neg_zh: List[Tuple[str, str, str]] = [
+        ("casual1", "再推荐一首歌就好。", "随便推荐一首歌。"),
+        ("casual2", "顺便聊聊今天心情。", "聊聊今天心情。"),
+        ("casual3", "再给一个轻松话题。", "给一个轻松话题。"),
+        ("casual4", "推荐一部电影，不用解释。", "推荐一部电影。"),
+        ("casual5", "给一个周末放松建议。", "给一个周末放松建议。"),
+        ("casual6", "再说一个有趣冷知识。", "给一个冷知识。"),
+        ("casual7", "一句话回答即可。", "一句话回答。"),
+        ("casual8", "换个轻松点的话题。", "换个轻松话题。"),
+        ("casual9", "今天先聊到这。", "先聊到这。"),
+        ("casual10", "最后推荐一个播客。", "推荐一个播客。"),
+    ]
+    variants_neg_en: List[Tuple[str, str, str]] = [
+        ("casual1", "Recommend one more song.", "Recommend one song."),
+        ("casual2", "Share one fun fact.", "Share one fun fact."),
+        ("casual3", "Give one light topic.", "Give one light topic."),
+        ("casual4", "Suggest a movie in one line.", "Suggest one movie."),
+        ("casual5", "Give one weekend relaxation tip.", "Give one relaxation tip."),
+        ("casual6", "Keep it short and casual.", "Short casual reply only."),
+        ("casual7", "No planning needed, just chat.", "No planning needed."),
+        ("casual8", "Switch to a random topic.", "Random light topic."),
+        ("casual9", "That is all for now.", "That is all."),
+        ("casual10", "Recommend one podcast.", "Recommend one podcast."),
+    ]
+
+    families: List[Dict[str, Any]] = [
+        {
+            "template_id": "zh_family_travel_agent",
+            "topic": "中文生活场景：家庭旅行规划 Agent",
+            "objective": "围绕家庭旅行进行长期多轮协同，处理预算、成员差异、行程变化和应急预案。",
+            "turns_seed": [
+                "帮我规划一次6天家庭旅行，2个大人+1老人+1小孩。",
+                "预算控制在1.5万以内，优先高铁，不坐红眼航班。",
+                "老人膝盖不好，日均步行强度要低，安排午休。",
+                "如遇天气变化，给室内备选和改签策略。",
+                "最后输出执行版和家庭群简版。",
             ],
-            reuse_query="Write a WeChat-style explainer article on AI governance with a strong title and no tables.",
-            reuse_queries=[
-                "Write a formal policy report on AI governance with strict official style and no tables.",
-                "Write a WeChat-style explainer article on AI governance with a strong title and no tables.",
+            "reuse_query": "给我一个家庭旅行长期协同方案，含预算、成员约束和天气预案。",
+            "reuse_queries": ["生成家庭旅行执行清单。", "生成家庭旅行简版说明。"],
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_home_renovation_agent",
+            "topic": "中文生活场景：装修项目管理 Agent",
+            "objective": "在装修全流程中进行阶段化推进、验收和变更管理，形成可复用协作流程。",
+            "turns_seed": [
+                "帮我做一个两居室装修70天推进计划。",
+                "先拆改和水电，隐蔽工程要重点把控。",
+                "预算18万上限，主材环保且耐用。",
+                "如果材料延期一周，工期怎么调度更稳？",
+                "给施工队执行版和业主验收版。",
             ],
-            expect_extract=True,
-            complexity="complex_switch",
+            "reuse_query": "生成装修项目推进方案，含预算控制、延期应对和验收节点。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_parent_school_coordination",
+            "topic": "中文生活场景：家校协同学习管理 Agent",
+            "objective": "围绕孩子学习目标进行家校协同、节奏调整与反馈闭环管理。",
+            "turns_seed": [
+                "给我做一个4周家校协同学习计划。",
+                "周中每天1.5小时，周末3小时。",
+                "数学薄弱、语文阅读慢、英语口语需保持。",
+                "每周要和班主任同步一次，给沟通模板。",
+                "状态不好时要有降载但不断档方案。",
+            ],
+            "reuse_query": "做一个家校协同学习方案，含沟通模板和降载策略。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_chronic_care_followup",
+            "topic": "中文生活场景：慢病随访管理 Agent",
+            "objective": "长期健康管理中沉淀提醒频率、异常升级、医生沟通摘要等可复用能力。",
+            "turns_seed": [
+                "帮我做父亲高血压随访计划。",
+                "每天早晚记录血压，异常时要提醒复诊。",
+                "提醒频率不能太打扰，尽量简洁。",
+                "连续3天偏高就生成医生沟通摘要。",
+                "每周给家属一个风险周报。",
+            ],
+            "reuse_query": "生成慢病随访流程，含提醒策略和异常升级规则。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_relocation_agent",
+            "topic": "中文生活场景：搬家与迁居项目 Agent",
+            "objective": "多阶段迁居任务中协调预算、时间、外部服务和家庭分工。",
+            "turns_seed": [
+                "帮我做一个6周跨城搬家计划。",
+                "包括找房、搬家公司、水电网迁移、地址变更。",
+                "预算上限5万，优先稳定可靠。",
+                "搬家公司临时取消时要有12小时替代流程。",
+                "给我、家人、父母三套分工清单。",
+            ],
+            "reuse_query": "生成跨城搬家执行方案，含分工清单和应急替代流程。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_wedding_planning_agent",
+            "topic": "中文生活场景：婚礼筹备 Agent",
+            "objective": "围绕婚礼筹备的里程碑管理、供应商协同与风险预案进行多轮优化。",
+            "turns_seed": [
+                "做一个4个月婚礼筹备计划，120人规模。",
+                "拆分场地、餐饮、摄影、请柬等节点。",
+                "预算30万以内，跟踪付款节点。",
+                "下雨和供应商爽约要有预案。",
+                "输出周计划和婚礼前72小时Runbook。",
+            ],
+            "reuse_query": "生成婚礼筹备执行流程，含里程碑、预算和风险预案。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_job_search_pipeline",
+            "topic": "中文生活场景：求职流程管理 Agent",
+            "objective": "在长期求职过程中管理申请节奏、反馈诊断、模拟面试与复盘。",
+            "turns_seed": [
+                "做一个10周产品经理求职计划。",
+                "包括简历优化、投递、内推、模拟面试。",
+                "每周投入不超过12小时，避免过载。",
+                "回复率低于8%时触发诊断流程。",
+                "给每周复盘模板和下周行动项。",
+            ],
+            "reuse_query": "生成可持续求职流程，含回复率诊断和周复盘机制。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_insurance_claim_agent",
+            "topic": "中文生活场景：理赔流程协作 Agent",
+            "objective": "理赔场景中沉淀证据整理、沟通节奏、拒赔申诉等可复用步骤。",
+            "turns_seed": [
+                "帮我处理一次家庭财产险理赔。",
+                "按紧急程度列出证据收集顺序。",
+                "和保险公司每3个工作日同步一次进度。",
+                "如果部分拒赔，给申诉路径和补证清单。",
+                "给家人看得懂的状态追踪表。",
+            ],
+            "reuse_query": "生成理赔协作流程，含证据顺序、沟通节奏和申诉路径。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_budget_recovery_agent",
+            "topic": "中文生活场景：家庭预算恢复 Agent",
+            "objective": "在家庭收支失衡后，通过多轮约束迭代恢复预算纪律并可持续执行。",
+            "turns_seed": [
+                "帮我做一个家庭预算恢复计划。",
+                "先分固定支出、可协商支出、弹性支出。",
+                "按周设置消费上限，保留应急例外规则。",
+                "连续两周超支要自动触发纠偏动作。",
+                "给双人家庭月度复盘流程。",
+            ],
+            "reuse_query": "生成家庭预算恢复流程，含超支纠偏与月度复盘。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_exam_prep_agent",
+            "topic": "中文生活场景：考试备考 Agent",
+            "objective": "长期备考中根据测试结果动态调参，沉淀学习节奏和应对策略。",
+            "turns_seed": [
+                "做一个14周职业考试备考计划。",
+                "工作日每天90分钟，周末最多4小时。",
+                "每两周根据模考分数调整重点。",
+                "连续停滞时切到错题类型专项。",
+                "最后给考前一周低压力执行清单。",
+            ],
+            "reuse_query": "生成可自适应的备考流程，含模考反馈调参和错题专项。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_pet_care_agent",
+            "topic": "中文生活场景：宠物照护协同 Agent",
+            "objective": "围绕宠物长期照护的喂养、运动、就医、代养交接进行流程化管理。",
+            "turns_seed": [
+                "帮我做一份狗狗每周照护计划。",
+                "包含喂食、遛狗、洗护、驱虫和体重记录。",
+                "下月要出差10天，加入代养交接流程。",
+                "出现食欲下降要有就医升级规则。",
+                "给我日常版和代养版两套清单。",
+            ],
+            "reuse_query": "生成宠物照护流程，含代养交接和异常升级规则。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_small_business_ops_agent",
+            "topic": "中文生活场景：小店经营运营 Agent",
+            "objective": "对小店日常经营中的排班、备货、活动、异常应对进行持续优化。",
+            "turns_seed": [
+                "帮我做一家咖啡小店的每周运营计划。",
+                "包括排班、备货、促销、损耗控制。",
+                "工作日和周末客流差异大，要分开策略。",
+                "突发缺人时要有应急排班方案。",
+                "最后给店长看板和店员执行清单。",
+            ],
+            "reuse_query": "生成小店运营流程，含排班、备货、应急和复盘。",
+            "expect_extract": True,
+            "complexity": "complex_agent_zh",
+        },
+        {
+            "template_id": "zh_topic_switch_report_to_wechat",
+            "topic": "中文主题切换：正式报告到公众号改写",
+            "objective": "同一会话中切换任务目标与产物标准，检验新增技能与合并判定的边界。",
+            "turns_seed": [
+                "先写一份正式报告草案，主题是社区养老服务优化。",
+                "要求正式、克制、可执行，不用表格。",
+                "加责任分工和量化指标。",
+                "现在切换任务：改写成公众号文章，面向普通家庭。",
+                "语言更易懂，但不能编造事实。",
+            ],
+            "reuse_query": "写一篇面向普通读者的公众号文章，结构清晰、无表格。",
+            "reuse_queries": ["写正式报告，强调责任分工和量化指标。"],
+            "expect_extract": True,
+            "complexity": "complex_switch_zh",
+        },
+        {
+            "template_id": "en_family_travel_agent",
+            "topic": "life agent: family travel orchestration",
+            "objective": "Handle long-horizon travel planning with constraints, role coordination, and contingencies.",
+            "turns_seed": [
+                "Plan a 7-day family trip with one senior and one child.",
+                "Keep budget below 4,000 USD and avoid overnight transfers.",
+                "Limit walking load and include daily rest slots.",
+                "Add weather fallback and transport delay contingency.",
+                "Provide both detailed and compact execution versions.",
+            ],
+            "reuse_query": "Create a family travel workflow with budget guardrails and contingency branches.",
+            "expect_extract": True,
+            "complexity": "complex_agent",
+        },
+        {
+            "template_id": "en_startup_ops_agent",
+            "topic": "agent operations: startup weekly cadence",
+            "objective": "Coordinate startup operations across hiring, runway, support load, and release rhythm.",
+            "turns_seed": [
+                "Set up a 12-week operating cadence for a small startup.",
+                "Track hiring pipeline, runway, support load, and release milestones.",
+                "Define owner checkpoints for weekly reviews.",
+                "If runway drops below 5 months, trigger a cost-control branch.",
+                "Output leadership summary and execution checklist.",
+            ],
+            "reuse_query": "Build a startup operations cadence with runway-triggered branch actions.",
+            "expect_extract": True,
+            "complexity": "complex_agent",
+        },
+        {
+            "template_id": "zh_casual_small_talk",
+            "topic": "中文负样例：闲聊",
+            "objective": "多轮闲聊，不应形成稳定可复用技能。",
+            "turns_seed": [
+                "今天有点累，想聊点轻松的。",
+                "推荐一部电影。",
+                "再推荐一首歌。",
+                "谢谢，差不多了。",
+            ],
+            "reuse_query": "推荐一部轻松电影。",
+            "expect_extract": False,
+            "complexity": "complex_negative_zh",
+        },
+        {
+            "template_id": "one_off_fact_question",
+            "topic": "one-off factual QA",
+            "objective": "Single factual question, no durable user workflow preference.",
+            "turns_seed": ["What is the difference between TCP and UDP?"],
+            "reuse_query": "Explain TCP vs UDP briefly.",
+            "expect_extract": False,
+            "complexity": "basic_negative",
+        },
+        {
+            "template_id": "single_translation",
+            "topic": "single translation",
+            "objective": "One-time translation request without persistent capability signal.",
+            "turns_seed": ["Translate this sentence to English: 该系统支持在线增量更新。"],
+            "reuse_query": "Translate: 模型会持续学习并更新技能。",
+            "expect_extract": False,
+            "complexity": "basic_negative",
+        },
+    ]
+
+    out: List[EvalTemplate] = []
+    for fam in families:
+        template_id = str(fam.get("template_id") or "").strip()
+        topic = str(fam.get("topic") or "").strip()
+        objective = str(fam.get("objective") or "").strip()
+        turns_seed = [str(x).strip() for x in list(fam.get("turns_seed") or []) if str(x).strip()]
+        reuse_query = str(fam.get("reuse_query") or "").strip()
+        reuse_queries = [str(x).strip() for x in list(fam.get("reuse_queries") or []) if str(x).strip()]
+        expect_extract = bool(fam.get("expect_extract"))
+        complexity = str(fam.get("complexity") or "basic")
+        has_cjk = _has_cjk(topic) or _has_cjk(objective) or any(_has_cjk(x) for x in turns_seed)
+
+        if expect_extract:
+            variants = variants_pos_zh if has_cjk else variants_pos_en
+        else:
+            variants = variants_neg_zh if has_cjk else variants_neg_en
+
+        for idx, (vname, vturn, vreuse) in enumerate(variants, start=1):
+            turns = list(turns_seed)
+            if vturn:
+                turns.append(str(vturn).strip())
+
+            rq = str(reuse_query)
+            if rq and vreuse:
+                rq = f"{rq}；{vreuse}" if has_cjk else f"{rq} {vreuse}"
+            elif not rq:
+                rq = str(vreuse or "").strip()
+
+            rqs = list(reuse_queries)
+            if rq and rq not in rqs:
+                rqs.append(rq)
+
+            out.append(
+                EvalTemplate(
+                    template_id=f"{template_id}__s{idx:02d}_{vname}",
+                    topic=topic,
+                    objective=objective,
+                    turns_seed=turns,
+                    reuse_query=rq,
+                    expect_extract=expect_extract,
+                    reuse_queries=rqs,
+                    complexity=complexity,
+                )
+            )
+    return out
+
+
+def _expand_templates_for_min_coverage(
+    templates: List[EvalTemplate],
+    *,
+    min_count: int,
+) -> List[EvalTemplate]:
+    """
+    Expands base templates with deterministic variants until reaching min_count.
+    Variants keep the same objective family but add extra constraints to improve
+    robustness coverage.
+    """
+
+    out = list(templates or [])
+    base = list(templates or [])
+    if not base:
+        return out
+    target = max(len(base), int(min_count))
+    if len(out) >= target:
+        return out
+
+    hints_en: List[Tuple[str, str, str]] = [
+        (
+            "no_markdown",
+            "Do not use Markdown formatting; keep output directly usable in plain text editors.",
+            "No markdown formatting; plain text only.",
         ),
-        EvalTemplate(
-            template_id="long_incident_playbook_updates",
-            topic="long multi-turn incident response playbook",
-            objective=(
-                "Stress test long conversations where the user repeatedly updates constraints and expects "
-                "a reusable incident response workflow."
-            ),
-            turns_seed=[
-                "Create an incident response playbook for an online service outage.",
-                "Include severity levels and clear owner responsibilities.",
-                "Add a communication timeline for internal and external updates.",
-                "Avoid blame language and keep the tone factual.",
-                "Add rollback and mitigation checkpoints with explicit go/no-go criteria.",
-                "Make escalation rules stricter for repeated failures within 24 hours.",
-                "Add a post-incident review template focused on action items, not narration.",
-                "Now compress the playbook into a concise version for on-call engineers.",
-                "Final revision: remove ambiguity and enforce measurable completion criteria.",
-            ],
-            reuse_query="Generate a concise outage incident playbook with severity, escalation, and measurable checkpoints.",
-            reuse_queries=[
-                "Generate a detailed outage incident playbook with communication timelines and escalation rules.",
-                "Generate a concise on-call incident playbook with measurable go/no-go checkpoints.",
-            ],
-            expect_extract=True,
-            complexity="complex_long",
+        (
+            "risk_checks",
+            "Add explicit risk checks and acceptance criteria before final output.",
+            "Include explicit risk checks and acceptance criteria.",
         ),
-        EvalTemplate(
-            template_id="customer_support_triage_workflow",
-            topic="customer support triage and escalation",
-            objective=(
-                "Evaluate extraction for operations workflows beyond coding and writing style tasks."
-            ),
-            turns_seed=[
-                "Design a support ticket triage process for a SaaS customer support team.",
-                "Prioritize by business impact and urgency, not only by first-come-first-served.",
-                "Add clear escalation triggers and handoff conditions to engineering.",
-                "Use a calm, professional tone for customer-facing templates.",
-                "Add a quality check to reduce repetitive back-and-forth with customers.",
-                "Refine the process for weekends with reduced staffing.",
-            ],
-            reuse_query="Create a SaaS support triage flow with impact-based priority and clear escalation triggers.",
-            expect_extract=True,
-            complexity="complex_domain",
+        (
+            "concise_mode",
+            "Keep the final output concise while preserving key constraints.",
+            "Produce a concise version while preserving constraints.",
         ),
-        EvalTemplate(
-            template_id="research_interview_protocol_refinement",
-            topic="user research interview protocol",
-            objective=(
-                "Capture reusable interview planning preferences with iterative updates."
-            ),
-            turns_seed=[
-                "Help me build a user interview protocol for a new analytics dashboard.",
-                "Focus on behavior-based questions instead of opinion-only questions.",
-                "Add a consent script and avoid leading questions.",
-                "Add a scoring rubric for prioritizing recurring pain points.",
-                "Now shorten it for a 20-minute remote interview slot.",
-            ],
-            reuse_query="Create a concise user interview protocol with behavior-based questions and a pain-point rubric.",
-            expect_extract=True,
-            complexity="complex_domain",
-        ),
-        EvalTemplate(
-            template_id="workshop_facilitation_agenda",
-            topic="cross-team workshop facilitation",
-            objective=(
-                "Test reusable facilitation skill extraction with concrete constraints."
-            ),
-            turns_seed=[
-                "Design a 90-minute cross-team alignment workshop agenda.",
-                "We need clear decisions, not brainstorming without closure.",
-                "Include time-boxed segments and decision checkpoints.",
-                "Add fallback plans if discussion diverges.",
-                "Provide facilitator prompts that keep discussion objective.",
-            ],
-            reuse_query="Build a time-boxed workshop agenda with decision checkpoints and facilitator prompts.",
-            expect_extract=True,
-            complexity="complex_domain",
-        ),
-        EvalTemplate(
-            template_id="gov_report_style",
-            topic="government report writing",
-            objective="Write a policy report with strict formal constraints and strong viewpoints.",
-            turns_seed=[
-                "Write a government report about self-evolving large-model systems.",
-                "Use formal Word-style prose, no table, no fancy symbols, and avoid hallucinations.",
-                "Make it more concrete and critical, with clear problem statements and independent insights.",
-            ],
-            reuse_query="Write another government report with formal style, no table, and critical analysis.",
-            expect_extract=True,
-            complexity="basic",
-        ),
-        EvalTemplate(
-            template_id="code_generation_preferences",
-            topic="code generation preferences",
-            objective="Generate implementation following stable user coding preferences.",
-            turns_seed=[
-                "Implement a high-performance log parser for large files.",
-                "Do not use Python. Use C, and keep code comments concise and practical.",
-                "Only annotate important functions, and output code directly.",
-            ],
-            reuse_query="Generate C code with concise function-level comments and no extra narrative.",
-            expect_extract=True,
-            complexity="basic",
-        ),
-        EvalTemplate(
-            template_id="email_personalization",
-            topic="personalized email drafting",
-            objective="Draft emails that follow user-specific tone and structure preferences.",
-            turns_seed=[
-                "Help me draft an outreach email for a collaboration invitation.",
-                "Keep it concise, polite, and avoid over-selling language.",
-                "Add a concrete CTA and a clear subject line; keep the body under 120 words.",
-            ],
-            reuse_query="Draft a concise collaboration email with polite tone and concrete CTA.",
-            expect_extract=True,
-            complexity="basic",
-        ),
-        EvalTemplate(
-            template_id="summary_format_control",
-            topic="structured summary style",
-            objective="Produce summaries under stable formatting constraints.",
-            turns_seed=[
-                "Summarize this technical proposal for leadership.",
-                "No bullet tables. Use short sections and explicit risks/next actions.",
-                "Keep style plain and avoid decorative language.",
-            ],
-            reuse_query="Summarize a technical proposal with explicit risks and actions, no tables.",
-            expect_extract=True,
-            complexity="basic",
-        ),
-        EvalTemplate(
-            template_id="one_off_fact_question",
-            topic="one-off factual QA",
-            objective="Simple one-shot factual request without durable workflow preference.",
-            turns_seed=[
-                "What is the difference between TCP and UDP?",
-            ],
-            reuse_query="Explain TCP vs UDP briefly.",
-            expect_extract=False,
-            complexity="basic_negative",
-        ),
-        EvalTemplate(
-            template_id="single_translation",
-            topic="single translation",
-            objective="One-time translation request without persistent user preference.",
-            turns_seed=[
-                "Translate this sentence to English: 该系统支持在线增量更新。",
-            ],
-            reuse_query="Translate: 模型会持续学习并更新技能。",
-            expect_extract=False,
-            complexity="basic_negative",
-        ),
-        EvalTemplate(
-            template_id="casual_multi_turn_chat",
-            topic="casual multi-turn chat",
-            objective="Multi-turn casual dialogue without stable reusable capability signal.",
-            turns_seed=[
-                "How was your day?",
-                "Tell me one interesting fact about rainbows.",
-                "Nice. Also recommend a movie for tonight.",
-                "Thanks, that is all.",
-            ],
-            reuse_query="Suggest a movie for tonight.",
-            expect_extract=False,
-            complexity="complex_negative",
+        (
+            "counterexample",
+            "Add one counterexample or failure mode and how to handle it.",
+            "Include one failure mode and mitigation.",
         ),
     ]
+    hints_zh: List[Tuple[str, str, str]] = [
+        (
+            "no_markdown",
+            "不要使用 Markdown 排版，输出要能直接用于纯文本或 Word。",
+            "不要 Markdown，输出纯文本/Word 可直接使用。",
+        ),
+        (
+            "risk_checks",
+            "补充风险检查项和验收标准，再给最终版本。",
+            "补充风险检查项和验收标准。",
+        ),
+        (
+            "concise_mode",
+            "在不丢失约束的前提下给一个更精简版本。",
+            "给出精简版但保留关键约束。",
+        ),
+        (
+            "counterexample",
+            "增加一个失败案例以及对应的处理方式。",
+            "增加失败案例与应对策略。",
+        ),
+    ]
+
+    idx = 0
+    while len(out) < target:
+        src = base[idx % len(base)]
+        is_zh = _has_cjk(src.topic) or _has_cjk(src.objective) or any(_has_cjk(t) for t in (src.turns_seed or []))
+        hints = hints_zh if is_zh else hints_en
+        h_name, h_turn, h_reuse = hints[(idx // len(base)) % len(hints)]
+
+        turns = list(src.turns_seed or [])
+        if not turns:
+            turns = [h_turn]
+        else:
+            turns = turns + [h_turn]
+
+        reuse_q = str(src.reuse_query or "").strip()
+        if reuse_q:
+            if is_zh:
+                reuse_q2 = f"{reuse_q}；{h_reuse}"
+            else:
+                reuse_q2 = f"{reuse_q} Also {h_reuse}"
+        else:
+            reuse_q2 = h_reuse
+
+        rqs = list(src.reuse_queries or [])
+        if reuse_q2 and reuse_q2 not in rqs:
+            rqs.append(reuse_q2)
+
+        variant_no = (idx // len(base)) + 1
+        new_id = f"{src.template_id}__v{variant_no}_{h_name}"
+
+        out.append(
+            EvalTemplate(
+                template_id=new_id,
+                topic=str(src.topic),
+                objective=str(src.objective),
+                turns_seed=turns,
+                reuse_query=reuse_q2,
+                expect_extract=bool(src.expect_extract),
+                reuse_queries=rqs,
+                complexity=f"{src.complexity}_variant",
+            )
+        )
+        idx += 1
+    return out
 
 
 def _simulate_turns_with_llm(
@@ -707,8 +985,9 @@ def _simulate_turns_with_llm(
         "Return strict JSON only: {\"turns\":[\"...\", ...]}.\n"
         "Rules:\n"
         "- Keep coherent progression; if seed turns include an explicit topic switch, keep that switch.\n"
-        "- Make turns natural and concise.\n"
-        "- Preserve the original objective and constraints.\n"
+        "- Preserve objective, constraints, and role context from seed turns.\n"
+        "- Favor real human-agent collaboration patterns: planning, revisions, trade-offs, checkpoints.\n"
+        "- Keep turns natural and concise; avoid generic filler.\n"
         "- Do not output assistant text.\n"
     )
     payload = {
@@ -751,14 +1030,19 @@ def _sample_scenarios(
     if not templates:
         return []
     rng = random.Random(int(seed))
+    order = list(range(len(templates)))
+    rng.shuffle(order)
     out: List[EvalScenario] = []
     for i in range(max(1, int(runs))):
-        t = templates[i % len(templates)]
+        t = templates[order[i % len(order)]]
         scenario_id = f"case_{i + 1:03d}_{t.template_id}"
         turns_seed = list(t.turns_seed)
         # Keep slight variation while preserving semantics.
         if len(turns_seed) >= 2 and rng.random() < 0.35:
-            turns_seed[-1] = f"{turns_seed[-1]} Also keep it concise."
+            last = str(turns_seed[-1] or "")
+            has_cjk = any(("\u4e00" <= ch <= "\u9fff") for ch in last)
+            suffix = " 另外请保持简洁。" if has_cjk else " Also keep it concise."
+            turns_seed[-1] = f"{last}{suffix}"
         final_turns = list(turns_seed)
         source = "template"
         if simulator is not None:
@@ -1314,6 +1598,115 @@ def _build_simulator_client(
         return None
 
 
+def _build_judge_client(
+    *,
+    judge_enabled: bool,
+    judge_base_url: str,
+    judge_api_key: str,
+    judge_model: str,
+    timeout_s: float,
+) -> Optional[OpenAICompatLLMClient]:
+    if not bool(judge_enabled):
+        return None
+    if not str(judge_api_key or "").strip():
+        return None
+    try:
+        return OpenAICompatLLMClient(
+            base_url=str(judge_base_url),
+            api_key=str(judge_api_key),
+            model=str(judge_model),
+            timeout_s=float(timeout_s),
+        )
+    except Exception:
+        return None
+
+
+def _judge_overall_with_llm(
+    *,
+    judge_llm: OpenAICompatLLMClient,
+    eval_result: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    summary = eval_result.get("summary") if isinstance(eval_result, dict) else {}
+    cases = eval_result.get("cases") if isinstance(eval_result, dict) else []
+    if not isinstance(summary, dict):
+        summary = {}
+    if not isinstance(cases, list):
+        cases = []
+
+    failed_examples: List[Dict[str, Any]] = []
+    for c in cases:
+        if not isinstance(c, dict):
+            continue
+        if bool(c.get("ok")):
+            continue
+        sc = c.get("scenario") if isinstance(c.get("scenario"), dict) else {}
+        failed_examples.append(
+            {
+                "scenario_id": str(sc.get("id") or ""),
+                "template_id": str(sc.get("template_id") or ""),
+                "topic": str(sc.get("topic") or ""),
+                "complexity": str(sc.get("complexity") or ""),
+                "error": str(c.get("error") or ""),
+            }
+        )
+        if len(failed_examples) >= 8:
+            break
+
+    system = (
+        "You are an evaluation judge for AutoSkill benchmark reports.\n"
+        "Return ONLY strict JSON with this schema:\n"
+        "{"
+        "\"overall_score\": 1-5,"
+        "\"status\": \"good\"|\"warning\"|\"critical\","
+        "\"strengths\": [\"...\"],"
+        "\"risks\": [\"...\"],"
+        "\"recommendations\": [\"...\"]"
+        "}\n"
+        "Judge the whole benchmark quality and extraction reliability."
+    )
+    user_payload = {
+        "summary": summary,
+        "failed_examples": failed_examples,
+    }
+    user = f"BENCHMARK_RESULT:\n{json.dumps(user_payload, ensure_ascii=False)}"
+    out = judge_llm.chat_text(
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=0.0,
+        max_tokens=700,
+    )
+    parsed = _json_from_text(out)
+    if not isinstance(parsed, dict):
+        return None
+    score_raw = parsed.get("overall_score")
+    try:
+        score = int(score_raw)
+    except Exception:
+        score = 0
+    status = str(parsed.get("status") or "").strip().lower()
+    if status not in {"good", "warning", "critical"}:
+        status = "warning"
+
+    def _to_list(v: Any, *, limit: int = 8) -> List[str]:
+        if not isinstance(v, list):
+            return []
+        out2: List[str] = []
+        for x in v:
+            s = str(x or "").strip()
+            if s:
+                out2.append(s)
+            if len(out2) >= int(limit):
+                break
+        return out2
+
+    return {
+        "overall_score": max(1, min(5, score)) if score else None,
+        "status": status,
+        "strengths": _to_list(parsed.get("strengths"), limit=8),
+        "risks": _to_list(parsed.get("risks"), limit=8),
+        "recommendations": _to_list(parsed.get("recommendations"), limit=8),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Health-check and evaluate AutoSkill proxy")
     parser.add_argument("--mode", default="health", choices=["health", "eval", "all"])
@@ -1324,7 +1717,7 @@ def main() -> None:
     parser.add_argument("--timeout-s", type=float, default=25.0)
     parser.add_argument("--skip-embeddings", action="store_true")
 
-    parser.add_argument("--eval-runs", type=int, default=24)
+    parser.add_argument("--eval-runs", type=int, default=32)
     parser.add_argument("--eval-seed", type=int, default=42)
     parser.add_argument("--eval-user-prefix", default="proxy_eval")
     parser.add_argument("--eval-stream", action="store_true")
@@ -1346,6 +1739,15 @@ def main() -> None:
     )
     parser.add_argument("--sim-model", default=os.getenv("EVAL_SIM_MODEL", "qwen-plus"))
     parser.add_argument("--judge-enable", action="store_true")
+    parser.add_argument(
+        "--judge-base-url",
+        default=os.getenv("EVAL_JUDGE_BASE_URL", os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode")),
+    )
+    parser.add_argument(
+        "--judge-api-key",
+        default=os.getenv("EVAL_JUDGE_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
+    )
+    parser.add_argument("--judge-model", default=os.getenv("EVAL_JUDGE_MODEL", "qwen-plus"))
     parser.add_argument("--report-json", default="")
     parser.add_argument(
         "--verbose",
@@ -1415,14 +1817,25 @@ def main() -> None:
             sim_model=str(args.sim_model),
             timeout_s=float(args.timeout_s),
         )
-        judge_llm = simulator if bool(args.judge_enable) else None
+        judge_llm = _build_judge_client(
+            judge_enabled=bool(args.judge_enable),
+            judge_base_url=str(args.judge_base_url),
+            judge_api_key=str(args.judge_api_key),
+            judge_model=str(args.judge_model),
+            timeout_s=float(args.timeout_s),
+        )
+        if judge_llm is None and bool(args.judge_enable) and simulator is not None:
+            # Backward-compatible fallback: reuse simulator client when explicit judge config is absent.
+            judge_llm = simulator
 
         if simulator is None:
             print("[eval] simulator: disabled (using template turns)")
         else:
             print(f"[eval] simulator: enabled model={args.sim_model}")
         if judge_llm is not None:
-            print(f"[eval] judge: enabled model={args.sim_model}")
+            print(f"[eval] judge: enabled model={args.judge_model}")
+        elif bool(args.judge_enable):
+            print("[eval] judge: enabled but client init failed (check judge api key/model/base url)")
 
         eval_result = run_eval(
             client=client,
@@ -1438,6 +1851,16 @@ def main() -> None:
             judge_llm=judge_llm,
             verbose=bool(args.verbose),
         )
+        if judge_llm is not None:
+            try:
+                overall_judge = _judge_overall_with_llm(
+                    judge_llm=judge_llm,
+                    eval_result=eval_result,
+                )
+            except Exception as e:
+                overall_judge = {"error": str(e)}
+            eval_result["overall_judge"] = overall_judge
+
         report["evaluation"] = eval_result
 
         summary = eval_result.get("summary") if isinstance(eval_result, dict) else {}
@@ -1459,6 +1882,7 @@ def main() -> None:
                     "confusion": conf,
                     "metrics": metrics,
                     "coverage": coverage,
+                    "overall_judge": (eval_result.get("overall_judge") if isinstance(eval_result, dict) else None),
                 },
                 ensure_ascii=False,
                 indent=2,
