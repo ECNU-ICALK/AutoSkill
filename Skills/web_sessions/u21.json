@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "user_id": "u21",
+  "saved_at_ms": 1770619564187,
+  "sessions": [
+    {
+      "id": "47a5b432-d8ff-4612-b11f-eafb5487833f",
+      "meta": {
+        "id": "47a5b432-d8ff-4612-b11f-eafb5487833f",
+        "title": "你好",
+        "created_at_ms": 1770619516363,
+        "updated_at_ms": 1770619564187
+      },
+      "state": {
+        "config": {
+          "store_dir": "Skills",
+          "user_id": "u21",
+          "skill_scope": "all",
+          "rewrite_mode": "always",
+          "rewrite_history_turns": 6,
+          "rewrite_history_chars": 2000,
+          "rewrite_max_query_chars": 256,
+          "min_score": 0.4,
+          "top_k": 1,
+          "history_turns": 20,
+          "ingest_window": 6,
+          "extract_turn_limit": 1,
+          "extract_mode": "auto",
+          "assistant_temperature": 0.2
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          },
+          {
+            "role": "assistant",
+            "content": "你好！有什么我可以帮助你的吗？"
+          }
+        ],
+        "pending": true
+      },
+      "trace": {
+        "version": 1,
+        "next_turn_seq": 2,
+        "turns": [
+          {
+            "id": "turn_1",
+            "input": "你好",
+            "started_at_ms": 1770619520282,
+            "finished_at_ms": 1770619564186,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "你好"
+              },
+              {
+                "role": "assistant",
+                "content": "你好！有什么我可以帮助你的吗？"
+              }
+            ],
+            "retrieval": {
+              "original_query": "你好",
+              "rewritten_query": "对话问候语生成 亲切友好 无特定格式",
+              "search_query": "对话问候语生成 亲切友好 无特定格式",
+              "event_time": 1770619558648,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            },
+            "extraction": null,
+            "error": ""
+          }
+        ],
+        "retrieval_events": [
+          {
+            "event_time": 1770619558648,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "你好",
+              "rewritten_query": "对话问候语生成 亲切友好 无特定格式",
+              "search_query": "对话问候语生成 亲切友好 无特定格式",
+              "event_time": 1770619558648,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770619564186,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "你好",
+              "rewritten_query": "对话问候语生成 亲切友好 无特定格式",
+              "search_query": "对话问候语生成 亲切友好 无特定格式",
+              "event_time": 1770619558648,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            }
+          }
+        ],
+        "extraction_events": [],
+        "config_events": [
+          {
+            "event_time": 1770619516363,
+            "source": "session/new",
+            "config": {
+              "store_dir": "Skills",
+              "user_id": "u21",
+              "skill_scope": "all",
+              "rewrite_mode": "always",
+              "rewrite_history_turns": 6,
+              "rewrite_history_chars": 2000,
+              "rewrite_max_query_chars": 256,
+              "min_score": 0.4,
+              "top_k": 1,
+              "history_turns": 20,
+              "ingest_window": 6,
+              "extract_turn_limit": 1,
+              "extract_mode": "auto",
+              "assistant_temperature": 0.2
+            }
+          }
+        ],
+        "last_result": {
+          "kind": "chat",
+          "chat_append": [
+            {
+              "role": "user",
+              "content": "你好"
+            },
+            {
+              "role": "assistant",
+              "content": "你好！有什么我可以帮助你的吗？"
+            }
+          ],
+          "retrieval": {
+            "original_query": "你好",
+            "rewritten_query": "对话问候语生成 亲切友好 无特定格式",
+            "search_query": "对话问候语生成 亲切友好 无特定格式",
+            "event_time": 1770619558648,
+            "scope": "all",
+            "top_k": 1,
+            "min_score": 0.4,
+            "hits": [],
+            "selected_for_use_ids": [],
+            "selected_for_context_ids": [],
+            "context_injected": false,
+            "error": null
+          },
+          "extraction": null,
+          "config": {
+            "store_dir": "Skills",
+            "user_id": "u21",
+            "skill_scope": "all",
+            "rewrite_mode": "always",
+            "rewrite_history_turns": 6,
+            "rewrite_history_chars": 2000,
+            "rewrite_max_query_chars": 256,
+            "min_score": 0.4,
+            "top_k": 1,
+            "history_turns": 20,
+            "ingest_window": 6,
+            "extract_turn_limit": 1,
+            "extract_mode": "auto",
+            "assistant_temperature": 0.2
+          },
+          "runtime": {
+            "llm_provider": "internlm",
+            "llm_model": "intern-s1-pro",
+            "thinking": {
+              "supported": true,
+              "requested": true,
+              "effective": true,
+              "auto_disabled": false
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -30,7 +30,7 @@ python3 -m examples.web_ui \
 
 启动后打开 `http://127.0.0.1:8000`。
 
-## 1.1 OpenAI 兼容反向代理（标准 API）
+## 1.1 标准 API 代理
 
 AutoSkill 也可以作为反向代理部署，对外暴露 OpenAI 兼容接口，并在内部自动执行：
 - 每次对话请求的技能检索与注入
@@ -416,7 +416,18 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 ### 9.6 代理健康检查脚本
 
 ```bash
-python3 -m examples.proxy_health_check --base-url http://127.0.0.1:9000
+python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
+```
+
+大规模自动化评测（代理作为助手 + 可选 Qwen 用户模拟）：
+
+```bash
+export DASHSCOPE_API_KEY="your_dashscope_key"
+python3 -m examples.proxy_health_check \
+  --mode eval \
+  --base-url http://127.0.0.1:9000 \
+  --eval-runs 24 \
+  --report-json ./proxy_eval_report.json
 ```
 
 向量管理端点：

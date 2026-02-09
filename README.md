@@ -31,7 +31,7 @@ python3 -m examples.web_ui \
 
 Open `http://127.0.0.1:8000`.
 
-## 1.1 OpenAI-Compatible Proxy (Standard API)
+## 1.1 Standard API Proxy
 
 AutoSkill can also be deployed as a reverse proxy that exposes OpenAI-compatible endpoints while transparently applying:
 - skill retrieval/injection for each chat request
@@ -417,7 +417,18 @@ Retrieval and extraction:
 ### 9.6 Proxy Health Check Script
 
 ```bash
-python3 -m examples.proxy_health_check --base-url http://127.0.0.1:9000
+python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
+```
+
+Large-scale automated evaluation (assistant via proxy + optional Qwen user simulator):
+
+```bash
+export DASHSCOPE_API_KEY="your_dashscope_key"
+python3 -m examples.proxy_health_check \
+  --mode eval \
+  --base-url http://127.0.0.1:9000 \
+  --eval-runs 24 \
+  --report-json ./proxy_eval_report.json
 ```
 
 Vector admin:
