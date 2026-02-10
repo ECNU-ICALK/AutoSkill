@@ -235,6 +235,7 @@ class LLMSkillExtractor:
             "- Output ONLY strict JSON parseable by json.loads.\n"
             "- Schema: {\"skills\": [...]} with at most {max_candidates} items.\n"
             "- Language consistency: all fields (name, description, prompt, triggers, tags, examples) must match user instruction language.\n"
+            "  - Example: Chinese input -> all fields in Chinese (for example: \"政府报告撰写规范\"); English input -> all fields  in English (for example: \"government-report-writing-policy\").\n"
             "- Generalize/de-identify aggressively; keep durable reusable procedures/constraints only.\n"
             "- Final checks before output:\n"
             "  - no case-specific proper nouns/one-off business facts in name/description/prompt/triggers/examples;\n"
@@ -404,6 +405,7 @@ class LLMSkillExtractor:
             "- Keep only portable capability constraints; if generic after de-identification, return {\"skills\": []}.\n"
             "- [E] Output language and JSON validity\n"
             "- Language: name/description/prompt/triggers/tags/examples match dominant input language.\n"
+            "- Language example: Chinese input -> all fields Chinese (for example: \"代码注释风格约束\"); English input -> all fields English (for example: \"code-comment-style-constraints\").\n"
             "- JSON validity: escape newlines inside strings as \\n.\n"
         )
         user = (
