@@ -95,21 +95,33 @@ If the user only asks to "write a report" and gives no stable preference/correct
 When the user adds durable constraints (for example: "do not hallucinate"), AutoSkill extracts or merges a skill into version `v0.1.0`.
 Skill management is backend-first (automatic add/merge), with optional human edit/save/delete of `SKILL.md`.
 
-![Skill Extraction](imgs/skill_extraction.png)
+![Skill Extraction (Daily)](imgs/skill_extraction.png)
+*Caption: Daily scenario — reusable writing constraints are extracted into a new skill (`v0.1.0`).*
+
+![Skill Extraction (Science)](imgs/science_skill_extraction.png)
+*Caption: Science scenario — reusable lab/process constraints (for example hard limits and mandatory SOP steps) are extracted as a skill (`v0.1.0`).*
 
 ### B) Skill Update (v0.1.1)
 
 When user feedback adds new constraints or changes priorities in later turns, AutoSkill updates the existing skill (instead of creating duplicates)
 and evolves the version from `v0.1.0` to `v0.1.1`.
 
-![Skill Update](imgs/skill_update.png)
+![Skill Update (Daily)](imgs/skill_update.png)
+*Caption: Daily scenario — later user feedback updates constraints and evolves the skill to `v0.1.1`.*
+
+![Skill Update (Science)](imgs/science_skill_update.png)
+*Caption: Science scenario — follow-up technical feedback updates the existing science skill instead of creating duplicates (`v0.1.1`).*
 
 ### C) Skill Usage
 
 For the next similar task (for example, writing a **government report about a self-evolving agent**), the updated skill is retrieved and used
 to generate outputs aligned with user expectations.
 
-![Skill Usage](imgs/skill_utilize.png)
+![Skill Usage (Daily)](imgs/skill_utilize.png)
+*Caption: Daily scenario — the evolved skill is retrieved and reused in the next similar task.*
+
+![Skill Usage (Science)](imgs/science_skill_utilize.png)
+*Caption: Science scenario — the evolved science skill is retrieved for subsequent domain-consistent requests.*
 
 ## 2. What Makes AutoSkill Different
 
@@ -516,4 +528,3 @@ Contribution: Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai
 Lead Authors: Jie Zhou, Kai Chen, Liang He
 
 Scientific Directors: Xin Li, Bo Zhang, Qin Chen
-
