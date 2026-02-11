@@ -1,7 +1,7 @@
 {
   "version": 1,
   "user_id": "u39",
-  "saved_at_ms": 1770793476951,
+  "saved_at_ms": 1770794910351,
   "sessions": [
     {
       "id": "99a6efdd-a024-4348-92e9-679ae5d90f1f",
@@ -1022,6 +1022,65 @@
             }
           }
         }
+      }
+    },
+    {
+      "id": "0a411051-2610-4d1e-860e-62e1bf6bf779",
+      "meta": {
+        "id": "0a411051-2610-4d1e-860e-62e1bf6bf779",
+        "title": "New Chat",
+        "created_at_ms": 1770794910345,
+        "updated_at_ms": 1770794910345
+      },
+      "state": {
+        "config": {
+          "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+          "user_id": "u39",
+          "skill_scope": "all",
+          "rewrite_mode": "always",
+          "rewrite_history_turns": 6,
+          "rewrite_history_chars": 2000,
+          "rewrite_max_query_chars": 256,
+          "min_score": 0.4,
+          "top_k": 1,
+          "history_turns": 20,
+          "ingest_window": 6,
+          "extract_turn_limit": 1,
+          "extract_mode": "auto",
+          "assistant_temperature": 0.2
+        },
+        "messages": [],
+        "pending": false
+      },
+      "trace": {
+        "version": 1,
+        "next_turn_seq": 1,
+        "turns": [],
+        "retrieval_events": [],
+        "extraction_events": [],
+        "config_events": [
+          {
+            "event_time": 1770794910345,
+            "source": "session/new",
+            "config": {
+              "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+              "user_id": "u39",
+              "skill_scope": "all",
+              "rewrite_mode": "always",
+              "rewrite_history_turns": 6,
+              "rewrite_history_chars": 2000,
+              "rewrite_max_query_chars": 256,
+              "min_score": 0.4,
+              "top_k": 1,
+              "history_turns": 20,
+              "ingest_window": 6,
+              "extract_turn_limit": 1,
+              "extract_mode": "auto",
+              "assistant_temperature": 0.2
+            }
+          }
+        ],
+        "last_result": null
       }
     }
   ]

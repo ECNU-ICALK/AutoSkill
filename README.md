@@ -504,3 +504,16 @@ If you use AutoSkill in academic work, technical reports, or demos, please cite:
   note = {GitHub repository}
 }
 ```
+
+## 12. Contributions and Acknowledgments
+
+Institutions: Shanghai AI Laboratory, School of Computer Science at East China Normal University.
+
+Core Authors: Yutao Yang
+
+Contribution: Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai
+
+Lead Authors: Jie Zhou, Kai Chen, Liang He
+
+Scientific Directors: Xin Li, Bo Zhang, Qin Chen
+
