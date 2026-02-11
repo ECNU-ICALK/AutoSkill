@@ -496,7 +496,7 @@ AutoSkill 把短期交互沉淀为长期能力资产。
 
 ```bibtex
 @software{autoskill_2026,
-  author = {ECNU-ICALK},
+  author = {Yutao Yang, Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai, Xin Li, Bo Zhang, Qin Chen, Jie Zhou, Kai Chen, Liang He},
   title = {AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution},
   year = {2026},
   url = {https://github.com/ECNU-ICALK/AutoSkill},
@@ -507,7 +507,7 @@ AutoSkill 把短期交互沉淀为长期能力资产。
 
 ## 12. 贡献与致谢
 
-机构：上海人工智能实验室、华东师范大学计算机学院。
+机构：上海人工智能实验室、华东师范大学计算机学院
 
 核心作者：杨宇涛
 

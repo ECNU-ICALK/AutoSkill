@@ -497,7 +497,7 @@ If you use AutoSkill in academic work, technical reports, or demos, please cite:
 
 ```bibtex
 @software{autoskill_2026,
-  author = {ECNU-ICALK},
+  author = {Yutao Yang, Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai, Xin Li, Bo Zhang, Qin Chen, Jie Zhou, Kai Chen, Liang He},
   title = {AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution},
   year = {2026},
   url = {https://github.com/ECNU-ICALK/AutoSkill},
@@ -507,7 +507,7 @@ If you use AutoSkill in academic work, technical reports, or demos, please cite:
 
 ## 12. Contributions and Acknowledgments
 
-Institutions: Shanghai AI Laboratory, School of Computer Science at East China Normal University.
+Institutions: Shanghai AI Laboratory, School of Computer Science at East China Normal University
 
 Core Authors: Yutao Yang
 

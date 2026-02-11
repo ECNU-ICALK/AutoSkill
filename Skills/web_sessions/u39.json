@@ -1,7 +1,7 @@
 {
   "version": 1,
   "user_id": "u39",
-  "saved_at_ms": 1770794910351,
+  "saved_at_ms": 1770805513633,
   "sessions": [
     {
       "id": "99a6efdd-a024-4348-92e9-679ae5d90f1f",
@@ -1028,9 +1028,805 @@
       "id": "0a411051-2610-4d1e-860e-62e1bf6bf779",
       "meta": {
         "id": "0a411051-2610-4d1e-860e-62e1bf6bf779",
-        "title": "New Chat",
+        "title": "画一个差异表达基因的热图。",
         "created_at_ms": 1770794910345,
-        "updated_at_ms": 1770794910345
+        "updated_at_ms": 1770805428961
+      },
+      "state": {
+        "config": {
+          "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+          "user_id": "u39",
+          "skill_scope": "all",
+          "rewrite_mode": "always",
+          "rewrite_history_turns": 6,
+          "rewrite_history_chars": 2000,
+          "rewrite_max_query_chars": 256,
+          "min_score": 0.4,
+          "top_k": 1,
+          "history_turns": 20,
+          "ingest_window": 6,
+          "extract_turn_limit": 1,
+          "extract_mode": "auto",
+          "assistant_temperature": 0.2
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": "画一个差异表达基因的热图。"
+          },
+          {
+            "role": "assistant",
+            "content": "我无法直接绘制热图，但我可以为你提供一段完整的 Python 代码（使用 `seaborn` + `matplotlib` + `pandas`），帮助你快速生成专业的差异表达基因（DEGs）热图。以下是一个典型流程示例：\n\n✅ 假设你已有差异分析结果（如 DESeq2 或 edgeR 输出的 log2FoldChange 和 p-value），并筛选出显著差异基因（例如 |log2FC| ≥ 1 且 padj < 0.05）。\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\nfrom scipy.cluster.hierarchy import linkage\n\n# ✅ 示例：构造模拟的差异表达基因表达矩阵（替换为你自己的数据）\n# 行：基因名；列：样本（如 Control_1, Control_2, Treat_1, Treat_2）\nnp.random.seed(42)\ngenes = [f\"GENE_{i:03d}\" for i in range(1, 21)]  # 20个差异基因\nsamples = [\"Ctrl_1\", \"Ctrl_2\", \"Treat_1\", \"Treat_2\"]\n# 模拟标准化后的表达值（如 TPM/CPM 或 DESeq2 rlog）\ndata = np.random.randn(20, 4) + np.array([0, 0, 1.5, 1.5])  # 处理组整体上调\ndf = pd.DataFrame(data, index=genes, columns=samples)\n\n# 🔍 可选：按行（基因）z-score 标准化（热图常用，消除量纲差异）\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘制热图\nplt.figure(figsize=(8, 10))\nsns.heatmap(\n    df_z,\n    cmap=\"RdBu_r\",\n    center=0,\n    robust=True,\n    square=False,\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\"},\n    xticklabels=True,\n    yticklabels=True,\n    linewidths=0.5,\n    linecolor='gray'\n)\n\nplt.title(\"Differentially Expressed Genes (Z-score normalized)\", fontsize=14, fontweight='bold')\nplt.xlabel(\"Samples\")\nplt.ylabel(\"Genes\")\nplt.tight_layout()\nplt.show()\n```\n\n📌 小贴士：\n- ✅ 替换 `df` 为你的真实表达矩阵（CSV/TSV 文件可读取：`pd.read_csv(\"deg_expr_matrix.csv\", index_col=0)`）；\n- ✅ 推荐对**行（每个基因）做 z-score 标准化**，以突出表达模式而非绝对丰度；\n- ✅ 如需聚类，`sns.heatmap(..., row_cluster=True, col_cluster=True)`（需安装 `scipy`）；\n- ✅ 添加注释（如基因功能、通路）？可后续用 `ax.text()` 或结合 `annot=True` 显示数值。\n\n需要我帮你：\n🔹 解析你的具体数据格式（如 CSV 结构）？  \n🔹 添加显著性星号或分组颜色条（sample annotation）？  \n🔹 导出为高分辨率 PDF/SVG？  \n🔹 生成带树状图（hierarchical clustering）的完整热图？\n\n欢迎把你的数据样例（脱敏后）发给我，我来定制代码 👇"
+          },
+          {
+            "role": "user",
+            "content": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。"
+          },
+          {
+            "role": "assistant",
+            "content": "好的，以下是按你要求定制的热图代码：\n\n✅ 使用 `viridis` 色系  \n✅ **仅列聚类（samples 聚类）**，**禁用行聚类（genes 不聚类）**  \n✅ 全局字体设为 **Arial**（兼容性强，无需额外安装）  \n✅ 保留 z-score 行标准化（使基因表达模式可比）  \n✅ 美观排版：无多余边框、清晰刻度、Arial 字体全覆盖（标题/坐标轴/色条）\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\nfrom scipy.cluster.hierarchy import linkage\n\n# 设置全局字体为 Arial（含标题、标签、色条文字）\nplt.rcParams.update({\n    \"font.family\": \"sans-serif\",\n    \"font.sans-serif\": [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\", \"sans-serif\"],\n    \"axes.titlesize\": 14,\n    \"axes.labelsize\": 12,\n    \"xtick.labelsize\": 11,\n    \"ytick.labelsize\": 11,\n    \"legend.fontsize\": 11,\n    \"figure.titlesize\": 15,\n})\n\n# ✅ 示例数据（请替换为你自己的 DataFrame，index=基因名，columns=样本名）\nnp.random.seed(42)\ngenes = [f\"GENE_{i:03d}\" for i in range(1, 21)]\nsamples = [\"Ctrl_1\", \"Ctrl_2\", \"Treat_1\", \"Treat_2\"]\ndata = np.random.randn(20, 4) + np.array([0, 0, 1.5, 1.5])\ndf = pd.DataFrame(data, index=genes, columns=samples)\n\n# 🔍 行（基因）z-score 标准化 —— 保持每行均值为0、标准差为1\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘图：仅列聚类（col_cluster=True），行不聚类（row_cluster=False）\nplt.figure(figsize=(8, 10))\nax = sns.heatmap(\n    df_z,\n    cmap=\"viridis\",           # ✅ viridis 色系\n    center=None,              # viridis 非对称，不强制 center\n    robust=True,              # 对异常值更鲁棒\n    square=False,\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\", \"aspect\": 20},\n    xticklabels=True,\n    yticklabels=True,\n    linewidths=0.3,\n    linecolor='lightgray',\n    row_cluster=False,        # ✅ 关键：禁用行聚类\n    col_cluster=True,         # ✅ 关键：启用列聚类（样本聚类）\n    dendrogram_ratio=0.1,     # 微调树状图高度，更紧凑\n)\n\n# ✅ 强制所有文本使用 Arial（seaborn 可能忽略部分，显式设置）\nfor item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +\n             ax.get_xticklabels() + ax.get_yticklabels() +\n             ax.collections[0].colorbar.ax.get_yticklabels()):\n    item.set_fontfamily(\"Arial\")\n\nplt.title(\"Differentially Expressed Genes Heatmap\\n(Z-score normalized, column-clustered)\", \n          fontsize=14, fontweight='bold', pad=20)\nplt.xlabel(\"Samples\", fontsize=12)\nplt.ylabel(\"Genes\", fontsize=12)\nplt.tight_layout()\nplt.show()\n```\n\n💡 提示：\n- 若你的数据文件是 `deg_matrix.csv`（第一列为基因名，其余为样本），只需在开头加：\n  ```python\n  df = pd.read_csv(\"deg_matrix.csv\", index_col=0)\n  ```\n- 如需**导出高清图**（如300 DPI PDF）：\n  ```python\n  plt.savefig(\"deg_heatmap_viridis.pdf\", dpi=300, bbox_inches='tight')\n  ```\n\n需要我帮你：\n🔹 自动读取你的 CSV/TSV 并检查格式？  \n🔹 添加样本分组颜色条（如 Ctrl vs Treat）？  \n🔹 输出带基因名注释的 SVG（支持网页交互）？  \n\n欢迎随时发来你的数据结构 👇"
+          },
+          {
+            "role": "user",
+            "content": "这是单细胞测序的亚群标志基因数据，出一张热图。"
+          },
+          {
+            "role": "assistant",
+            "content": "明白了！你提供的是**单细胞测序中各细胞亚群（cluster）的标志基因（marker genes）表达矩阵**，目标是绘制一张专业、可发表的热图，满足以下全部要求：\n\n✅ 使用 `viridis` 色系  \n✅ **仅列聚类（即按亚群/样本列聚类）**，**不进行行聚类（基因不聚类）** —— 保持生物学意义清晰（如按预定义亚群顺序或功能分组排列更合理）  \n✅ 字体统一为 **Arial**  \n✅ 行（每个标志基因）做 **z-score 标准化**（消除量纲，突出跨亚群表达模式）  \n✅ 标题/坐标轴/色条文字均为 Arial，无中文字体异常  \n✅ 美观紧凑：带列树状图、灰细边框、Z-score 色条标注  \n\n以下是**专为单细胞 marker 基因热图优化的完整代码**（已适配典型 scRNA-seq 输出格式，如 Seurat 的 `FindAllMarkers()` 或 Scanpy 的 `rank_genes_groups()` 结果整理后的表达矩阵）：\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\n\n# ✅ 设置 Arial 全局字体（含中文系统兼容方案）\nplt.rcParams.update({\n    \"font.family\": \"sans-serif\",\n    \"font.sans-serif\": [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\", \"sans-serif\"],\n    \"axes.unicode_minus\": False,  # 防止负号显示为方块\n    \"xtick.labelsize\": 11,\n    \"ytick.labelsize\": 11,\n    \"axes.labelsize\": 12,\n    \"axes.titlesize\": 14,\n})\n\n# 📥 示例：请将下方 df 替换为你的真实数据\n# 行 = 标志基因（如 'CD3D', 'GNLY', 'FCGR3A'...），列 = 细胞亚群（如 'Cluster_0', 'Cluster_1', ...）\n# 值 = 平均表达值（如 log2(TPM+1)、log2(CPM+1) 或 Seurat 的 avg_log2FC）\nnp.random.seed(42)\ngenes = [\"CD3D\", \"CD8A\", \"GNLY\", \"GZMB\", \"FCGR3A\", \"MS4A1\", \"CD79A\", \"IGHG1\", \n         \"PPBP\", \"PF4\", \"S100A8\", \"S100A9\", \"LYZ\", \"CST3\", \"CD68\", \"APOE\"]\nclusters = [\"T_cells\", \"NK_cells\", \"B_cells\", \"Plasma_cells\", \"Neutrophils\", \"Monocytes\"]\ndata = np.abs(np.random.randn(16, 6) * 0.8 + np.array([1.2, 1.5, 0.3, 0.2, 0.9, 1.1]))  # 模拟高表达亚群\ndf = pd.DataFrame(data, index=genes, columns=clusters)\n\n# 🔬 关键处理：对每一行（每个基因）做 z-score 标准化（使跨亚群表达模式可比）\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘制热图：viridis + 仅列聚类 + Arial\nplt.figure(figsize=(8, 10))\nax = sns.heatmap(\n    df_z,\n    cmap=\"viridis\",\n    robust=True,\n    square=False,\n    linewidths=0.5,\n    linecolor=\"lightgray\",\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\", \"aspect\": 20},\n    xticklabels=True,\n    yticklabels=True,\n    row_cluster=False,   # ✅ 强制关闭基因行聚类（保留你定义的生物学顺序）\n    col_cluster=True,    # ✅ 启用亚群列聚类（探索亚群间相似性）\n    dendrogram_ratio=0.08,\n)\n\n# ✅ 强制所有文本使用 Arial（防御性设置）\nfor obj in ([ax.title, ax.xaxis.label, ax.yaxis.label] +\n            ax.get_xticklabels() + ax.get_yticklabels() +\n            ax.collections[0].colorbar.ax.get_yticklabels()):\n    obj.set_fontfamily(\"Arial\")\n\nplt.title(\"Marker Genes Across Cell Clusters\\n(Z-score normalized, column-hierarchically clustered)\", \n          fontsize=14, fontweight=\"bold\", pad=20)\nplt.xlabel(\"Cell Clusters\", fontsize=12)\nplt.ylabel(\"Marker Genes\", fontsize=12)\nplt.tight_layout()\nplt.show()\n```\n\n📌 使用说明：\n- ✅ **替换你的数据**：只需将 `df = pd.DataFrame(...)` 替换为：\n  ```python\n  df = pd.read_csv(\"your_marker_expr.csv\", index_col=0)  # 第一列为基因名\n  # 确保列名为亚群名称（如 'CD4_T', 'CD8_T', 'Treg', 'B_cell'...）\n  ```\n- ✅ 若你希望**按生物学逻辑排序基因（如免疫相关→代谢相关）**，可手动重排 `df` 行索引：\n  ```python\n  desired_order = [\"CD3D\", \"CD4\", \"FOXP3\", \"IL2RA\", \"CD19\", \"MS4A1\", ...]\n  df = df.loc[desired_order]\n  ```\n- ✅ 如需**导出高清图**（PDF/SVG/PNG）：\n  ```python\n  plt.savefig(\"sc_marker_heatmap_viridis.pdf\", dpi=300, bbox_inches='tight')\n  ```\n\n需要我帮你：\n🔹 自动解析你提供的 CSV/TSV 文件（发来前几行即可）？  \n🔹 添加亚群注释条（如用不同颜色标记 T/B/Myeloid 大类）？  \n🔹 输出交互式 HTML 热图（支持缩放/悬停查看基因名）？  \n\n欢迎随时贴出你的数据样例（脱敏后），我来一键生成最终代码 👇"
+          }
+        ],
+        "pending": true
+      },
+      "trace": {
+        "version": 1,
+        "next_turn_seq": 4,
+        "turns": [
+          {
+            "id": "turn_1",
+            "input": "画一个差异表达基因的热图。",
+            "started_at_ms": 1770805276341,
+            "finished_at_ms": 1770805296170,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "画一个差异表达基因的热图。"
+              },
+              {
+                "role": "assistant",
+                "content": "我无法直接绘制热图，但我可以为你提供一段完整的 Python 代码（使用 `seaborn` + `matplotlib` + `pandas`），帮助你快速生成专业的差异表达基因（DEGs）热图。以下是一个典型流程示例：\n\n✅ 假设你已有差异分析结果（如 DESeq2 或 edgeR 输出的 log2FoldChange 和 p-value），并筛选出显著差异基因（例如 |log2FC| ≥ 1 且 padj < 0.05）。\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\nfrom scipy.cluster.hierarchy import linkage\n\n# ✅ 示例：构造模拟的差异表达基因表达矩阵（替换为你自己的数据）\n# 行：基因名；列：样本（如 Control_1, Control_2, Treat_1, Treat_2）\nnp.random.seed(42)\ngenes = [f\"GENE_{i:03d}\" for i in range(1, 21)]  # 20个差异基因\nsamples = [\"Ctrl_1\", \"Ctrl_2\", \"Treat_1\", \"Treat_2\"]\n# 模拟标准化后的表达值（如 TPM/CPM 或 DESeq2 rlog）\ndata = np.random.randn(20, 4) + np.array([0, 0, 1.5, 1.5])  # 处理组整体上调\ndf = pd.DataFrame(data, index=genes, columns=samples)\n\n# 🔍 可选：按行（基因）z-score 标准化（热图常用，消除量纲差异）\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘制热图\nplt.figure(figsize=(8, 10))\nsns.heatmap(\n    df_z,\n    cmap=\"RdBu_r\",\n    center=0,\n    robust=True,\n    square=False,\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\"},\n    xticklabels=True,\n    yticklabels=True,\n    linewidths=0.5,\n    linecolor='gray'\n)\n\nplt.title(\"Differentially Expressed Genes (Z-score normalized)\", fontsize=14, fontweight='bold')\nplt.xlabel(\"Samples\")\nplt.ylabel(\"Genes\")\nplt.tight_layout()\nplt.show()\n```\n\n📌 小贴士：\n- ✅ 替换 `df` 为你的真实表达矩阵（CSV/TSV 文件可读取：`pd.read_csv(\"deg_expr_matrix.csv\", index_col=0)`）；\n- ✅ 推荐对**行（每个基因）做 z-score 标准化**，以突出表达模式而非绝对丰度；\n- ✅ 如需聚类，`sns.heatmap(..., row_cluster=True, col_cluster=True)`（需安装 `scipy`）；\n- ✅ 添加注释（如基因功能、通路）？可后续用 `ax.text()` 或结合 `annot=True` 显示数值。\n\n需要我帮你：\n🔹 解析你的具体数据格式（如 CSV 结构）？  \n🔹 添加显著性星号或分组颜色条（sample annotation）？  \n🔹 导出为高分辨率 PDF/SVG？  \n🔹 生成带树状图（hierarchical clustering）的完整热图？\n\n欢迎把你的数据样例（脱敏后）发给我，我来定制代码 👇"
+              }
+            ],
+            "retrieval": {
+              "original_query": "画一个差异表达基因的热图。",
+              "rewritten_query": "差异表达基因热图绘制",
+              "search_query": "差异表达基因热图绘制",
+              "event_time": 1770805280683,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            },
+            "extraction": null,
+            "error": ""
+          },
+          {
+            "id": "turn_2",
+            "input": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。",
+            "started_at_ms": 1770805353394,
+            "finished_at_ms": 1770805376737,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。"
+              },
+              {
+                "role": "assistant",
+                "content": "好的，以下是按你要求定制的热图代码：\n\n✅ 使用 `viridis` 色系  \n✅ **仅列聚类（samples 聚类）**，**禁用行聚类（genes 不聚类）**  \n✅ 全局字体设为 **Arial**（兼容性强，无需额外安装）  \n✅ 保留 z-score 行标准化（使基因表达模式可比）  \n✅ 美观排版：无多余边框、清晰刻度、Arial 字体全覆盖（标题/坐标轴/色条）\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\nfrom scipy.cluster.hierarchy import linkage\n\n# 设置全局字体为 Arial（含标题、标签、色条文字）\nplt.rcParams.update({\n    \"font.family\": \"sans-serif\",\n    \"font.sans-serif\": [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\", \"sans-serif\"],\n    \"axes.titlesize\": 14,\n    \"axes.labelsize\": 12,\n    \"xtick.labelsize\": 11,\n    \"ytick.labelsize\": 11,\n    \"legend.fontsize\": 11,\n    \"figure.titlesize\": 15,\n})\n\n# ✅ 示例数据（请替换为你自己的 DataFrame，index=基因名，columns=样本名）\nnp.random.seed(42)\ngenes = [f\"GENE_{i:03d}\" for i in range(1, 21)]\nsamples = [\"Ctrl_1\", \"Ctrl_2\", \"Treat_1\", \"Treat_2\"]\ndata = np.random.randn(20, 4) + np.array([0, 0, 1.5, 1.5])\ndf = pd.DataFrame(data, index=genes, columns=samples)\n\n# 🔍 行（基因）z-score 标准化 —— 保持每行均值为0、标准差为1\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘图：仅列聚类（col_cluster=True），行不聚类（row_cluster=False）\nplt.figure(figsize=(8, 10))\nax = sns.heatmap(\n    df_z,\n    cmap=\"viridis\",           # ✅ viridis 色系\n    center=None,              # viridis 非对称，不强制 center\n    robust=True,              # 对异常值更鲁棒\n    square=False,\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\", \"aspect\": 20},\n    xticklabels=True,\n    yticklabels=True,\n    linewidths=0.3,\n    linecolor='lightgray',\n    row_cluster=False,        # ✅ 关键：禁用行聚类\n    col_cluster=True,         # ✅ 关键：启用列聚类（样本聚类）\n    dendrogram_ratio=0.1,     # 微调树状图高度，更紧凑\n)\n\n# ✅ 强制所有文本使用 Arial（seaborn 可能忽略部分，显式设置）\nfor item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +\n             ax.get_xticklabels() + ax.get_yticklabels() +\n             ax.collections[0].colorbar.ax.get_yticklabels()):\n    item.set_fontfamily(\"Arial\")\n\nplt.title(\"Differentially Expressed Genes Heatmap\\n(Z-score normalized, column-clustered)\", \n          fontsize=14, fontweight='bold', pad=20)\nplt.xlabel(\"Samples\", fontsize=12)\nplt.ylabel(\"Genes\", fontsize=12)\nplt.tight_layout()\nplt.show()\n```\n\n💡 提示：\n- 若你的数据文件是 `deg_matrix.csv`（第一列为基因名，其余为样本），只需在开头加：\n  ```python\n  df = pd.read_csv(\"deg_matrix.csv\", index_col=0)\n  ```\n- 如需**导出高清图**（如300 DPI PDF）：\n  ```python\n  plt.savefig(\"deg_heatmap_viridis.pdf\", dpi=300, bbox_inches='tight')\n  ```\n\n需要我帮你：\n🔹 自动读取你的 CSV/TSV 并检查格式？  \n🔹 添加样本分组颜色条（如 Ctrl vs Treat）？  \n🔹 输出带基因名注释的 SVG（支持网页交互）？  \n\n欢迎随时发来你的数据结构 👇"
+              }
+            ],
+            "retrieval": {
+              "original_query": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。",
+              "rewritten_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "search_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "event_time": 1770805357937,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.4004060362434982,
+                  "id": "02a70c45-1747-534b-93b0-ae3f93201ce4",
+                  "name": "brand-guidelines",
+                  "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+                  "source": "library:AwesomeClaudeSkills",
+                  "owner": "library:AwesomeClaudeSkills",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "selected_for_context_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "context_injected": true,
+              "error": null
+            },
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "dfc681cc-2f01-488e-9599-ccce8d7c8bd2",
+              "event_time": 1770805381414,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "version": "0.1.0",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                  "version": "0.1.0",
+                  "owner": "u39",
+                  "triggers": [
+                    "生成差异表达基因热图",
+                    "画DEG热图",
+                    "viridis色系热图",
+                    "列聚类热图",
+                    "Arial字体热图"
+                  ],
+                  "tags": [
+                    "bioinformatics",
+                    "heatmap",
+                    "seaborn",
+                    "gene-expression",
+                    "visualization"
+                  ],
+                  "instructions": "# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-heatmap-generation-with-viridis-and-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\"\nversion: \"0.1.0\"\ntags:\n  - \"bioinformatics\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"viridis色系热图\"\n  - \"列聚类热图\"\n  - \"Arial字体热图\"\n---\n\n# deg-heatmap-generation-with-viridis-and-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- viridis色系热图\n- 列聚类热图\n- Arial字体热图\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-heatmap-generation-with-viridis-and-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\"\nversion: \"0.1.0\"\ntags:\n  - \"bioinformatics\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"viridis色系热图\"\n  - \"列聚类热图\"\n  - \"Arial字体热图\"\n---\n\n# deg-heatmap-generation-with-viridis-and-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- viridis色系热图\n- 列聚类热图\n- Arial字体热图\n"
+                }
+              ]
+            },
+            "error": ""
+          },
+          {
+            "id": "turn_3",
+            "input": "这是单细胞测序的亚群标志基因数据，出一张热图。",
+            "started_at_ms": 1770805387868,
+            "finished_at_ms": 1770805418222,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "这是单细胞测序的亚群标志基因数据，出一张热图。"
+              },
+              {
+                "role": "assistant",
+                "content": "明白了！你提供的是**单细胞测序中各细胞亚群（cluster）的标志基因（marker genes）表达矩阵**，目标是绘制一张专业、可发表的热图，满足以下全部要求：\n\n✅ 使用 `viridis` 色系  \n✅ **仅列聚类（即按亚群/样本列聚类）**，**不进行行聚类（基因不聚类）** —— 保持生物学意义清晰（如按预定义亚群顺序或功能分组排列更合理）  \n✅ 字体统一为 **Arial**  \n✅ 行（每个标志基因）做 **z-score 标准化**（消除量纲，突出跨亚群表达模式）  \n✅ 标题/坐标轴/色条文字均为 Arial，无中文字体异常  \n✅ 美观紧凑：带列树状图、灰细边框、Z-score 色条标注  \n\n以下是**专为单细胞 marker 基因热图优化的完整代码**（已适配典型 scRNA-seq 输出格式，如 Seurat 的 `FindAllMarkers()` 或 Scanpy 的 `rank_genes_groups()` 结果整理后的表达矩阵）：\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\n\n# ✅ 设置 Arial 全局字体（含中文系统兼容方案）\nplt.rcParams.update({\n    \"font.family\": \"sans-serif\",\n    \"font.sans-serif\": [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\", \"sans-serif\"],\n    \"axes.unicode_minus\": False,  # 防止负号显示为方块\n    \"xtick.labelsize\": 11,\n    \"ytick.labelsize\": 11,\n    \"axes.labelsize\": 12,\n    \"axes.titlesize\": 14,\n})\n\n# 📥 示例：请将下方 df 替换为你的真实数据\n# 行 = 标志基因（如 'CD3D', 'GNLY', 'FCGR3A'...），列 = 细胞亚群（如 'Cluster_0', 'Cluster_1', ...）\n# 值 = 平均表达值（如 log2(TPM+1)、log2(CPM+1) 或 Seurat 的 avg_log2FC）\nnp.random.seed(42)\ngenes = [\"CD3D\", \"CD8A\", \"GNLY\", \"GZMB\", \"FCGR3A\", \"MS4A1\", \"CD79A\", \"IGHG1\", \n         \"PPBP\", \"PF4\", \"S100A8\", \"S100A9\", \"LYZ\", \"CST3\", \"CD68\", \"APOE\"]\nclusters = [\"T_cells\", \"NK_cells\", \"B_cells\", \"Plasma_cells\", \"Neutrophils\", \"Monocytes\"]\ndata = np.abs(np.random.randn(16, 6) * 0.8 + np.array([1.2, 1.5, 0.3, 0.2, 0.9, 1.1]))  # 模拟高表达亚群\ndf = pd.DataFrame(data, index=genes, columns=clusters)\n\n# 🔬 关键处理：对每一行（每个基因）做 z-score 标准化（使跨亚群表达模式可比）\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘制热图：viridis + 仅列聚类 + Arial\nplt.figure(figsize=(8, 10))\nax = sns.heatmap(\n    df_z,\n    cmap=\"viridis\",\n    robust=True,\n    square=False,\n    linewidths=0.5,\n    linecolor=\"lightgray\",\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\", \"aspect\": 20},\n    xticklabels=True,\n    yticklabels=True,\n    row_cluster=False,   # ✅ 强制关闭基因行聚类（保留你定义的生物学顺序）\n    col_cluster=True,    # ✅ 启用亚群列聚类（探索亚群间相似性）\n    dendrogram_ratio=0.08,\n)\n\n# ✅ 强制所有文本使用 Arial（防御性设置）\nfor obj in ([ax.title, ax.xaxis.label, ax.yaxis.label] +\n            ax.get_xticklabels() + ax.get_yticklabels() +\n            ax.collections[0].colorbar.ax.get_yticklabels()):\n    obj.set_fontfamily(\"Arial\")\n\nplt.title(\"Marker Genes Across Cell Clusters\\n(Z-score normalized, column-hierarchically clustered)\", \n          fontsize=14, fontweight=\"bold\", pad=20)\nplt.xlabel(\"Cell Clusters\", fontsize=12)\nplt.ylabel(\"Marker Genes\", fontsize=12)\nplt.tight_layout()\nplt.show()\n```\n\n📌 使用说明：\n- ✅ **替换你的数据**：只需将 `df = pd.DataFrame(...)` 替换为：\n  ```python\n  df = pd.read_csv(\"your_marker_expr.csv\", index_col=0)  # 第一列为基因名\n  # 确保列名为亚群名称（如 'CD4_T', 'CD8_T', 'Treg', 'B_cell'...）\n  ```\n- ✅ 若你希望**按生物学逻辑排序基因（如免疫相关→代谢相关）**，可手动重排 `df` 行索引：\n  ```python\n  desired_order = [\"CD3D\", \"CD4\", \"FOXP3\", \"IL2RA\", \"CD19\", \"MS4A1\", ...]\n  df = df.loc[desired_order]\n  ```\n- ✅ 如需**导出高清图**（PDF/SVG/PNG）：\n  ```python\n  plt.savefig(\"sc_marker_heatmap_viridis.pdf\", dpi=300, bbox_inches='tight')\n  ```\n\n需要我帮你：\n🔹 自动解析你提供的 CSV/TSV 文件（发来前几行即可）？  \n🔹 添加亚群注释条（如用不同颜色标记 T/B/Myeloid 大类）？  \n🔹 输出交互式 HTML 热图（支持缩放/悬停查看基因名）？  \n\n欢迎随时贴出你的数据样例（脱敏后），我来一键生成最终代码 👇"
+              }
+            ],
+            "retrieval": {
+              "original_query": "这是单细胞测序的亚群标志基因数据，出一张热图。",
+              "rewritten_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "search_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "event_time": 1770805392525,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6843877191604036,
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "selected_for_context_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "context_injected": true,
+              "error": null
+            },
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+              "event_time": 1770805428423,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                  "version": "0.1.1",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.",
+                  "version": "0.1.1",
+                  "owner": "u39",
+                  "triggers": [
+                    "生成差异表达基因热图",
+                    "画DEG热图",
+                    "单细胞亚群标志基因热图",
+                    "scRNA-seq marker gene heatmap",
+                    "viridis列聚类热图"
+                  ],
+                  "tags": [
+                    "bioinformatics",
+                    "single-cell",
+                    "scRNA-seq",
+                    "heatmap",
+                    "seaborn",
+                    "gene-expression",
+                    "marker-genes",
+                    "visualization"
+                  ],
+                  "instructions": "# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+                }
+              ]
+            },
+            "error": ""
+          }
+        ],
+        "retrieval_events": [
+          {
+            "event_time": 1770805280683,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "画一个差异表达基因的热图。",
+              "rewritten_query": "差异表达基因热图绘制",
+              "search_query": "差异表达基因热图绘制",
+              "event_time": 1770805280683,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770805296170,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "画一个差异表达基因的热图。",
+              "rewritten_query": "差异表达基因热图绘制",
+              "search_query": "差异表达基因热图绘制",
+              "event_time": 1770805280683,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [],
+              "selected_for_use_ids": [],
+              "selected_for_context_ids": [],
+              "context_injected": false,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770805357937,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "retrieval": {
+              "original_query": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。",
+              "rewritten_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "search_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "event_time": 1770805357937,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.4004060362434982,
+                  "id": "02a70c45-1747-534b-93b0-ae3f93201ce4",
+                  "name": "brand-guidelines",
+                  "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+                  "source": "library:AwesomeClaudeSkills",
+                  "owner": "library:AwesomeClaudeSkills",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "selected_for_context_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770805376738,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "retrieval": {
+              "original_query": "请统一使用 viridis 色系。另外，去掉行聚类，只保留列聚类，字体用 Arial。",
+              "rewritten_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "search_query": "差异表达基因热图绘制 viridis色系 仅列聚类 行不聚类 Arial字体",
+              "event_time": 1770805357937,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.4004060362434982,
+                  "id": "02a70c45-1747-534b-93b0-ae3f93201ce4",
+                  "name": "brand-guidelines",
+                  "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+                  "source": "library:AwesomeClaudeSkills",
+                  "owner": "library:AwesomeClaudeSkills",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "selected_for_context_ids": [
+                "02a70c45-1747-534b-93b0-ae3f93201ce4"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770805392525,
+            "source": "stream",
+            "turn_id": "turn_3",
+            "retrieval": {
+              "original_query": "这是单细胞测序的亚群标志基因数据，出一张热图。",
+              "rewritten_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "search_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "event_time": 1770805392525,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6843877191604036,
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "selected_for_context_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1770805418223,
+            "source": "stream",
+            "turn_id": "turn_3",
+            "retrieval": {
+              "original_query": "这是单细胞测序的亚群标志基因数据，出一张热图。",
+              "rewritten_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "search_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+              "event_time": 1770805392525,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6843877191604036,
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.0"
+                }
+              ],
+              "selected_for_use_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "selected_for_context_ids": [
+                "7161407a-1575-427e-9989-d784d2376a0c"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          }
+        ],
+        "extraction_events": [
+          {
+            "event_time": 1770805357938,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "dfc681cc-2f01-488e-9599-ccce8d7c8bd2",
+              "event_time": 1770805357921,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805358396,
+            "source": "poll",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "dfc681cc-2f01-488e-9599-ccce8d7c8bd2",
+              "event_time": 1770805357915,
+              "status": "running",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805376738,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "dfc681cc-2f01-488e-9599-ccce8d7c8bd2",
+              "event_time": 1770805357921,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805381934,
+            "source": "poll",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "dfc681cc-2f01-488e-9599-ccce8d7c8bd2",
+              "event_time": 1770805381414,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "version": "0.1.0",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                  "version": "0.1.0",
+                  "owner": "u39",
+                  "triggers": [
+                    "生成差异表达基因热图",
+                    "画DEG热图",
+                    "viridis色系热图",
+                    "列聚类热图",
+                    "Arial字体热图"
+                  ],
+                  "tags": [
+                    "bioinformatics",
+                    "heatmap",
+                    "seaborn",
+                    "gene-expression",
+                    "visualization"
+                  ],
+                  "instructions": "# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-heatmap-generation-with-viridis-and-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\"\nversion: \"0.1.0\"\ntags:\n  - \"bioinformatics\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"viridis色系热图\"\n  - \"列聚类热图\"\n  - \"Arial字体热图\"\n---\n\n# deg-heatmap-generation-with-viridis-and-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- viridis色系热图\n- 列聚类热图\n- Arial字体热图\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-heatmap-generation-with-viridis-and-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\"\nversion: \"0.1.0\"\ntags:\n  - \"bioinformatics\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"viridis色系热图\"\n  - \"列聚类热图\"\n  - \"Arial字体热图\"\n---\n\n# deg-heatmap-generation-with-viridis-and-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed genes (DEGs), accepting a pandas DataFrame with genes as rows and samples as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r or any other colormap.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Disable row clustering dendrogram; retain column dendrogram.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Use `linewidths=0.5` and `linecolor='gray'` for cell borders.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" (bold, 14pt).\n- Axis labels: \"Samples\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- viridis色系热图\n- 列聚类热图\n- Arial字体热图\n"
+                }
+              ]
+            }
+          },
+          {
+            "event_time": 1770805392528,
+            "source": "stream",
+            "turn_id": "turn_3",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+              "event_time": 1770805392509,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805392731,
+            "source": "poll",
+            "turn_id": "turn_3",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+              "event_time": 1770805392502,
+              "status": "running",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805418223,
+            "source": "stream",
+            "turn_id": "turn_3",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+              "event_time": 1770805392509,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1770805428960,
+            "source": "poll",
+            "turn_id": "turn_3",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+              "event_time": 1770805428423,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                  "version": "0.1.1",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                  "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.",
+                  "version": "0.1.1",
+                  "owner": "u39",
+                  "triggers": [
+                    "生成差异表达基因热图",
+                    "画DEG热图",
+                    "单细胞亚群标志基因热图",
+                    "scRNA-seq marker gene heatmap",
+                    "viridis列聚类热图"
+                  ],
+                  "tags": [
+                    "bioinformatics",
+                    "single-cell",
+                    "scRNA-seq",
+                    "heatmap",
+                    "seaborn",
+                    "gene-expression",
+                    "marker-genes",
+                    "visualization"
+                  ],
+                  "instructions": "# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                  "md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+                }
+              ]
+            }
+          }
+        ],
+        "config_events": [
+          {
+            "event_time": 1770794910345,
+            "source": "session/new",
+            "config": {
+              "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+              "user_id": "u39",
+              "skill_scope": "all",
+              "rewrite_mode": "always",
+              "rewrite_history_turns": 6,
+              "rewrite_history_chars": 2000,
+              "rewrite_max_query_chars": 256,
+              "min_score": 0.4,
+              "top_k": 1,
+              "history_turns": 20,
+              "ingest_window": 6,
+              "extract_turn_limit": 1,
+              "extract_mode": "auto",
+              "assistant_temperature": 0.2
+            }
+          }
+        ],
+        "last_result": {
+          "kind": "chat",
+          "chat_append": [
+            {
+              "role": "user",
+              "content": "这是单细胞测序的亚群标志基因数据，出一张热图。"
+            },
+            {
+              "role": "assistant",
+              "content": "明白了！你提供的是**单细胞测序中各细胞亚群（cluster）的标志基因（marker genes）表达矩阵**，目标是绘制一张专业、可发表的热图，满足以下全部要求：\n\n✅ 使用 `viridis` 色系  \n✅ **仅列聚类（即按亚群/样本列聚类）**，**不进行行聚类（基因不聚类）** —— 保持生物学意义清晰（如按预定义亚群顺序或功能分组排列更合理）  \n✅ 字体统一为 **Arial**  \n✅ 行（每个标志基因）做 **z-score 标准化**（消除量纲，突出跨亚群表达模式）  \n✅ 标题/坐标轴/色条文字均为 Arial，无中文字体异常  \n✅ 美观紧凑：带列树状图、灰细边框、Z-score 色条标注  \n\n以下是**专为单细胞 marker 基因热图优化的完整代码**（已适配典型 scRNA-seq 输出格式，如 Seurat 的 `FindAllMarkers()` 或 Scanpy 的 `rank_genes_groups()` 结果整理后的表达矩阵）：\n\n```python\nimport pandas as pd\nimport numpy as np\nimport seaborn as sns\nimport matplotlib.pyplot as plt\n\n# ✅ 设置 Arial 全局字体（含中文系统兼容方案）\nplt.rcParams.update({\n    \"font.family\": \"sans-serif\",\n    \"font.sans-serif\": [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\", \"sans-serif\"],\n    \"axes.unicode_minus\": False,  # 防止负号显示为方块\n    \"xtick.labelsize\": 11,\n    \"ytick.labelsize\": 11,\n    \"axes.labelsize\": 12,\n    \"axes.titlesize\": 14,\n})\n\n# 📥 示例：请将下方 df 替换为你的真实数据\n# 行 = 标志基因（如 'CD3D', 'GNLY', 'FCGR3A'...），列 = 细胞亚群（如 'Cluster_0', 'Cluster_1', ...）\n# 值 = 平均表达值（如 log2(TPM+1)、log2(CPM+1) 或 Seurat 的 avg_log2FC）\nnp.random.seed(42)\ngenes = [\"CD3D\", \"CD8A\", \"GNLY\", \"GZMB\", \"FCGR3A\", \"MS4A1\", \"CD79A\", \"IGHG1\", \n         \"PPBP\", \"PF4\", \"S100A8\", \"S100A9\", \"LYZ\", \"CST3\", \"CD68\", \"APOE\"]\nclusters = [\"T_cells\", \"NK_cells\", \"B_cells\", \"Plasma_cells\", \"Neutrophils\", \"Monocytes\"]\ndata = np.abs(np.random.randn(16, 6) * 0.8 + np.array([1.2, 1.5, 0.3, 0.2, 0.9, 1.1]))  # 模拟高表达亚群\ndf = pd.DataFrame(data, index=genes, columns=clusters)\n\n# 🔬 关键处理：对每一行（每个基因）做 z-score 标准化（使跨亚群表达模式可比）\ndf_z = df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T\n\n# 🎨 绘制热图：viridis + 仅列聚类 + Arial\nplt.figure(figsize=(8, 10))\nax = sns.heatmap(\n    df_z,\n    cmap=\"viridis\",\n    robust=True,\n    square=False,\n    linewidths=0.5,\n    linecolor=\"lightgray\",\n    cbar_kws={\"shrink\": 0.6, \"label\": \"Z-score\", \"aspect\": 20},\n    xticklabels=True,\n    yticklabels=True,\n    row_cluster=False,   # ✅ 强制关闭基因行聚类（保留你定义的生物学顺序）\n    col_cluster=True,    # ✅ 启用亚群列聚类（探索亚群间相似性）\n    dendrogram_ratio=0.08,\n)\n\n# ✅ 强制所有文本使用 Arial（防御性设置）\nfor obj in ([ax.title, ax.xaxis.label, ax.yaxis.label] +\n            ax.get_xticklabels() + ax.get_yticklabels() +\n            ax.collections[0].colorbar.ax.get_yticklabels()):\n    obj.set_fontfamily(\"Arial\")\n\nplt.title(\"Marker Genes Across Cell Clusters\\n(Z-score normalized, column-hierarchically clustered)\", \n          fontsize=14, fontweight=\"bold\", pad=20)\nplt.xlabel(\"Cell Clusters\", fontsize=12)\nplt.ylabel(\"Marker Genes\", fontsize=12)\nplt.tight_layout()\nplt.show()\n```\n\n📌 使用说明：\n- ✅ **替换你的数据**：只需将 `df = pd.DataFrame(...)` 替换为：\n  ```python\n  df = pd.read_csv(\"your_marker_expr.csv\", index_col=0)  # 第一列为基因名\n  # 确保列名为亚群名称（如 'CD4_T', 'CD8_T', 'Treg', 'B_cell'...）\n  ```\n- ✅ 若你希望**按生物学逻辑排序基因（如免疫相关→代谢相关）**，可手动重排 `df` 行索引：\n  ```python\n  desired_order = [\"CD3D\", \"CD4\", \"FOXP3\", \"IL2RA\", \"CD19\", \"MS4A1\", ...]\n  df = df.loc[desired_order]\n  ```\n- ✅ 如需**导出高清图**（PDF/SVG/PNG）：\n  ```python\n  plt.savefig(\"sc_marker_heatmap_viridis.pdf\", dpi=300, bbox_inches='tight')\n  ```\n\n需要我帮你：\n🔹 自动解析你提供的 CSV/TSV 文件（发来前几行即可）？  \n🔹 添加亚群注释条（如用不同颜色标记 T/B/Myeloid 大类）？  \n🔹 输出交互式 HTML 热图（支持缩放/悬停查看基因名）？  \n\n欢迎随时贴出你的数据样例（脱敏后），我来一键生成最终代码 👇"
+            }
+          ],
+          "retrieval": {
+            "original_query": "这是单细胞测序的亚群标志基因数据，出一张热图。",
+            "rewritten_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+            "search_query": "单细胞测序 亚群标志基因 热图 viridis色系 仅列聚类 Arial字体 行z-score标准化",
+            "event_time": 1770805392525,
+            "scope": "all",
+            "top_k": 1,
+            "min_score": 0.4,
+            "hits": [
+              {
+                "rank": 1,
+                "score": 0.6843877191604036,
+                "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                "name": "deg-heatmap-generation-with-viridis-and-col-clustering",
+                "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix.",
+                "source": "user:u39",
+                "owner": "u39",
+                "version": "0.1.0"
+              }
+            ],
+            "selected_for_use_ids": [
+              "7161407a-1575-427e-9989-d784d2376a0c"
+            ],
+            "selected_for_context_ids": [
+              "7161407a-1575-427e-9989-d784d2376a0c"
+            ],
+            "context_injected": true,
+            "error": null
+          },
+          "extraction": {
+            "trigger": "auto",
+            "job_id": "3fbbcf81-8771-4893-a2cc-c996420fcc55",
+            "event_time": 1770805428423,
+            "status": "completed",
+            "error": "",
+            "upserted": [
+              {
+                "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                "version": "0.1.1",
+                "owner": "u39"
+              }
+            ],
+            "skills": [
+              {
+                "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                "name": "deg-and-marker-gene-heatmap-with-viridis-col-clustering",
+                "description": "Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.",
+                "version": "0.1.1",
+                "owner": "u39",
+                "triggers": [
+                  "生成差异表达基因热图",
+                  "画DEG热图",
+                  "单细胞亚群标志基因热图",
+                  "scRNA-seq marker gene heatmap",
+                  "viridis列聚类热图"
+                ],
+                "tags": [
+                  "bioinformatics",
+                  "single-cell",
+                  "scRNA-seq",
+                  "heatmap",
+                  "seaborn",
+                  "gene-expression",
+                  "marker-genes",
+                  "visualization"
+                ],
+                "instructions": "# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.",
+                "examples": [],
+                "skill_md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+              }
+            ],
+            "skill_mds": [
+              {
+                "id": "7161407a-1575-427e-9989-d784d2376a0c",
+                "md": "---\nid: \"7161407a-1575-427e-9989-d784d2376a0c\"\nname: \"deg-and-marker-gene-heatmap-with-viridis-col-clustering\"\ndescription: \"Generates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\"\nversion: \"0.1.1\"\ntags:\n  - \"bioinformatics\"\n  - \"single-cell\"\n  - \"scRNA-seq\"\n  - \"heatmap\"\n  - \"seaborn\"\n  - \"gene-expression\"\n  - \"marker-genes\"\n  - \"visualization\"\ntriggers:\n  - \"生成差异表达基因热图\"\n  - \"画DEG热图\"\n  - \"单细胞亚群标志基因热图\"\n  - \"scRNA-seq marker gene heatmap\"\n  - \"viridis列聚类热图\"\n---\n\n# deg-and-marker-gene-heatmap-with-viridis-col-clustering\n\nGenerates a publication-ready heatmap for differentially expressed genes (DEGs) or marker genes using viridis colormap, column-only hierarchical clustering, and Arial font — applicable to any normalized gene expression matrix with genes as rows and samples/subclusters as columns.\n\n## Prompt\n\n# Goal\nGenerate a seaborn-based heatmap for differentially expressed or marker genes, accepting a pandas DataFrame with genes as rows and samples/subclusters as columns.\n\n# Constraints & Style\n- Use `cmap=\"viridis\"` exclusively; do not use RdBu_r, center, or any other colormap or symmetry setting.\n- Enable only column-wise hierarchical clustering: set `col_cluster=True` and `row_cluster=False`.\n- Use Arial font for all text elements (title, axis labels, tick labels, colorbar label); enforce via `plt.rcParams[\"font.sans-serif\"] = [\"Arial\", \"DejaVu Sans\", \"Liberation Sans\"]` and `plt.rcParams[\"axes.unicode_minus\"] = False`; explicitly annotate plot elements if seaborn does not inherit font settings.\n- Apply row-wise z-score normalization (per gene) before plotting: `df.T.apply(lambda x: (x - x.mean()) / x.std(ddof=0)).T`.\n- Use `robust=True` in `sns.heatmap` for outlier resilience.\n- Set `linewidths=0.3` and `linecolor='lightgray'` for subtle cell borders.\n- Set figure size to `(8, 10)`; include colorbar labeled \"Z-score\" with shrink=0.6.\n- Title: \"Differentially Expressed Genes (Z-score normalized)\" or \"Marker Genes (Z-score normalized)\" (bold, 14pt); adapt label based on context but retain consistent phrasing.\n- Axis labels: \"Samples\" or \"Subclusters\" (x), \"Genes\" (y); no rotation of tick labels.\n- Call `plt.tight_layout()` before `plt.show()`; ensure no clipping.\n\n# Workflow\n1. Accept input DataFrame with gene-indexed rows and sample/subcluster-labeled columns.\n2. Apply row-wise z-score normalization.\n3. Configure matplotlib font settings for Arial compatibility.\n4. Generate heatmap with specified clustering, colormap, robust scaling, layout, and labeling.\n5. Display the plot.\n\n## Triggers\n\n- 生成差异表达基因热图\n- 画DEG热图\n- 单细胞亚群标志基因热图\n- scRNA-seq marker gene heatmap\n- viridis列聚类热图\n"
+              }
+            ]
+          },
+          "config": {
+            "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+            "user_id": "u39",
+            "skill_scope": "all",
+            "rewrite_mode": "always",
+            "rewrite_history_turns": 6,
+            "rewrite_history_chars": 2000,
+            "rewrite_max_query_chars": 256,
+            "min_score": 0.4,
+            "top_k": 1,
+            "history_turns": 20,
+            "ingest_window": 6,
+            "extract_turn_limit": 1,
+            "extract_mode": "auto",
+            "assistant_temperature": 0.2
+          },
+          "runtime": {
+            "llm_provider": "dashscope",
+            "llm_model": "qwen-plus",
+            "thinking": {
+              "supported": false,
+              "requested": null,
+              "effective": null,
+              "auto_disabled": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "c5b5451e-c258-4423-a43a-3ae9cd998c4f",
+      "meta": {
+        "id": "c5b5451e-c258-4423-a43a-3ae9cd998c4f",
+        "title": "New Chat",
+        "created_at_ms": 1770805513630,
+        "updated_at_ms": 1770805513630
       },
       "state": {
         "config": {
@@ -1060,7 +1856,7 @@
         "extraction_events": [],
         "config_events": [
           {
-            "event_time": 1770794910345,
+            "event_time": 1770805513630,
             "source": "session/new",
             "config": {
               "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
