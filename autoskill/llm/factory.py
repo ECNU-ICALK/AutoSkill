@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from .anthropic import AnthropicLLM
 from .base import LLM
+from .generic import GenericChatLLM
 from .glm import GLMChatLLM
 from .internlm import InternLMChatLLM
 from .mock import MockLLM
@@ -30,6 +31,21 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             model=str(config.get("model", "gpt-4o-mini")),
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.openai.com")),
+            timeout_s=int(config.get("timeout_s", 60)),
+            max_input_chars=int(config.get("max_input_chars", 100000)),
+            max_tokens=int(config.get("max_tokens", 30000)),
+        )
+
+    if provider in {"generic", "universal", "custom"}:
+        base_url = str(
+            config.get("url")
+            or config.get("base_url")
+            or "http://35.220.164.252:3888/v1"
+        )
+        return GenericChatLLM(
+            model=str(config.get("model", "gpt-5.2")),
+            api_key=(config.get("api_key") or os.getenv("AUTOSKILL_GENERIC_API_KEY") or ""),
+            base_url=base_url,
             timeout_s=int(config.get("timeout_s", 60)),
             max_input_chars=int(config.get("max_input_chars", 100000)),
             max_tokens=int(config.get("max_tokens", 30000)),

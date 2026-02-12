@@ -3,6 +3,7 @@ LLM provider layer.
 
 To keep the SDK lightweight, providers are implemented with urllib:
 - openai / anthropic: minimal chat completion clients
+- generic: OpenAI-compatible custom endpoint (optional API key)
 - dashscope: Aliyun DashScope Qwen (OpenAI-compatible mode)
 - internlm: InternLM API (OpenAI-compatible mode)
 - glm: BigModel GLM client (supports jwt/api_key/auto auth)

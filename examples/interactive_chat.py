@@ -57,6 +57,8 @@ def _env_json(name: str) -> Optional[Dict[str, Any]]:
 
 
 def _pick_default_provider() -> str:
+    if os.getenv("AUTOSKILL_GENERIC_LLM_URL"):
+        return "generic"
     if os.getenv("DASHSCOPE_API_KEY"):
         return "dashscope"
     if os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY"):
@@ -132,6 +134,17 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "timeout_s": timeout_s,
         }
 
+    if provider in {"generic", "universal", "custom"}:
+        url = _env("AUTOSKILL_GENERIC_LLM_URL", "http://35.220.164.252:3888/v1")
+        return {
+            "provider": "generic",
+            "model": model or _env("AUTOSKILL_GENERIC_LLM_MODEL", "gpt-5.2"),
+            "api_key": _env("AUTOSKILL_GENERIC_API_KEY", ""),
+            "url": url,
+            "base_url": url,
+            "timeout_s": timeout_s,
+        }
+
     if provider == "anthropic":
         return {
             "provider": "anthropic",
@@ -168,6 +181,8 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
             provider = "dashscope"
         elif llm_provider == "openai":
             provider = "openai"
+        elif llm_provider in {"generic", "universal", "custom"}:
+            provider = "generic"
         elif llm_provider == "anthropic":
             provider = "openai" if os.getenv("OPENAI_API_KEY") else "hashing"
         else:
@@ -186,6 +201,21 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
             "base_url": _env("OPENAI_BASE_URL", "https://api.openai.com"),
             "timeout_s": timeout_s,
             "extra_body": _env_json("OPENAI_EMB_EXTRA_BODY"),
+        }
+
+    if provider in {"generic", "universal", "custom"}:
+        url = _env(
+            "AUTOSKILL_GENERIC_EMBED_URL",
+            "http://s-20260204155338-p8gv8.ailab-evalservice.pjh-service.org.cn/v1",
+        )
+        return {
+            "provider": "generic",
+            "model": model or _env("AUTOSKILL_GENERIC_EMBED_MODEL", "embd_qwen3vl8b"),
+            "api_key": _env("AUTOSKILL_GENERIC_API_KEY", ""),
+            "url": url,
+            "base_url": url,
+            "timeout_s": timeout_s,
+            "extra_body": _env_json("AUTOSKILL_GENERIC_EMB_EXTRA_BODY"),
         }
 
     if provider in {"dashscope", "qwen"}:
@@ -224,13 +254,13 @@ def main() -> None:
     parser.add_argument(
         "--llm-provider",
         default=_pick_default_provider(),
-        help="mock|glm|internlm|dashscope|openai|anthropic",
+        help="mock|generic|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=None)
     parser.add_argument(
         "--embeddings-provider",
         default="",
-        help="hashing|glm|dashscope|openai (default depends on llm)",
+        help="hashing|generic|glm|dashscope|openai (default depends on llm)",
     )
     parser.add_argument("--embeddings-model", default=None)
     default_store_dir = _env(

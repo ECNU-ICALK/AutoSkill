@@ -1283,13 +1283,13 @@ def main() -> None:
     parser.add_argument(
         "--llm-provider",
         default=_pick_default_provider(),
-        help="mock|glm|internlm|dashscope|openai|anthropic",
+        help="mock|generic|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=None)
     parser.add_argument(
         "--embeddings-provider",
         default="",
-        help="hashing|glm|dashscope|openai (default depends on llm)",
+        help="hashing|generic|glm|dashscope|openai (default depends on llm)",
     )
     parser.add_argument("--embeddings-model", default=None)
     default_store_dir = _env(

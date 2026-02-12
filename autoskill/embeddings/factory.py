@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 from .base import EmbeddingModel
 from .bigmodel import BigModelEmbedding3
+from .generic import GenericEmbedding
 from .hashing import HashingEmbedding
 from .openai import OpenAIEmbedding
 
@@ -24,6 +25,23 @@ def build_embeddings(config: Dict[str, Any]) -> EmbeddingModel:
             model=str(config.get("model", "text-embedding-3-small")),
             api_key=config.get("api_key"),
             base_url=str(config.get("base_url", "https://api.openai.com")),
+            timeout_s=int(config.get("timeout_s", 60)),
+            max_text_chars=int(config.get("max_text_chars", 10000)),
+            min_text_chars=int(config.get("min_text_chars", 512)),
+            max_batch_size=int(config.get("max_batch_size", 256)),
+            extra_body=(config.get("extra_body") or config.get("extra_payload")),
+        )
+
+    if provider in {"generic", "universal", "custom"}:
+        base_url = str(
+            config.get("url")
+            or config.get("base_url")
+            or "http://s-20260204155338-p8gv8.ailab-evalservice.pjh-service.org.cn/v1"
+        )
+        return GenericEmbedding(
+            model=str(config.get("model", "embd_qwen3vl8b")),
+            api_key=(config.get("api_key") or os.getenv("AUTOSKILL_GENERIC_API_KEY") or ""),
+            base_url=base_url,
             timeout_s=int(config.get("timeout_s", 60)),
             max_text_chars=int(config.get("max_text_chars", 10000)),
             min_text_chars=int(config.get("min_text_chars", 512)),
