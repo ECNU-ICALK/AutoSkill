@@ -143,6 +143,48 @@ def _q_first(qs: Dict[str, List[str]], key: str, default: str = "") -> str:
     return str(vals[0] or "")
 
 
+def _decode_jwt_payload_no_verify(token: str) -> Dict[str, Any]:
+    """
+    Best-effort JWT payload decode (without signature verification).
+
+    Used only for lightweight user-id routing when caller does not provide
+    explicit `user` or `X-AutoSkill-User`.
+    """
+
+    tok = str(token or "").strip()
+    if not tok:
+        return {}
+    parts = tok.split(".")
+    if len(parts) < 2:
+        return {}
+    payload_b64 = str(parts[1] or "").strip()
+    if not payload_b64:
+        return {}
+    payload_b64 += "=" * (-len(payload_b64) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
+        if not raw or len(raw) > 65536:
+            return {}
+        obj = json.loads(raw.decode("utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _user_id_from_auth_jwt(headers: Any) -> str:
+    auth = str(headers.get("Authorization") or "").strip()
+    if not auth:
+        return ""
+    if not auth.lower().startswith("bearer "):
+        return ""
+    token = auth[7:].strip()
+    if not token:
+        return ""
+    payload = _decode_jwt_payload_no_verify(token)
+    uid = str(payload.get("id") or "").strip()
+    return uid
+
+
 def _examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for ex in examples or []:
@@ -2287,11 +2329,19 @@ class AutoSkillProxyRuntime:
     def _resolve_user_id(self, *, body: Dict[str, Any], headers: Any) -> str:
         from_body = str(body.get("user") or "").strip()
         if from_body:
+            print(f"[proxy] resolved user_id from body user={from_body}", flush=True)
             return from_body
         from_header = str(headers.get("X-AutoSkill-User") or "").strip()
         if from_header:
+            print(f"[proxy] resolved user_id from X-AutoSkill-User user={from_header}", flush=True)
             return from_header
-        return self.config.user_id
+        from_auth_jwt = _user_id_from_auth_jwt(headers)
+        if from_auth_jwt:
+            print(f"[proxy] resolved user_id from Authorization JWT id={from_auth_jwt}", flush=True)
+            return from_auth_jwt
+        fallback = self.config.user_id
+        print(f"[proxy] resolved user_id from default user={fallback}", flush=True)
+        return fallback
 
     def _resolve_scope(self, *, headers: Any) -> str:
         raw = str(headers.get("X-AutoSkill-Scope") or "").strip()
