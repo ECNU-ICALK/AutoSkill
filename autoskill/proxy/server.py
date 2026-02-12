@@ -2340,6 +2340,11 @@ class AutoSkillProxyRuntime:
         if from_header:
             print(f"[proxy] resolved user_id from X-AutoSkill-User user={from_header}", flush=True)
             return from_header
+        print(f"[proxy] headers={headers}", flush=True)
+        from_openwebui_username = str(headers.get("X-OpenWebUI-User-Name") or "").strip()
+        if from_openwebui_username:
+            print(f"[proxy] resolved user_id from X-OpenWebUI-User-Name user={from_openwebui_username}", flush=True)
+            return from_openwebui_username
         from_auth_jwt = _user_id_from_auth_jwt(headers)
         if from_auth_jwt:
             print(f"[proxy] resolved user_id from Authorization JWT id={from_auth_jwt}", flush=True)
