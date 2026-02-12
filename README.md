@@ -6,11 +6,12 @@ AutoSkill is a practical implementation of **Experience-driven Lifelong Learning
 It learns from real interaction experience (dialogue + behavior/events), automatically creates reusable Skills,
 and continuously evolves existing Skills through merge + version updates.
 
+![AutoSkill Framework](imgs/Framework.png)
+
 ## News
 
 - **2025-02-04**: **AutoSkill 1.0** released.
 
-![AutoSkill Framework](imgs/Framework.png)
 
 ## 1. Start Here: Web UI
 
@@ -114,7 +115,7 @@ and evolves the version from `v0.1.0` to `v0.1.1`.
 *Caption: Daily scenario — later user feedback updates constraints and evolves the skill to `v0.1.1`.*
 
 ![Skill Update (Science)](imgs/science_skill_update.png)
-*Caption: Science scenario — follow-up technical feedback updates the existing science skill instead of creating duplicates (`v0.1.1`).*
+*Caption: Science scenario — follow-up technical feedback updates the existing science skill instead of creating duplicates (`v0.1.2`).*
 
 ### C) Skill Usage
 
