@@ -13,6 +13,7 @@ Typical usage:
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any, Dict
 
 from autoskill import AutoSkill, AutoSkillConfig
@@ -55,7 +56,7 @@ def main() -> None:
     parser.add_argument("--rewrite-mode", default=_env("AUTOSKILL_REWRITE_MODE", "always"), help="never|auto|always")
     parser.add_argument("--min-score", type=float, default=float(_env("AUTOSKILL_MIN_SCORE", "0.4")))
     parser.add_argument("--top-k", type=int, default=int(_env("AUTOSKILL_TOP_K", "1")))
-    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "20")))
+    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "100")))
     parser.add_argument("--ingest-window", type=int, default=int(_env("AUTOSKILL_INGEST_WINDOW", "6")))
     parser.add_argument("--extract-enabled", default=_env("AUTOSKILL_EXTRACT_ENABLED", "1"), help="1|0")
     parser.add_argument(
@@ -84,6 +85,18 @@ def main() -> None:
         action="append",
         default=[],
         help="Additional read-only library root (can be passed multiple times).",
+    )
+    parser.add_argument(
+        "--served-model",
+        action="append",
+        default=[],
+        help="Model id exposed by /v1/models (repeat this flag for multiple models).",
+    )
+    parser.add_argument(
+        "--served-models-json",
+        default=_env("AUTOSKILL_PROXY_MODELS", ""),
+        help="Optional JSON list for /v1/models, e.g. "
+        "'[{\"id\":\"gpt-5.2\"},{\"id\":\"gemini-3-pro-preview\",\"object\":\"gemini\"}]'.",
     )
     args = parser.parse_args()
 
@@ -119,6 +132,19 @@ def main() -> None:
         "false",
         "no",
     }
+    served_models: list[dict[str, Any] | str] = []
+    for mid in list(args.served_model or []):
+        m = str(mid or "").strip()
+        if m:
+            served_models.append(m)
+    raw_models_json = str(args.served_models_json or "").strip()
+    if raw_models_json:
+        try:
+            parsed_models = json.loads(raw_models_json)
+            if isinstance(parsed_models, list):
+                served_models.extend(parsed_models)
+        except Exception:
+            print("[proxy] warning: invalid --served-models-json / AUTOSKILL_PROXY_MODELS, ignored.")
 
     proxy_cfg = AutoSkillProxyConfig(
         user_id=str(args.user_id),
@@ -133,6 +159,7 @@ def main() -> None:
         extract_event_include_skill_details=bool(extract_event_details),
         extract_event_max_md_chars=int(args.extract_event_max_md_chars),
         proxy_api_key=(str(args.proxy_api_key).strip() or None),
+        served_models=served_models,
     ).normalize()
 
     runtime = AutoSkillProxyRuntime(

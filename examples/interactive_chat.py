@@ -316,7 +316,7 @@ def main() -> None:
         help="Additional read-only library root (can be passed multiple times).",
     )
     parser.add_argument("--top-k", type=int, default=int(_env("AUTOSKILL_TOP_K", "1")))
-    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "20")))
+    parser.add_argument("--history-turns", type=int, default=int(_env("AUTOSKILL_HISTORY_TURNS", "100")))
     parser.add_argument("--ingest-window", type=int, default=int(_env("AUTOSKILL_INGEST_WINDOW", "6")))
     parser.add_argument(
         "--extract-turn-limit",

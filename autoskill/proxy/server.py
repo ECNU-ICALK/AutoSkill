@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -141,6 +141,46 @@ def _q_first(qs: Dict[str, List[str]], key: str, default: str = "") -> str:
     if not vals:
         return str(default or "")
     return str(vals[0] or "")
+
+
+def _normalize_served_models(raw: Any) -> List[Dict[str, Any]]:
+    """
+    Normalize configured model catalog entries for `/v1/models`.
+
+    Supported raw item forms:
+    - string: model id
+    - dict: {"id": "...", "object": "...", "owned_by": "...", "created": ...}
+    """
+
+    if not isinstance(raw, list):
+        return []
+    now_ts = int(time.time())
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        model_id = ""
+        obj = "model"
+        owned_by = "openai"
+        created = now_ts
+        if isinstance(item, str):
+            model_id = item.strip()
+        elif isinstance(item, dict):
+            model_id = str(item.get("id") or item.get("model") or "").strip()
+            obj = str(item.get("object") or "model").strip() or "model"
+            owned_by = str(item.get("owned_by") or "openai").strip() or "openai"
+            created = _safe_int(item.get("created"), now_ts) or now_ts
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        out.append(
+            {
+                "id": model_id,
+                "object": obj,
+                "owned_by": owned_by,
+                "created": int(created),
+            }
+        )
+    return out
 
 
 def _decode_jwt_payload_no_verify(token: str) -> Dict[str, Any]:
@@ -527,7 +567,7 @@ class AutoSkillProxyConfig:
     rewrite_mode: str = "always"  # never|auto|always
     min_score: float = 0.4
     top_k: int = 1
-    history_turns: int = 20
+    history_turns: int = 100
     assistant_temperature: float = 0.2
     extract_enabled: bool = True
     ingest_window: int = 6
@@ -536,6 +576,8 @@ class AutoSkillProxyConfig:
     # 0 means no truncation (preferred for editable UI workflows).
     extract_event_max_md_chars: int = 0
     proxy_api_key: Optional[str] = None
+    # Optional static model catalog exposed by GET /v1/models.
+    served_models: List[Dict[str, Any]] = field(default_factory=list)
 
     def normalize(self) -> "AutoSkillProxyConfig":
         self.user_id = str(self.user_id or "u1").strip() or "u1"
@@ -546,7 +588,7 @@ class AutoSkillProxyConfig:
         self.rewrite_mode = mode
         self.min_score = _safe_float(self.min_score, 0.4)
         self.top_k = max(1, int(self.top_k or 1))
-        self.history_turns = max(1, int(self.history_turns or 20))
+        self.history_turns = max(1, int(self.history_turns or 100))
         self.ingest_window = max(2, int(self.ingest_window or 6))
         self.max_bg_extract_jobs = max(1, int(self.max_bg_extract_jobs or 2))
         self.extract_event_include_skill_details = bool(self.extract_event_include_skill_details)
@@ -554,6 +596,7 @@ class AutoSkillProxyConfig:
         self.assistant_temperature = _safe_float(self.assistant_temperature, 0.2)
         key = str(self.proxy_api_key or "").strip()
         self.proxy_api_key = key or None
+        self.served_models = _normalize_served_models(list(self.served_models or []))
         return self
 
 
@@ -673,17 +716,20 @@ class AutoSkillProxyRuntime:
                     return
 
                 if path == "/v1/models":
-                    model = str(runtime.llm_config.get("model") or "autoskill-model")
-                    payload = {
-                        "object": "list",
-                        "data": [
+                    models = list(runtime.config.served_models or [])
+                    if not models:
+                        model = str(runtime.llm_config.get("model") or "autoskill-model")
+                        models = [
                             {
                                 "id": model,
                                 "object": "model",
                                 "created": int(time.time()),
                                 "owned_by": "autoskill-proxy",
                             }
-                        ],
+                        ]
+                    payload = {
+                        "object": "list",
+                        "data": models,
                     }
                     return _json_response(self, payload)
 

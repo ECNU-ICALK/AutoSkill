@@ -39,7 +39,7 @@ class InteractiveConfig:
     min_score: float = 0.4
 
     top_k: int = 1
-    history_turns: int = 20
+    history_turns: int = 100
     ingest_window: int = 6
 
     # Extraction timing signals:
