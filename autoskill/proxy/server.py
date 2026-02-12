@@ -1390,7 +1390,8 @@ class AutoSkillProxyRuntime:
         handler.send_response(200)
         handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Connection", "keep-alive")
+        # For one-shot chat streaming, close socket after [DONE] so curl exits automatically.
+        handler.send_header("Connection", "close")
         handler.send_header("X-Accel-Buffering", "no")
         handler.end_headers()
 
@@ -1402,6 +1403,7 @@ class AutoSkillProxyRuntime:
         def _done() -> None:
             handler.wfile.write(b"data: [DONE]\n\n")
             handler.wfile.flush()
+            handler.close_connection = True
 
         try:
             role_chunk = {
@@ -1455,6 +1457,7 @@ class AutoSkillProxyRuntime:
             )
             _done()
         except BrokenPipeError:
+            handler.close_connection = True
             return
         except Exception as e:
             try:
@@ -1471,6 +1474,8 @@ class AutoSkillProxyRuntime:
                 _done()
             except Exception:
                 pass
+            finally:
+                handler.close_connection = True
 
     def create_embeddings(self, *, body: Dict[str, Any]) -> Dict[str, Any]:
         inp = body.get("input")

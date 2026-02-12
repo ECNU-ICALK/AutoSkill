@@ -50,7 +50,6 @@ python3 -m examples.openai_proxy \
   --llm-provider internlm \
   --embeddings-provider qwen \
   --store-dir Skills \
-  --user-id u1 \
   --skill-scope all \
   --rewrite-mode always \
   --min-score 0.4 \
@@ -63,9 +62,11 @@ python3 -m examples.openai_proxy \
 - `GET /v1/models`
 - `GET /health`
 
-按请求隔离用户：
-- 请求体字段 `user`（推荐）
+按请求隔离用户（部署时 `--user-id` 为可选）：
+- 请求体字段 `user`（最高优先级）
 - 或请求头 `X-AutoSkill-User`
+- 或 `Authorization: Bearer <JWT>` 的 payload 字段 `id`
+- 最后回退到代理默认用户（配置的 `--user-id`，或默认 `u1`）
 
 流式聊天调用示例（`stream=true`）：
 
@@ -74,7 +75,6 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "intern-s1-pro",
-    "user": "u1",
     "stream": true,
     "messages": [
       {"role": "user", "content": "请简要总结技能自进化的核心思路。"}
@@ -398,7 +398,6 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "intern-s1-pro",
-    "user": "u1",
     "stream": true,
     "messages": [
       {"role": "user", "content": "请给出 AutoSkill 的 3 点价值。"}

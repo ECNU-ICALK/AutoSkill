@@ -52,7 +52,6 @@ python3 -m examples.openai_proxy \
   --llm-provider internlm \
   --embeddings-provider qwen \
   --store-dir Skills \
-  --user-id u1 \
   --skill-scope all \
   --rewrite-mode always \
   --min-score 0.4 \
@@ -65,9 +64,11 @@ Endpoints:
 - `GET /v1/models`
 - `GET /health`
 
-Per-request user isolation:
-- request body field `user` (recommended)
+Per-request user isolation (`--user-id` is optional at deploy time):
+- request body field `user` (highest priority)
 - or header `X-AutoSkill-User`
+- or `Authorization: Bearer <JWT>` payload field `id`
+- fallback to proxy default user (configured `--user-id`, or default `u1`)
 
 Streaming chat curl example (`stream=true`):
 
@@ -76,7 +77,6 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "intern-s1-pro",
-    "user": "u1",
     "stream": true,
     "messages": [
       {"role": "user", "content": "Write a concise summary of skill self-evolution."}
@@ -400,7 +400,6 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "intern-s1-pro",
-    "user": "u1",
     "stream": true,
     "messages": [
       {"role": "user", "content": "Give me 3 points about AutoSkill."}
