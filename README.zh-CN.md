@@ -95,7 +95,33 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 -H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
 ```
 
-## 1.2 技能生命周期示例（三个方面）
+## 1.2 一键部署（Docker Compose）
+
+```bash
+cp .env.example .env
+# 编辑 .env，填写 API Key（至少一个对话模型和一个 embedding 模型）
+docker compose up --build -d
+```
+
+启动后访问：
+- Web UI：`http://127.0.0.1:8000`
+- API Proxy：`http://127.0.0.1:9000`
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+Compose 会同时拉起两个服务：
+- `autoskill-web`（`examples.web_ui`）
+- `autoskill-proxy`（`examples.openai_proxy`）
+
+两个服务共享同一份持久化存储：
+- 宿主机：`./SkillBank`
+- 容器内：`/data/SkillBank`
+
+## 1.3 技能生命周期示例（三个方面）
 
 ### A) 自动判断 + 反馈触发抽取与技能管理（v0.1.0）
 
@@ -260,6 +286,8 @@ SkillBank/
 - `web/`：本地 Web UI 静态资源。
 - `SkillBank/`：默认本地技能存储根目录。
 - `imgs/`：README 示例图片。
+- `Dockerfile`：AutoSkill 运行时镜像定义。
+- `docker-compose.yml`：Web UI + API Proxy 一键编排部署。
 
 ### 6.2 SDK 核心模块
 

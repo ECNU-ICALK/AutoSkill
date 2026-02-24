@@ -1,0 +1,116 @@
+services:
+  autoskill-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autoskill-web
+    command:
+      - python3
+      - -m
+      - examples.web_ui
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --llm-provider
+      - "${AUTOSKILL_LLM_PROVIDER:-internlm}"
+      - --embeddings-provider
+      - "${AUTOSKILL_EMBEDDINGS_PROVIDER:-qwen}"
+      - --store-dir
+      - /data/SkillBank
+      - --user-id
+      - "${AUTOSKILL_USER_ID:-u1}"
+      - --skill-scope
+      - "${AUTOSKILL_SKILL_SCOPE:-all}"
+      - --rewrite-mode
+      - "${AUTOSKILL_REWRITE_MODE:-always}"
+      - --extract-mode
+      - "${AUTOSKILL_EXTRACT_MODE:-auto}"
+      - --extract-turn-limit
+      - "${AUTOSKILL_EXTRACT_TURN_LIMIT:-1}"
+      - --min-score
+      - "${AUTOSKILL_MIN_SCORE:-0.4}"
+      - --top-k
+      - "${AUTOSKILL_TOP_K:-1}"
+    environment:
+      INTERNLM_API_KEY: "${INTERNLM_API_KEY:-}"
+      INTERN_API_KEY: "${INTERN_API_KEY:-}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      ZHIPUAI_API_KEY: "${ZHIPUAI_API_KEY:-}"
+      BIGMODEL_API_KEY: "${BIGMODEL_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      AUTOSKILL_GENERIC_API_KEY: "${AUTOSKILL_GENERIC_API_KEY:-}"
+      AUTOSKILL_GENERIC_LLM_URL: "${AUTOSKILL_GENERIC_LLM_URL:-}"
+      AUTOSKILL_GENERIC_LLM_MODEL: "${AUTOSKILL_GENERIC_LLM_MODEL:-}"
+      AUTOSKILL_GENERIC_EMBED_URL: "${AUTOSKILL_GENERIC_EMBED_URL:-}"
+      AUTOSKILL_GENERIC_EMBED_MODEL: "${AUTOSKILL_GENERIC_EMBED_MODEL:-}"
+      AUTOSKILL_AUTO_NORMALIZE_IDS: "${AUTOSKILL_AUTO_NORMALIZE_IDS:-1}"
+      AUTOSKILL_AUTO_IMPORT_DIRS: "${AUTOSKILL_AUTO_IMPORT_DIRS:-}"
+      AUTOSKILL_AUTO_IMPORT_SCOPE: "${AUTOSKILL_AUTO_IMPORT_SCOPE:-common}"
+      AUTOSKILL_AUTO_IMPORT_LIBRARY: "${AUTOSKILL_AUTO_IMPORT_LIBRARY:-}"
+      AUTOSKILL_AUTO_IMPORT_OVERWRITE: "${AUTOSKILL_AUTO_IMPORT_OVERWRITE:-0}"
+      AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES: "${AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES:-1}"
+      AUTOSKILL_AUTO_IMPORT_MAX_DEPTH: "${AUTOSKILL_AUTO_IMPORT_MAX_DEPTH:-6}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./SkillBank:/data/SkillBank
+    restart: unless-stopped
+
+  autoskill-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autoskill-proxy
+    command:
+      - python3
+      - -m
+      - examples.openai_proxy
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9000"
+      - --llm-provider
+      - "${AUTOSKILL_LLM_PROVIDER:-internlm}"
+      - --embeddings-provider
+      - "${AUTOSKILL_EMBEDDINGS_PROVIDER:-qwen}"
+      - --store-dir
+      - /data/SkillBank
+      - --user-id
+      - "${AUTOSKILL_USER_ID:-u1}"
+      - --skill-scope
+      - "${AUTOSKILL_SKILL_SCOPE:-all}"
+      - --rewrite-mode
+      - "${AUTOSKILL_REWRITE_MODE:-always}"
+      - --min-score
+      - "${AUTOSKILL_MIN_SCORE:-0.4}"
+      - --top-k
+      - "${AUTOSKILL_TOP_K:-1}"
+    environment:
+      INTERNLM_API_KEY: "${INTERNLM_API_KEY:-}"
+      INTERN_API_KEY: "${INTERN_API_KEY:-}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      ZHIPUAI_API_KEY: "${ZHIPUAI_API_KEY:-}"
+      BIGMODEL_API_KEY: "${BIGMODEL_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      AUTOSKILL_GENERIC_API_KEY: "${AUTOSKILL_GENERIC_API_KEY:-}"
+      AUTOSKILL_GENERIC_LLM_URL: "${AUTOSKILL_GENERIC_LLM_URL:-}"
+      AUTOSKILL_GENERIC_LLM_MODEL: "${AUTOSKILL_GENERIC_LLM_MODEL:-}"
+      AUTOSKILL_GENERIC_EMBED_URL: "${AUTOSKILL_GENERIC_EMBED_URL:-}"
+      AUTOSKILL_GENERIC_EMBED_MODEL: "${AUTOSKILL_GENERIC_EMBED_MODEL:-}"
+      AUTOSKILL_PROXY_MODELS: "${AUTOSKILL_PROXY_MODELS:-}"
+      AUTOSKILL_PROXY_API_KEY: "${AUTOSKILL_PROXY_API_KEY:-}"
+      AUTOSKILL_AUTO_NORMALIZE_IDS: "${AUTOSKILL_AUTO_NORMALIZE_IDS:-1}"
+      AUTOSKILL_AUTO_IMPORT_DIRS: "${AUTOSKILL_AUTO_IMPORT_DIRS:-}"
+      AUTOSKILL_AUTO_IMPORT_SCOPE: "${AUTOSKILL_AUTO_IMPORT_SCOPE:-common}"
+      AUTOSKILL_AUTO_IMPORT_LIBRARY: "${AUTOSKILL_AUTO_IMPORT_LIBRARY:-}"
+      AUTOSKILL_AUTO_IMPORT_OVERWRITE: "${AUTOSKILL_AUTO_IMPORT_OVERWRITE:-0}"
+      AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES: "${AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES:-1}"
+      AUTOSKILL_AUTO_IMPORT_MAX_DEPTH: "${AUTOSKILL_AUTO_IMPORT_MAX_DEPTH:-6}"
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./SkillBank:/data/SkillBank
+    restart: unless-stopped

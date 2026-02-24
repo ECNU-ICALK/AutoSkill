@@ -97,7 +97,33 @@ If proxy auth is enabled (`--proxy-api-key`), add:
 -H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
 ```
 
-## 1.2 Skill Lifecycle Example (3 Aspects)
+## 1.2 One-click Deploy (Docker Compose)
+
+```bash
+cp .env.example .env
+# edit .env and fill API keys (at least one LLM provider + one embedding provider)
+docker compose up --build -d
+```
+
+After startup:
+- Web UI: `http://127.0.0.1:8000`
+- API Proxy: `http://127.0.0.1:9000`
+
+Stop services:
+
+```bash
+docker compose down
+```
+
+The compose file starts both services:
+- `autoskill-web` (`examples.web_ui`)
+- `autoskill-proxy` (`examples.openai_proxy`)
+
+Both share persistent local storage:
+- host: `./SkillBank`
+- container: `/data/SkillBank`
+
+## 1.3 Skill Lifecycle Example (3 Aspects)
 
 ### A) Auto Decision + Feedback-triggered Extraction & Skill Management (v0.1.0)
 
@@ -262,6 +288,8 @@ Notes:
 - `web/`: static frontend assets for local Web UI.
 - `SkillBank/`: default local storage root.
 - `imgs/`: README demo images.
+- `Dockerfile`: container image for AutoSkill runtime.
+- `docker-compose.yml`: one-click deployment for Web UI + API Proxy.
 
 ### 6.2 Core SDK Modules
 
