@@ -134,6 +134,26 @@ to generate outputs aligned with user expectations.
 - **Universal skill format**: uses the Agent Skill artifact (`SKILL.md`) with clear explainability and editability: the structure is transparent, content is reviewable, and humans can revise it as needed; this also enables both importing existing skills and migrating extracted skills to other systems.
 - **Standard API service integration**: integrates into existing LLM stacks in a plug-in style; with an OpenAI-compatible proxy, AutoSkill can be adopted without changing business-side calling patterns.
 
+## 2.1 Decoupled Connectors and Vector Backends
+
+- **LLM connector registry**: `build_llm(...)` now supports runtime registration (`register_llm_connector`) and config-driven custom builders (`connector_factory="module:function"`), so new providers can be plugged in without changing SDK internals.
+- **Embedding connector registry**: `build_embeddings(...)` supports the same plugin pattern (`register_embedding_connector` / `connector_factory`), making model integration more LangChain/LiteLLM-like in spirit.
+- **Vector backend abstraction**: local store now uses pluggable vector backends through `build_vector_index(...)`; default is `flat`, and optional backends include `chroma`, `milvus`, and `pinecone` (dependency-based).
+
+Example `store` config:
+
+```python
+store = {
+  "provider": "local",
+  "path": "Skills",
+  "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
+  "vector_backend_config": {
+    # For custom plugin backend:
+    # "backend_factory": "your_pkg.your_module:build_vector_backend"
+  },
+}
+```
+
 ## 3. System Workflow
 
 ### 3.1 Ingest and Evolve
@@ -231,7 +251,7 @@ Notes:
 
 - `autoskill/`: SDK core.
 - `examples/`: runnable demos and entry scripts.
-- `autoskill/proxy/`: OpenAI-compatible reverse proxy runtime.
+- `autoskill/interactive/server.py`: OpenAI-compatible reverse proxy runtime.
 - `web/`: static frontend assets for local Web UI.
 - `Skills/`: default local storage root.
 - `imgs/`: README demo images.
@@ -242,15 +262,16 @@ Notes:
 - `autoskill/config.py`: global config model.
 - `autoskill/models.py`: core data models (`Skill`, `SkillHit`, etc.).
 - `autoskill/render.py`: convert selected skills into injectable context.
+- `autoskill/interactive/unified.py`: unified composition root for interactive + proxy runtime wiring.
 
 ### 6.3 Skill Management Layer
 
-- `autoskill/skill_management/extraction.py`: extraction logic and prompts.
-- `autoskill/skill_management/maintenance.py`: merge/version/add-discard decisions.
-- `autoskill/skill_management/formats/agent_skill.py`: `SKILL.md` render/parse.
-- `autoskill/skill_management/stores/local.py`: directory-based storage + vector mapping.
-- `autoskill/skill_management/vectors/flat.py`: on-disk vector index backend.
-- `autoskill/skill_management/importer.py`: import external Agent Skills.
+- `autoskill/management/extraction.py`: extraction logic and prompts.
+- `autoskill/management/maintenance.py`: merge/version/add-discard decisions.
+- `autoskill/management/formats/agent_skill.py`: `SKILL.md` render/parse.
+- `autoskill/management/stores/local.py`: directory-based storage + vector mapping.
+- `autoskill/management/vectors/flat.py`: on-disk vector index backend.
+- `autoskill/management/importer.py`: import external Agent Skills.
 
 ### 6.4 Interactive Layer
 

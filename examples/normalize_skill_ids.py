@@ -18,7 +18,7 @@ import argparse
 import os
 
 from autoskill.config import default_store_path
-from autoskill.skill_management.formats.agent_skill import load_agent_skill_dir
+from autoskill.management.formats.agent_skill import load_agent_skill_dir
 
 
 def _iter_skill_dirs(root_dir: str, *, max_depth: int) -> list[tuple[str, str]]:

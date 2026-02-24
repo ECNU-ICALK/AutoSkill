@@ -140,6 +140,8 @@ class InteractiveSession:
         # FIFO queue for extraction jobs that arrive while a worker is running.
         self._queued_extract: List[_BgExtractJob] = []
         self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+        # Optional caller-level system instructions injected by API adapters (e.g., proxy).
+        self._caller_system_prompt: str = ""
         self._schedule_vector_prewarm()
 
     def state(self) -> Dict[str, Any]:
@@ -206,6 +208,58 @@ class InteractiveSession:
 
         for ev in self._handle_user_message_stream(raw):
             yield ev
+
+    def run_chat_turn(
+        self,
+        *,
+        history_messages: List[Dict[str, Any]],
+        latest_user: str,
+        caller_system: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Programmatic chat turn API without command parsing.
+
+        This is intended for adapters (proxy/web backends) that already parsed transport-level
+        messages and want a stable, non-private session entrypoint.
+        """
+
+        latest = str(latest_user or "").strip()
+        if not latest:
+            raise ValueError("latest user message is empty")
+        self.messages = [dict(m) for m in (history_messages or [])]
+        self._pending = None
+        self._caller_system_prompt = str(caller_system or "").strip()
+        try:
+            return self._handle_user_message(latest)
+        finally:
+            self._caller_system_prompt = ""
+
+    def run_chat_turn_stream(
+        self,
+        *,
+        history_messages: List[Dict[str, Any]],
+        latest_user: str,
+        caller_system: str = "",
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Streaming variant of `run_chat_turn` without command parsing.
+        """
+
+        latest = str(latest_user or "").strip()
+        if not latest:
+            raise ValueError("latest user message is empty")
+        self.messages = [dict(m) for m in (history_messages or [])]
+        self._pending = None
+        self._caller_system_prompt = str(caller_system or "").strip()
+
+        def _gen() -> Iterator[Dict[str, Any]]:
+            try:
+                for ev in self._handle_user_message_stream(latest):
+                    yield ev
+            finally:
+                self._caller_system_prompt = ""
+
+        return _gen()
 
     def _drain_latest_event(self, *, kind: str) -> Optional[Dict[str, Any]]:
         """
@@ -886,6 +940,9 @@ class InteractiveSession:
             )
         else:
             system = "You are a helpful assistant.\n"
+        caller_system = str(getattr(self, "_caller_system_prompt", "") or "").strip()
+        if caller_system:
+            system += f"\n\nCaller System Instructions:\n{caller_system}"
         history = self._format_history(max_turns=self.config.history_turns)
         user = f"Conversation:\n{history}\n\nRespond to the latest user message."
         return system, user

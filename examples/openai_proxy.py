@@ -16,9 +16,9 @@ import argparse
 import json
 from typing import Any, Dict
 
-from autoskill import AutoSkill, AutoSkillConfig
+from autoskill import AutoSkill, AutoSkillConfig, AutoSkillRuntime
 from autoskill.config import default_store_path
-from autoskill.proxy import AutoSkillProxyConfig, AutoSkillProxyRuntime
+from autoskill.interactive import AutoSkillProxyConfig
 
 from .interactive_chat import (
     _env,
@@ -162,12 +162,12 @@ def main() -> None:
         served_models=served_models,
     ).normalize()
 
-    runtime = AutoSkillProxyRuntime(
+    unified = AutoSkillRuntime(
         sdk=sdk,
         llm_config=llm_cfg,
         embeddings_config=emb_cfg,
-        config=proxy_cfg,
     )
+    runtime = unified.new_proxy_runtime(config_override=proxy_cfg)
     server = runtime.create_server(host=str(args.host), port=int(args.port))
     host, port = server.server_address[:2]
     print(f"AutoSkill OpenAI Proxy: http://{host}:{port}")

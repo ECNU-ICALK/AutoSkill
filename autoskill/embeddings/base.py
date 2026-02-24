@@ -15,3 +15,7 @@ class EmbeddingModel(ABC):
     @abstractmethod
     def embed(self, texts: List[str]) -> List[List[float]]:
         raise NotImplementedError
+
+
+# Backward-compatible semantic alias used by plugin-style factory APIs.
+EmbeddingConnector = EmbeddingModel

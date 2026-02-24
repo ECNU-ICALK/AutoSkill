@@ -16,20 +16,20 @@ from dataclasses import asdict
 from typing import Any, Dict, Iterable, List, Optional
 
 from .config import AutoSkillConfig
-from .skill_management.formats.agent_skill import build_agent_skill_files
+from .management.formats.agent_skill import build_agent_skill_files
 from .models import Skill, SkillHit
 from .render import render_skills_context
-from .skill_management.extraction import SkillExtractor, build_default_extractor
-from .skill_management.maintenance import SkillMaintainer
-from .skill_management.artifacts import (
+from .management.extraction import SkillExtractor, build_default_extractor
+from .management.maintenance import SkillMaintainer
+from .management.artifacts import (
     export_skill_dir as _export_skill_dir,
     export_skill_md as _export_skill_md,
     write_skill_dir as _write_skill_dir,
     write_skill_dirs as _write_skill_dirs,
 )
-from .skill_management.importer import import_agent_skill_dirs as _import_agent_skill_dirs
-from .skill_management.stores.base import SkillStore
-from .skill_management.stores.factory import build_store
+from .management.importer import import_agent_skill_dirs as _import_agent_skill_dirs
+from .management.stores.base import SkillStore
+from .management.stores.factory import build_store
 from .utils.time import now_iso
 
 

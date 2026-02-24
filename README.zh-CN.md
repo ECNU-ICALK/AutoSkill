@@ -132,6 +132,26 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - **通用技能格式**：采用 Agent Skill 形态（`SKILL.md`），具备可解释、可编辑的优势：结构清晰、内容可审阅、可按需人工修改；既可导入已有技能，也可将抽取技能迁移到其他系统。
 - **标准接口服务化**：以可插拔方式接入现有大模型；通过 OpenAI 兼容代理，可在不改业务调用形态的情况下接入 AutoSkill。
 
+## 2.1 解耦连接器与向量后端
+
+- **LLM 连接器注册机制**：`build_llm(...)` 支持运行时注册（`register_llm_connector`）和配置化自定义构建器（`connector_factory="module:function"`），新增模型后端无需修改 SDK 内核代码。
+- **Embedding 连接器注册机制**：`build_embeddings(...)` 提供同样的插件化方式（`register_embedding_connector` / `connector_factory`），更接近 LangChain/LiteLLM 的接入体验。
+- **向量后端抽象**：本地技能库通过 `build_vector_index(...)` 接入可插拔向量后端；默认 `flat`，并支持可选 `chroma`、`milvus`、`pinecone`（按依赖启用）。
+
+`store` 配置示例：
+
+```python
+store = {
+  "provider": "local",
+  "path": "Skills",
+  "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
+  "vector_backend_config": {
+    # 自定义插件后端示例：
+    # "backend_factory": "your_pkg.your_module:build_vector_backend"
+  },
+}
+```
+
 ## 3. 系统工作流
 
 ### 3.1 学习与进化流程
@@ -229,7 +249,7 @@ Skills/
 
 - `autoskill/`：SDK 核心实现。
 - `examples/`：可直接运行的示例入口。
-- `autoskill/proxy/`：OpenAI 兼容反向代理运行时。
+- `autoskill/interactive/server.py`：OpenAI 兼容反向代理运行时。
 - `web/`：本地 Web UI 静态资源。
 - `Skills/`：默认本地技能存储根目录。
 - `imgs/`：README 示例图片。
@@ -240,15 +260,16 @@ Skills/
 - `autoskill/config.py`：全局配置模型。
 - `autoskill/models.py`：核心数据结构（`Skill`、`SkillHit` 等）。
 - `autoskill/render.py`：技能上下文渲染。
+- `autoskill/interactive/unified.py`：interactive + proxy 的统一运行时组合入口。
 
 ### 6.3 Skill Management 层
 
-- `autoskill/skill_management/extraction.py`：技能抽取逻辑与提示词。
-- `autoskill/skill_management/maintenance.py`：新增/合并/丢弃和版本演化。
-- `autoskill/skill_management/formats/agent_skill.py`：`SKILL.md` 渲染与解析。
-- `autoskill/skill_management/stores/local.py`：目录存储与向量映射。
-- `autoskill/skill_management/vectors/flat.py`：本地向量索引后端。
-- `autoskill/skill_management/importer.py`：导入外部 Agent Skills。
+- `autoskill/management/extraction.py`：技能抽取逻辑与提示词。
+- `autoskill/management/maintenance.py`：新增/合并/丢弃和版本演化。
+- `autoskill/management/formats/agent_skill.py`：`SKILL.md` 渲染与解析。
+- `autoskill/management/stores/local.py`：目录存储与向量映射。
+- `autoskill/management/vectors/flat.py`：本地向量索引后端。
+- `autoskill/management/importer.py`：导入外部 Agent Skills。
 
 ### 6.4 Interactive 层
 

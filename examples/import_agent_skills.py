@@ -21,7 +21,7 @@ import uuid
 
 from autoskill import AutoSkill, AutoSkillConfig
 from autoskill.config import default_store_path
-from autoskill.skill_management.formats.agent_skill import upsert_skill_md_id
+from autoskill.management.formats.agent_skill import upsert_skill_md_id
 
 
 def _iter_skill_dirs(root_dir: str, *, max_depth: int) -> list[str]:

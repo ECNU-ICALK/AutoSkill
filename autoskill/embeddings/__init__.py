@@ -9,7 +9,17 @@ Built-in providers:
 - `glm`: BigModel embedding-3
 """
 
-from .base import EmbeddingModel
-from .factory import build_embeddings
+from .base import EmbeddingConnector, EmbeddingModel
+from .factory import (
+    build_embeddings,
+    list_embedding_connectors,
+    register_embedding_connector,
+)
 
-__all__ = ["EmbeddingModel", "build_embeddings"]
+__all__ = [
+    "EmbeddingModel",
+    "EmbeddingConnector",
+    "build_embeddings",
+    "register_embedding_connector",
+    "list_embedding_connectors",
+]

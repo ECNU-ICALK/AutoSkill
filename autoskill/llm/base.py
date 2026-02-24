@@ -38,3 +38,7 @@ class LLM(ABC):
         out = self.complete(system=system, user=user, temperature=temperature)
         if out:
             yield str(out)
+
+
+# Backward-compatible semantic alias used by plugin-style factory APIs.
+LLMConnector = LLM
