@@ -157,7 +157,7 @@ class _SessionManager:
         self._trace: Dict[str, Dict[str, Any]] = {}
 
         store_root = os.path.abspath(
-            os.path.expanduser(str(getattr(self.interactive_cfg, "store_dir", "") or "Skills"))
+            os.path.expanduser(str(getattr(self.interactive_cfg, "store_dir", "") or "SkillBank"))
         )
         user_key = str(getattr(self.interactive_cfg, "user_id", "") or "u1").strip() or "u1"
         self._persist_file = os.path.join(store_root, "web_sessions", f"{user_key}.json")

@@ -17,9 +17,9 @@ def _default_store_path() -> str:
     try:
         here = os.path.abspath(os.path.dirname(__file__))
         root = os.path.abspath(os.path.join(here, os.pardir))
-        return os.path.join(root, "Skills")
+        return os.path.join(root, "SkillBank")
     except Exception:
-        return os.path.abspath("Skills")
+        return os.path.abspath("SkillBank")
 
 
 def default_store_path() -> str:
@@ -27,7 +27,7 @@ def default_store_path() -> str:
     Returns the canonical default local store path.
 
     Target location:
-    - <repo_root>/Skills
+    - <repo_root>/SkillBank
     """
 
     return _default_store_path()
@@ -49,7 +49,7 @@ class AutoSkillConfig:
     embeddings: Dict[str, Any] = field(
         default_factory=lambda: {"provider": "hashing", "dims": 256}
     )
-    # Default to local filesystem store (SKILL.md under repo_root/Skills).
+    # Default to local filesystem store (SKILL.md under repo_root/SkillBank).
     store: Dict[str, Any] = field(default_factory=_default_store)
 
     namespace: str = "default"

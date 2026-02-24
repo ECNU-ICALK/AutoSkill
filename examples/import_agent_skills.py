@@ -5,11 +5,11 @@ This script imports an existing set of Agent Skill artifacts (anthropics/skills 
 - each skill is a directory containing `SKILL.md` (and optional scripts/resources)
 
 Import modes:
-- scope=user: parse each `SKILL.md` and upsert into `Skills/Users/<user_id>/...` (maintainable user skills)
-- scope=common: copy each skill directory into `Skills/Common/...` (shared library, treated read-only by the SDK)
+- scope=user: parse each `SKILL.md` and upsert into `SkillBank/Users/<user_id>/...` (maintainable user skills)
+- scope=common: copy each skill directory into `SkillBank/Common/...` (shared library, treated read-only by the SDK)
 
 Run:
-  python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir Skills
+  python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir SkillBank
 """
 
 from __future__ import annotations

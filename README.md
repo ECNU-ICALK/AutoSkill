@@ -24,7 +24,7 @@ python3 -m examples.web_ui \
   --port 8000 \
   --llm-provider internlm \
   --embeddings-provider qwen \
-  --store-dir Skills \
+  --store-dir SkillBank \
   --user-id u1 \
   --skill-scope all \
   --rewrite-mode always \
@@ -51,7 +51,9 @@ python3 -m examples.openai_proxy \
   --port 9000 \
   --llm-provider internlm \
   --embeddings-provider qwen \
-  --store-dir Skills \
+  --served-model intern-s1-pro \
+  --served-model gpt-5.2 \
+  --store-dir SkillBank \
   --skill-scope all \
   --rewrite-mode always \
   --min-score 0.4 \
@@ -63,6 +65,11 @@ Endpoints:
 - `POST /v1/embeddings`
 - `GET /v1/models`
 - `GET /health`
+
+Model catalog (`/v1/models`):
+- use `--served-model <model_id>` repeatedly, or
+- use `--served-models-json '[{"id":"gpt-5.2"},{"id":"gemini-3-pro-preview","object":"gemini","owned_by":"openai"}]'`
+- if not configured, proxy returns the currently configured LLM model as a single default entry
 
 Per-request user isolation (`--user-id` is optional at deploy time):
 - request body field `user` (highest priority)
@@ -115,7 +122,7 @@ and evolves the version from `v0.1.0` to `v0.1.1`.
 *Caption: Daily scenario — later user feedback updates constraints and evolves the skill to `v0.1.1`.*
 
 ![Skill Update (Science)](imgs/science_skill_update.png)
-*Caption: Science scenario — follow-up technical feedback updates the existing science skill instead of creating duplicates (`v0.1.2`).*
+*Caption: Science scenario — follow-up technical feedback updates the existing science skill instead of creating duplicates (`v0.1.1`).*
 
 ### C) Skill Usage
 
@@ -145,7 +152,7 @@ Example `store` config:
 ```python
 store = {
   "provider": "local",
-  "path": "Skills",
+  "path": "SkillBank",
   "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
   "vector_backend_config": {
     # For custom plugin backend:
@@ -219,10 +226,10 @@ Client (OpenAI-compatible request)
 
 ## 5. Storage Layout (Local Store)
 
-When using `store={"provider": "local", "path": "Skills"}`:
+When using `store={"provider": "local", "path": "SkillBank"}`:
 
 ```text
-Skills/
+SkillBank/
   Users/
     <user_id>/
       <skill-slug>/
@@ -253,7 +260,7 @@ Notes:
 - `examples/`: runnable demos and entry scripts.
 - `autoskill/interactive/server.py`: OpenAI-compatible reverse proxy runtime.
 - `web/`: static frontend assets for local Web UI.
-- `Skills/`: default local storage root.
+- `SkillBank/`: default local storage root.
 - `imgs/`: README demo images.
 
 ### 6.2 Core SDK Modules
@@ -304,7 +311,7 @@ sdk = AutoSkill(
     AutoSkillConfig(
         llm={"provider": "mock"},
         embeddings={"provider": "hashing", "dims": 256},
-        store={"provider": "local", "path": "Skills"},
+        store={"provider": "local", "path": "SkillBank"},
     )
 )
 
@@ -354,6 +361,19 @@ export INTERNLM_API_KEY="YOUR_INTERNLM_TOKEN"
 python3 -m examples.interactive_chat --llm-provider internlm --llm-model intern-s1-pro
 ```
 
+### 8.5 Generic URL-based Backends (LLM + Embeddings)
+
+```bash
+export AUTOSKILL_GENERIC_LLM_URL="http://35.220.164.252:3888/v1"
+export AUTOSKILL_GENERIC_LLM_MODEL="gpt-5.2"
+export AUTOSKILL_GENERIC_EMBED_URL="http://s-20260204155338-p8gv8.ailab-evalservice.pjh-service.org.cn/v1"
+export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3vl8b"
+# Optional (can be empty):
+export AUTOSKILL_GENERIC_API_KEY=""
+
+python3 -m examples.interactive_chat --llm-provider generic --embeddings-provider generic
+```
+
 ## 9. Common Workflows
 
 ### 9.1 Interactive Chat (retrieve every turn)
@@ -384,13 +404,13 @@ python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ### 9.3 Import Existing Agent Skills
 
 ```bash
-python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir Skills
+python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir SkillBank
 ```
 
 ### 9.4 Normalize Missing Skill IDs
 
 ```bash
-python3 -m examples.normalize_skill_ids --store-dir Skills
+python3 -m examples.normalize_skill_ids --store-dir SkillBank
 ```
 
 ### 9.5 OpenAI-Compatible Proxy API

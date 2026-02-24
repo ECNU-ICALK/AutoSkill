@@ -9,7 +9,7 @@ What it does:
 
 Environment variables:
 - `ZHIPUAI_API_KEY` / `BIGMODEL_API_KEY`: "id.secret"
-- `AUTOSKILL_STORE_DIR`: default <repo_root>/Skills
+- `AUTOSKILL_STORE_DIR`: default <repo_root>/SkillBank
 - `BIGMODEL_AUTH_MODE`: auto/jwt/api_key (default: auto)
 - `BIGMODEL_TOKEN_TIME_UNIT`: ms/s (default: ms)
 - `BIGMODEL_BASE_URL`: default https://open.bigmodel.cn/api/paas/v4

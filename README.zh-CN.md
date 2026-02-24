@@ -22,7 +22,7 @@ python3 -m examples.web_ui \
   --port 8000 \
   --llm-provider internlm \
   --embeddings-provider qwen \
-  --store-dir Skills \
+  --store-dir SkillBank \
   --user-id u1 \
   --skill-scope all \
   --rewrite-mode always \
@@ -49,7 +49,9 @@ python3 -m examples.openai_proxy \
   --port 9000 \
   --llm-provider internlm \
   --embeddings-provider qwen \
-  --store-dir Skills \
+  --served-model intern-s1-pro \
+  --served-model gpt-5.2 \
+  --store-dir SkillBank \
   --skill-scope all \
   --rewrite-mode always \
   --min-score 0.4 \
@@ -61,6 +63,11 @@ python3 -m examples.openai_proxy \
 - `POST /v1/embeddings`
 - `GET /v1/models`
 - `GET /health`
+
+模型列表（`/v1/models`）配置方式：
+- 使用 `--served-model <model_id>` 多次传入，或
+- 使用 `--served-models-json '[{"id":"gpt-5.2"},{"id":"gemini-3-pro-preview","object":"gemini","owned_by":"openai"}]'`
+- 若未配置，代理会返回当前 LLM 配置模型作为单条默认项
 
 按请求隔离用户（部署时 `--user-id` 为可选）：
 - 请求体字段 `user`（最高优先级）
@@ -143,7 +150,7 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 ```python
 store = {
   "provider": "local",
-  "path": "Skills",
+  "path": "SkillBank",
   "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
   "vector_backend_config": {
     # 自定义插件后端示例：
@@ -217,10 +224,10 @@ store = {
 
 ## 5. 本地存储结构（Local Store）
 
-当使用 `store={"provider": "local", "path": "Skills"}`：
+当使用 `store={"provider": "local", "path": "SkillBank"}`：
 
 ```text
-Skills/
+SkillBank/
   Users/
     <user_id>/
       <skill-slug>/
@@ -251,7 +258,7 @@ Skills/
 - `examples/`：可直接运行的示例入口。
 - `autoskill/interactive/server.py`：OpenAI 兼容反向代理运行时。
 - `web/`：本地 Web UI 静态资源。
-- `Skills/`：默认本地技能存储根目录。
+- `SkillBank/`：默认本地技能存储根目录。
 - `imgs/`：README 示例图片。
 
 ### 6.2 SDK 核心模块
@@ -302,7 +309,7 @@ sdk = AutoSkill(
     AutoSkillConfig(
         llm={"provider": "mock"},
         embeddings={"provider": "hashing", "dims": 256},
-        store={"provider": "local", "path": "Skills"},
+        store={"provider": "local", "path": "SkillBank"},
     )
 )
 
@@ -352,6 +359,19 @@ export INTERNLM_API_KEY="YOUR_INTERNLM_TOKEN"
 python3 -m examples.interactive_chat --llm-provider internlm --llm-model intern-s1-pro
 ```
 
+### 8.5 通用 URL 后端（LLM + Embedding）
+
+```bash
+export AUTOSKILL_GENERIC_LLM_URL="http://35.220.164.252:3888/v1"
+export AUTOSKILL_GENERIC_LLM_MODEL="gpt-5.2"
+export AUTOSKILL_GENERIC_EMBED_URL="http://s-20260204155338-p8gv8.ailab-evalservice.pjh-service.org.cn/v1"
+export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3vl8b"
+# 可选（可以为空）：
+export AUTOSKILL_GENERIC_API_KEY=""
+
+python3 -m examples.interactive_chat --llm-provider generic --embeddings-provider generic
+```
+
 ## 9. 常用工作流
 
 ### 9.1 终端交互（每轮检索）
@@ -382,13 +402,13 @@ python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ### 9.3 导入已有 Agent Skills
 
 ```bash
-python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir Skills
+python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir SkillBank
 ```
 
 ### 9.4 规范化缺失的技能 ID
 
 ```bash
-python3 -m examples.normalize_skill_ids --store-dir Skills
+python3 -m examples.normalize_skill_ids --store-dir SkillBank
 ```
 
 ### 9.5 OpenAI 兼容代理 API

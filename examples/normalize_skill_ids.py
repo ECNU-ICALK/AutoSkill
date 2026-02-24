@@ -1,5 +1,5 @@
 """
-Normalize SKILL.md frontmatter IDs for a local Skills store.
+Normalize SKILL.md frontmatter IDs for a local SkillBank store.
 
 Why:
 - External Agent Skill libraries often omit `id:` in SKILL.md.
@@ -7,9 +7,9 @@ Why:
   artifact self-contained and avoids brittle ID inference later.
 
 Run:
-  python3 -m examples.normalize_skill_ids --store-dir Skills --scope common
-  python3 -m examples.normalize_skill_ids --store-dir Skills --scope user --user-id u1
-  python3 -m examples.normalize_skill_ids --store-dir Skills --scope all --dry-run
+  python3 -m examples.normalize_skill_ids --store-dir SkillBank --scope common
+  python3 -m examples.normalize_skill_ids --store-dir SkillBank --scope user --user-id u1
+  python3 -m examples.normalize_skill_ids --store-dir SkillBank --scope all --dry-run
 """
 
 from __future__ import annotations
