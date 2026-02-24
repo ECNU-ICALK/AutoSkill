@@ -37,6 +37,7 @@ from autoskill.interactive.skill_versions import (
     pop_skill_snapshot as _pop_skill_snapshot,
     push_skill_snapshot as _push_skill_snapshot,
 )
+from autoskill.management.bootstrap import run_service_startup_maintenance
 from autoskill.llm.factory import build_llm
 from autoskill.models import Skill, SkillExample
 
@@ -1244,6 +1245,11 @@ def main() -> None:
             store=store_cfg,
             maintenance_strategy=("llm" if llm_provider != "mock" else "heuristic"),
         )
+    )
+    run_service_startup_maintenance(
+        sdk=sdk,
+        default_user_id=str(interactive_cfg.user_id or "u1"),
+        log_prefix="[web]",
     )
 
     chat_llm = None if llm_provider == "mock" else build_llm(llm_cfg)

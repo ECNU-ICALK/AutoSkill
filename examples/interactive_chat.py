@@ -12,7 +12,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from autoskill import AutoSkill, AutoSkillConfig
+from autoskill import AutoSkill, AutoSkillConfig, AutoSkillRuntime
 from autoskill.config import default_store_path
 from autoskill.interactive import (
     ConsoleIO,
@@ -379,7 +379,6 @@ def main() -> None:
             maintenance_strategy=("llm" if llm_provider != "mock" else "heuristic"),
         )
     )
-
     chat_llm = None if llm_provider == "mock" else build_llm(llm_cfg)
 
     query_rewriter = None
@@ -409,13 +408,22 @@ def main() -> None:
 
     # print("skill_selector", skill_selector)
     # print("query_rewriter", query_rewriter)
-    app = InteractiveChatApp(
+    runtime = AutoSkillRuntime(
         sdk=sdk,
-        config=interactive_cfg,
-        io=ConsoleIO(),
-        chat_llm=chat_llm,
+        llm_config=llm_cfg,
+        embeddings_config=emb_cfg,
+        interactive_config=interactive_cfg,
         query_rewriter=query_rewriter,
         skill_selector=skill_selector,
+    )
+
+    app = InteractiveChatApp(
+        sdk=runtime.sdk,
+        config=runtime.interactive_config,
+        io=ConsoleIO(),
+        chat_llm=chat_llm,
+        query_rewriter=runtime.query_rewriter,
+        skill_selector=runtime.skill_selector,
     )
     app.run()
 

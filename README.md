@@ -292,15 +292,8 @@ Notes:
 - `examples/web_ui.py`: local Web UI server.
 - `examples/interactive_chat.py`: CLI interactive chat.
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
-- `examples/proxy_health_check.py`: proxy endpoint and streaming health check.
-- `examples/import_agent_skills.py`: bulk import existing skills.
-- `examples/normalize_skill_ids.py`: normalize missing IDs in `SKILL.md`.
-- `examples/dashscope_qwen_chat.py`: DashScope chat API demo.
-- `examples/dashscope_qwen_embeddings.py`: DashScope embeddings API demo.
-- `examples/bigmodel_glm_embed_extract.py`: GLM + embedding online extraction demo.
-- `examples/bigmodel_glm_persistent_store.py`: GLM + local persistent store demo.
+- `examples/proxy_health_check.py`: proxy endpoint health checks and large-scale eval runs.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
-- `examples/local_persistent_store.py`: offline local persistence demo.
 
 ## 7. Quick SDK Usage
 
@@ -401,19 +394,22 @@ export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ```
 
-### 9.3 Import Existing Agent Skills
+### 9.3 Startup Offline Maintenance (Auto)
 
-```bash
-python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir SkillBank
-```
+When service runtime starts (`web_ui`, `interactive_chat`, `openai_proxy`), AutoSkill now runs offline checks automatically:
+- normalize missing `id:` in `SKILL.md` under local store
+- optionally import external skill directories when `AUTOSKILL_AUTO_IMPORT_DIRS` is configured
 
-### 9.4 Normalize Missing Skill IDs
+Optional environment controls:
+- `AUTOSKILL_AUTO_NORMALIZE_IDS` (default: `1`)
+- `AUTOSKILL_AUTO_IMPORT_DIRS` (comma-separated paths)
+- `AUTOSKILL_AUTO_IMPORT_SCOPE` (`common`|`user`, default: `common`)
+- `AUTOSKILL_AUTO_IMPORT_LIBRARY` (target library name when scope=`common`)
+- `AUTOSKILL_AUTO_IMPORT_OVERWRITE` (default: `0`)
+- `AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES` (default: `1`)
+- `AUTOSKILL_AUTO_IMPORT_MAX_DEPTH` (default: `6`)
 
-```bash
-python3 -m examples.normalize_skill_ids --store-dir SkillBank
-```
-
-### 9.5 OpenAI-Compatible Proxy API
+### 9.4 OpenAI-Compatible Proxy API
 
 ```bash
 export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
@@ -471,7 +467,7 @@ Retrieval and extraction:
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events` (SSE)
 
-### 9.6 Proxy Health Check Script
+### 9.5 Proxy Health Check Script
 
 ```bash
 python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000

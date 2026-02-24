@@ -17,6 +17,7 @@ from .rewriting import LLMQueryRewriter
 from .selection import LLMSkillSelector
 from .server import AutoSkillProxyConfig, AutoSkillProxyRuntime
 from .session import InteractiveSession
+from ..management.bootstrap import run_service_startup_maintenance
 from ..llm.factory import build_llm
 
 
@@ -43,6 +44,11 @@ class AutoSkillRuntime:
         self.embeddings_config = dict(embeddings_config or {})
         self.interactive_config = (interactive_config or InteractiveConfig()).normalize()
         self.proxy_config = (proxy_config or AutoSkillProxyConfig()).normalize()
+        self.startup_maintenance = run_service_startup_maintenance(
+            sdk=self.sdk,
+            default_user_id=str(self.interactive_config.user_id or "u1"),
+            log_prefix="[runtime]",
+        )
 
         if query_rewriter is not None:
             self.query_rewriter = query_rewriter

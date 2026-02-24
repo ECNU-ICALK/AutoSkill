@@ -290,15 +290,8 @@ SkillBank/
 - `examples/web_ui.py`：本地 Web UI 服务。
 - `examples/interactive_chat.py`：终端交互式对话。
 - `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
-- `examples/proxy_health_check.py`：代理端点与流式健康检查。
-- `examples/import_agent_skills.py`：导入已有技能。
-- `examples/normalize_skill_ids.py`：补齐/规范化技能 ID。
-- `examples/dashscope_qwen_chat.py`：百炼聊天 API 示例。
-- `examples/dashscope_qwen_embeddings.py`：百炼向量 API 示例。
-- `examples/bigmodel_glm_embed_extract.py`：GLM + 向量在线抽取示例。
-- `examples/bigmodel_glm_persistent_store.py`：GLM + 本地持久化示例。
+- `examples/proxy_health_check.py`：代理端点健康检查与大规模评测脚本。
 - `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
-- `examples/local_persistent_store.py`：离线本地持久化示例。
 
 ## 7. SDK 最小使用示例
 
@@ -399,19 +392,22 @@ export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
 python3 -m examples.web_ui --llm-provider internlm --embeddings-provider qwen
 ```
 
-### 9.3 导入已有 Agent Skills
+### 9.3 启动时离线维护（自动执行）
 
-```bash
-python3 -m examples.import_agent_skills --root-dir /path/to/skills --scope common --store-dir SkillBank
-```
+服务启动（`web_ui`、`interactive_chat`、`openai_proxy`）时，AutoSkill 会自动离线执行：
+- 检查并补齐本地技能库中 `SKILL.md` 缺失的 `id:`
+- 当配置 `AUTOSKILL_AUTO_IMPORT_DIRS` 时，自动导入外部技能目录
 
-### 9.4 规范化缺失的技能 ID
+可选环境变量：
+- `AUTOSKILL_AUTO_NORMALIZE_IDS`（默认 `1`）
+- `AUTOSKILL_AUTO_IMPORT_DIRS`（逗号分隔目录）
+- `AUTOSKILL_AUTO_IMPORT_SCOPE`（`common`|`user`，默认 `common`）
+- `AUTOSKILL_AUTO_IMPORT_LIBRARY`（当 scope=`common` 时的目标库名）
+- `AUTOSKILL_AUTO_IMPORT_OVERWRITE`（默认 `0`）
+- `AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES`（默认 `1`）
+- `AUTOSKILL_AUTO_IMPORT_MAX_DEPTH`（默认 `6`）
 
-```bash
-python3 -m examples.normalize_skill_ids --store-dir SkillBank
-```
-
-### 9.5 OpenAI 兼容代理 API
+### 9.4 OpenAI 兼容代理 API
 
 ```bash
 export INTERNLM_API_KEY="YOUR_INTERNLM_API_KEY"
@@ -469,7 +465,7 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events`（SSE）
 
-### 9.6 代理健康检查脚本
+### 9.5 代理健康检查脚本
 
 ```bash
 python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
