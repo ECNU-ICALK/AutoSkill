@@ -19,7 +19,9 @@ from typing import Dict, List, Optional
 
 from ...models import Skill, SkillExample
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
+_SLUG_RE = re.compile(r"[^\w-]+", re.UNICODE)
+_WS_RE = re.compile(r"\s+", re.UNICODE)
+_DASH_RE = re.compile(r"-{2,}")
 
 
 def skill_dir_name(skill: Skill) -> str:
@@ -29,7 +31,7 @@ def skill_dir_name(skill: Skill) -> str:
 
     slug = _slugify(skill.name)
     if not slug:
-        slug = _slugify(skill.id) or "skill"
+        slug = _slugify(skill.description) or "skill"
     return slug
 
 
@@ -233,7 +235,9 @@ def _q(value: str) -> str:
 def _slugify(text: str) -> str:
     s = (text or "").strip().lower()
     s = s.replace("/", "-").replace("\\", "-")
-    s = _SLUG_RE.sub("-", s).strip("-")
+    s = _WS_RE.sub("-", s)
+    s = _SLUG_RE.sub("-", s)
+    s = _DASH_RE.sub("-", s).strip("-_")
     return s[:64]
 
 

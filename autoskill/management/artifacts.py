@@ -54,7 +54,7 @@ def write_skill_dir(store: SkillStore, skill_id: str, *, root_dir: str) -> Optio
 def write_skill_dirs(store: SkillStore, *, user_id: str, root_dir: str) -> List[str]:
     """
     Writes all active skills for a user as Agent Skill artifacts (one folder per skill).
-    Directory names are derived from `skill.name` and de-duplicated with an id suffix.
+    Directory names are derived from skill text fields and de-duplicated with numeric suffixes.
     """
 
     skills = store.list(user_id=user_id)
@@ -64,7 +64,10 @@ def write_skill_dirs(store: SkillStore, *, user_id: str, root_dir: str) -> List[
         base = skill_dir_name(s)
         dir_name = base
         if dir_name in used:
-            dir_name = f"{base}-{(s.id or '')[:8]}"
+            i = 2
+            while f"{base}-{i}" in used:
+                i += 1
+            dir_name = f"{base}-{i}"
         used.add(dir_name)
 
         files = export_skill_dir(store, s.id) or {}

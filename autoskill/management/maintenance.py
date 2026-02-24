@@ -21,6 +21,13 @@ from typing import Dict, List, Optional, Tuple
 from ..config import AutoSkillConfig
 from .extraction import SkillCandidate, SkillExtractor
 from .formats.agent_skill import build_agent_skill_files
+from .identity import (
+    META_IDENTITY_DESC_HASH,
+    META_IDENTITY_DESC_NORM,
+    identity_desc_norm_from_fields,
+    identity_hash_from_norm,
+    normalize_identity_text,
+)
 from ..llm.factory import build_llm
 from ..models import Skill, SkillExample
 from .stores.base import SkillStore
@@ -86,6 +93,35 @@ def _clip01(x: float) -> float:
     if v > 1.0:
         return 1.0
     return v
+
+
+def _candidate_identity_desc_norm(cand: SkillCandidate) -> str:
+    return identity_desc_norm_from_fields(
+        description=str(getattr(cand, "description", "") or ""),
+        name=str(getattr(cand, "name", "") or ""),
+    )
+
+
+def _skill_identity_desc_norm(skill: Skill) -> str:
+    md = dict(getattr(skill, "metadata", {}) or {})
+    from_md = normalize_identity_text(str(md.get(META_IDENTITY_DESC_NORM) or ""))
+    if from_md:
+        return from_md
+    return identity_desc_norm_from_fields(
+        description=str(getattr(skill, "description", "") or ""),
+        name=str(getattr(skill, "name", "") or ""),
+    )
+
+
+def _sort_skills_by_recency(skills: List[Skill]) -> List[Skill]:
+    return sorted(
+        list(skills or []),
+        key=lambda s: (
+            str(getattr(s, "updated_at", "") or ""),
+            str(getattr(s, "id", "") or ""),
+        ),
+        reverse=True,
+    )
 
 
 def _merge_confidence_by_code(
@@ -388,6 +424,58 @@ class SkillMaintainer:
         with self._last_lock:
             self._last_upserted_skill_id_by_user[uid] = sid
 
+    def _find_same_identity_user_skills(
+        self, *, user_id: str, desc_norm: str, limit: int = 8
+    ) -> List[Skill]:
+        """
+        Finds user skills that share the same normalized identity description.
+
+        Fast path:
+        - Local store index: average O(1) lookup + O(k) materialization
+
+        Fallback:
+        - Generic store list scan: O(n)
+        """
+
+        uid = str(user_id or "").strip()
+        key = normalize_identity_text(desc_norm)
+        if not uid or not key:
+            return []
+
+        finder = getattr(self._store, "find_user_skills_by_identity_desc_norm", None)
+        if callable(finder):
+            try:
+                found = finder(user_id=uid, desc_norm=key, limit=int(limit or 8))
+                if isinstance(found, list):
+                    return _sort_skills_by_recency(
+                        [
+                            s
+                            for s in found
+                            if isinstance(s, Skill)
+                            and str(getattr(s, "user_id", "") or "").strip() == uid
+                            and not _is_library_skill(s)
+                        ]
+                    )[: max(1, int(limit or 8))]
+            except Exception:
+                pass
+
+        try:
+            candidates = self._store.list(user_id=uid)
+        except Exception:
+            return []
+
+        out: List[Skill] = []
+        for s in candidates or []:
+            if not isinstance(s, Skill):
+                continue
+            if _is_library_skill(s):
+                continue
+            if str(getattr(s, "user_id", "") or "").strip() != uid:
+                continue
+            if _skill_identity_desc_norm(s) == key:
+                out.append(s)
+        return _sort_skills_by_recency(out)[: max(1, int(limit or 8))]
+
     def apply(
         self,
         candidates: List[SkillCandidate],
@@ -431,8 +519,14 @@ class SkillMaintainer:
                 else _merge(target, cand)
             )
             merged.updated_at = now_iso()
+            merged_meta = _merge_metadata(target.metadata, metadata_clean, cand)
+            merged_meta = _with_identity_metadata(
+                merged_meta,
+                name=str(getattr(merged, "name", "") or ""),
+                description=str(getattr(merged, "description", "") or ""),
+            )
             merged.metadata = _append_version_snapshot(
-                _merge_metadata(target.metadata, metadata_clean, cand),
+                merged_meta,
                 target,
             )
             if self._config.store_sources and cand.source:
@@ -466,6 +560,27 @@ class SkillMaintainer:
                 s = None
             if s is not None and not _is_library_skill(s) and str(getattr(s, "user_id", "")) == str(user_id):
                 previous_skill = s
+
+        # Exact-identity fast path:
+        # if candidate and existing user skill share the same normalized description identity,
+        # merge directly to avoid duplicate folders caused by naming/wording variation.
+        cand_desc_norm = _candidate_identity_desc_norm(cand)
+        if cand_desc_norm:
+            same_identity = self._find_same_identity_user_skills(
+                user_id=user_id, desc_norm=cand_desc_norm, limit=8
+            )
+            if same_identity:
+                target = None
+                if previous_skill is not None:
+                    prev_id = str(getattr(previous_skill, "id", "") or "")
+                    for s in same_identity:
+                        if str(getattr(s, "id", "") or "") == prev_id:
+                            target = s
+                            break
+                if target is None:
+                    target = same_identity[0]
+                if target is not None:
+                    return _persist_merged(target)
 
         prev_threshold = float(
             (self._config.extra or {}).get(
@@ -515,17 +630,23 @@ class SkillMaintainer:
         best_library = next((h for h in similar if _is_library_skill(h.skill)), None)
 
         def _create_new() -> Skill:
+            new_name = cand.name.strip()
+            new_description = cand.description.strip() or new_name
             created = Skill(
                 id=str(uuid.uuid4()),
                 user_id=user_id,
-                name=cand.name.strip(),
-                description=cand.description.strip() or cand.name.strip(),
+                name=new_name,
+                description=new_description,
                 instructions=cand.instructions.strip(),
                 triggers=[t.strip() for t in cand.triggers if t and t.strip()],
                 tags=[t.strip() for t in cand.tags if t and t.strip()],
                 examples=list(cand.examples or []),
                 version="0.1.0",
-                metadata=_merge_metadata({}, metadata_clean, cand),
+                metadata=_with_identity_metadata(
+                    _merge_metadata({}, metadata_clean, cand),
+                    name=new_name,
+                    description=new_description,
+                ),
                 source=cand.source if self._config.store_sources else None,
                 created_at=now_iso(),
                 updated_at=now_iso(),
@@ -965,12 +1086,27 @@ def _merge_metadata(old: Dict, extra: Optional[Dict], cand: SkillCandidate) -> D
     out = dict(old or {})
     if extra:
         out.update(extra)
+
+    desc_norm = _candidate_identity_desc_norm(cand)
+    if desc_norm:
+        out[META_IDENTITY_DESC_NORM] = desc_norm
+        out[META_IDENTITY_DESC_HASH] = identity_hash_from_norm(desc_norm)
+
     prev_conf = out.get("confidence")
     try:
         prev_conf_f = float(prev_conf) if prev_conf is not None else 0.0
     except (TypeError, ValueError):
         prev_conf_f = 0.0
     out["confidence"] = max(prev_conf_f, float(cand.confidence))
+    return out
+
+
+def _with_identity_metadata(metadata: Dict, *, name: str, description: str) -> Dict:
+    out = dict(metadata or {})
+    desc_norm = identity_desc_norm_from_fields(description=description, name=name)
+    if desc_norm:
+        out[META_IDENTITY_DESC_NORM] = desc_norm
+        out[META_IDENTITY_DESC_HASH] = identity_hash_from_norm(desc_norm)
     return out
 
 

@@ -22,7 +22,6 @@ Notes:
 
 from __future__ import annotations
 
-import hashlib
 import collections
 import os
 import re
@@ -33,6 +32,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ...embeddings.base import EmbeddingModel
 from ..formats.agent_skill import load_agent_skill_dir, upsert_skill_md_id
+from ..identity import META_IDENTITY_DESC_NORM, identity_desc_norm_from_fields, normalize_identity_text
 from ...models import Skill, SkillHit, SkillStatus
 from ..vectors import FlatFileVectorIndex, VectorIndex
 from .base import SkillStore
@@ -215,6 +215,9 @@ class LocalSkillStore(SkillStore):
         self._bg_embed_pending: set[str] = set()
         self._bg_embed_queue: "collections.deque[str]" = collections.deque()
         self._bg_embed_thread: Optional[threading.Thread] = None
+        # O(1) exact dedupe index for user skills by normalized description identity.
+        self._identity_desc_index_by_user: Dict[str, Dict[str, set[str]]] = {}
+        self._identity_desc_key_by_skill: Dict[str, Tuple[str, str]] = {}
 
         os.makedirs(self._root_dir, exist_ok=True)
         if self._cache_vectors:
@@ -258,9 +261,34 @@ class LocalSkillStore(SkillStore):
         with self._lock:
             rec = self._records.get(skill.id)
             if rec is not None and rec.scope == "user" and rec.owner == user_id:
-                dir_path = rec.dir_path
+                used_dirs = {
+                    os.path.abspath(r.dir_path)
+                    for sid, r in self._records.items()
+                    if sid != skill.id and r.scope == "user" and r.owner == user_id
+                }
+                old_dir = os.path.abspath(rec.dir_path)
+                dir_path = self._allocate_dir(
+                    skill=skill,
+                    base_dir=user_root,
+                    used_dirs=used_dirs,
+                    exclude_dir=old_dir,
+                )
+                if dir_path != old_dir:
+                    try:
+                        if os.path.isdir(old_dir):
+                            os.makedirs(os.path.dirname(dir_path), exist_ok=True)
+                            shutil.move(old_dir, dir_path)
+                        elif not os.path.exists(dir_path):
+                            os.makedirs(dir_path, exist_ok=True)
+                    except Exception:
+                        dir_path = old_dir
             else:
-                dir_path = self._allocate_dir(skill=skill, base_dir=user_root)
+                used_dirs = {
+                    os.path.abspath(r.dir_path)
+                    for r in self._records.values()
+                    if r.scope == "user" and r.owner == user_id
+                }
+                dir_path = self._allocate_dir(skill=skill, base_dir=user_root, used_dirs=used_dirs)
 
             os.makedirs(dir_path, exist_ok=True)
             self._write_skill_files(skill=skill, dir_path=dir_path)
@@ -270,6 +298,7 @@ class LocalSkillStore(SkillStore):
                 self._index.upsert(skill.id, vector)
                 self._index.save()
 
+            self._deindex_identity_desc_locked(skill.id)
             self._records[skill.id] = _Record(
                 skill=skill,
                 dir_path=dir_path,
@@ -277,6 +306,7 @@ class LocalSkillStore(SkillStore):
                 scope="user",
                 owner=user_id,
             )
+            self._index_identity_desc_locked(self._records[skill.id])
 
     def get(self, skill_id: str) -> Optional[Skill]:
         """Returns a skill by id if loaded in memory."""
@@ -296,6 +326,7 @@ class LocalSkillStore(SkillStore):
                 return False
 
             self._records.pop(skill_id, None)
+            self._deindex_identity_desc_locked(skill_id)
             try:
                 shutil.rmtree(rec.dir_path)
             except Exception:
@@ -673,7 +704,59 @@ class LocalSkillStore(SkillStore):
                     )
 
         with self._lock:
+            self._normalize_loaded_user_dirs(loaded)
             self._records = loaded
+            self._rebuild_identity_desc_index_locked()
+
+    def _normalize_loaded_user_dirs(self, loaded: Dict[str, _Record]) -> None:
+        """
+        Normalizes user skill directory names to text-based slugs.
+
+        This keeps historical stores consistent when older runs created id-like folder names.
+        """
+
+        grouped: Dict[str, List[_Record]] = {}
+        for rec in loaded.values():
+            if rec.scope != "user":
+                continue
+            owner = str(rec.owner or "").strip()
+            if not owner:
+                continue
+            grouped.setdefault(owner, []).append(rec)
+
+        for owner, records in grouped.items():
+            user_root = os.path.join(self._users_root, owner)
+            os.makedirs(user_root, exist_ok=True)
+            used_dirs: set[str] = set()
+
+            # Stable order makes renaming deterministic across runs.
+            ordered = sorted(
+                records,
+                key=lambda r: (
+                    str(getattr(r.skill, "name", "") or "").strip().lower(),
+                    str(getattr(r.skill, "id", "") or "").strip(),
+                ),
+            )
+
+            for rec in ordered:
+                old_dir = os.path.abspath(str(rec.dir_path or ""))
+                new_dir = self._allocate_dir(
+                    skill=rec.skill,
+                    base_dir=user_root,
+                    used_dirs=used_dirs,
+                    exclude_dir=old_dir,
+                )
+                if old_dir and os.path.abspath(new_dir) != old_dir:
+                    try:
+                        if os.path.isdir(old_dir):
+                            os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+                            shutil.move(old_dir, new_dir)
+                        elif not os.path.exists(new_dir):
+                            os.makedirs(new_dir, exist_ok=True)
+                    except Exception:
+                        new_dir = old_dir
+                rec.dir_path = os.path.abspath(new_dir)
+                used_dirs.add(rec.dir_path)
 
     def _load_library_root(
         self, loaded: Dict[str, _Record], *, library_name: str, library_root: str
@@ -700,6 +783,38 @@ class LocalSkillStore(SkillStore):
                 scope="library",
                 owner=lib_name,
             )
+
+    def find_user_skills_by_identity_desc_norm(
+        self, *, user_id: str, desc_norm: str, limit: int = 8
+    ) -> List[Skill]:
+        """
+        Returns user skills that share the same normalized description identity.
+
+        Complexity:
+        - average O(1) bucket lookup + O(k) output materialization
+        """
+
+        uid = str(user_id or "").strip()
+        key = normalize_identity_text(desc_norm)
+        if not uid or not key:
+            return []
+        lim = max(1, int(limit or 8))
+        with self._lock:
+            bucket = self._identity_desc_index_by_user.get(uid, {}).get(key, set())
+            if not bucket:
+                return []
+            out: List[Skill] = []
+            for sid in bucket:
+                rec = self._records.get(str(sid))
+                if rec is None:
+                    continue
+                if rec.scope != "user" or rec.owner != uid:
+                    continue
+                if rec.skill.status == SkillStatus.ARCHIVED:
+                    continue
+                out.append(rec.skill)
+            out.sort(key=lambda s: (str(getattr(s, "updated_at", "") or ""), str(getattr(s, "id", "") or "")), reverse=True)
+            return out[:lim]
 
     def _maybe_persist_missing_id(self, dir_path: str, *, skill_id: str) -> None:
         """
@@ -728,6 +843,56 @@ class LocalSkillStore(SkillStore):
                 f.write(updated)
         except Exception:
             return
+
+    def _identity_desc_norm_for_skill(self, skill: Skill) -> str:
+        md = dict(getattr(skill, "metadata", {}) or {})
+        from_md = normalize_identity_text(str(md.get(META_IDENTITY_DESC_NORM) or ""))
+        if from_md:
+            return from_md
+        return identity_desc_norm_from_fields(
+            description=str(getattr(skill, "description", "") or ""),
+            name=str(getattr(skill, "name", "") or ""),
+        )
+
+    def _rebuild_identity_desc_index_locked(self) -> None:
+        self._identity_desc_index_by_user = {}
+        self._identity_desc_key_by_skill = {}
+        for rec in self._records.values():
+            self._index_identity_desc_locked(rec)
+
+    def _deindex_identity_desc_locked(self, skill_id: str) -> None:
+        sid = str(skill_id or "").strip()
+        if not sid:
+            return
+        prev = self._identity_desc_key_by_skill.pop(sid, None)
+        if not prev:
+            return
+        uid, key = prev
+        by_user = self._identity_desc_index_by_user.get(uid)
+        if not by_user:
+            return
+        bucket = by_user.get(key)
+        if not bucket:
+            return
+        bucket.discard(sid)
+        if not bucket:
+            by_user.pop(key, None)
+        if not by_user:
+            self._identity_desc_index_by_user.pop(uid, None)
+
+    def _index_identity_desc_locked(self, rec: _Record) -> None:
+        if rec.scope != "user":
+            return
+        uid = str(rec.owner or "").strip()
+        sid = str(getattr(rec.skill, "id", "") or "").strip()
+        if not uid or not sid:
+            return
+        key = self._identity_desc_norm_for_skill(rec.skill)
+        if not key:
+            return
+        self._identity_desc_key_by_skill[sid] = (uid, key)
+        by_user = self._identity_desc_index_by_user.setdefault(uid, {})
+        by_user.setdefault(key, set()).add(sid)
 
     def _maybe_migrate_legacy_vector_cache(self) -> None:
         """
@@ -767,28 +932,52 @@ class LocalSkillStore(SkillStore):
         except Exception:
             return
 
-    def _allocate_dir(self, *, skill: Skill, base_dir: str) -> str:
+    def _allocate_dir(
+        self,
+        *,
+        skill: Skill,
+        base_dir: str,
+        used_dirs: Optional[set[str]] = None,
+        exclude_dir: str = "",
+    ) -> str:
         """
         Allocates a stable skill directory path under a user root.
 
-        If slug collision happens, appends an id-based suffix.
+        If slug collision happens, appends a numeric suffix (`-2`, `-3`, ...).
         """
 
         from ..formats.agent_skill import skill_dir_name
 
         base = skill_dir_name(skill) or "skill"
-        candidate = os.path.join(base_dir, base)
+        base_dir_abs = os.path.abspath(base_dir)
+        exclude_abs = os.path.abspath(exclude_dir) if str(exclude_dir or "").strip() else ""
+        if used_dirs is None:
+            used_set = {
+                os.path.abspath(r.dir_path)
+                for r in self._records.values()
+                if r.scope == "user" and os.path.dirname(os.path.abspath(r.dir_path)) == base_dir_abs
+            }
+        else:
+            used_set = {os.path.abspath(p) for p in used_dirs if str(p or "").strip()}
 
-        used_dirs = {
-            r.dir_path
-            for r in self._records.values()
-            if r.scope == "user" and os.path.dirname(r.dir_path) == os.path.abspath(base_dir)
-        }
-        if candidate not in used_dirs and not os.path.exists(candidate):
+        def _is_taken(path: str) -> bool:
+            p_abs = os.path.abspath(path)
+            if exclude_abs and p_abs == exclude_abs:
+                return False
+            if p_abs in used_set:
+                return True
+            return os.path.exists(path)
+
+        candidate = os.path.join(base_dir, base)
+        if not _is_taken(candidate):
             return candidate
 
-        suffix = (skill.id or "")[:8] or _hash_id(skill.id)[:8]
-        return os.path.join(base_dir, f"{base}-{suffix}")
+        i = 2
+        while True:
+            nxt = os.path.join(base_dir, f"{base}-{i}")
+            if not _is_taken(nxt):
+                return nxt
+            i += 1
 
     def _write_skill_files(self, *, skill: Skill, dir_path: str) -> None:
         """
@@ -939,6 +1128,3 @@ class LocalSkillStore(SkillStore):
                 sid_s = str(sid or "").strip()
                 if sid_s:
                     self._bg_embed_pending.discard(sid_s)
-
-def _hash_id(skill_id: str) -> str:
-    return hashlib.sha256(str(skill_id or "").encode("utf-8")).hexdigest()[:40]
