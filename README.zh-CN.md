@@ -9,7 +9,8 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 ## News
 
-- **2025-02-04**：发布 **AutoSkill 1.0**。
+- **2025-03-25**: **AutoSkill-Agent 1.0**即将到来（面向智能体的Skill抽取）。
+- **2025-02-04**：发布 **AutoSkill 1.0**（面向对话的Skill抽取）。
 
 ## 1. 快速开始：Web UI
 
@@ -320,6 +321,7 @@ SkillBank/
 - `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
 - `examples/proxy_health_check.py`：代理端点健康检查与大规模评测脚本。
 - `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
+- `examples/import_openai_conversations.py`：导入 OpenAI 标准对话并自动抽取技能。
 
 ## 7. SDK 最小使用示例
 
@@ -345,6 +347,32 @@ sdk.ingest(
 hits = sdk.search("How should I do a safe release?", user_id="u1", limit=3)
 for h in hits:
     print(h.skill.name, h.score)
+```
+
+### 7.1 导入 OpenAI 对话并自动抽取技能
+
+```python
+from autoskill import AutoSkill, AutoSkillConfig
+
+sdk = AutoSkill(
+    AutoSkillConfig(
+        llm={"provider": "internlm", "model": "intern-s1-pro"},
+        embeddings={"provider": "qwen", "model": "text-embedding-v4"},
+        store={"provider": "local", "path": "SkillBank"},
+    )
+)
+
+result = sdk.import_openai_conversations(
+    user_id="u1",
+    file_path="./data/openai_dialogues.jsonl",  # 支持 .json 或 .jsonl
+    hint="Focus on reusable user preferences and workflows.",
+    continue_on_error=True,
+    max_messages_per_conversation=100,
+)
+
+print("processed:", result["processed"], "upserted:", result["upserted_count"])
+for s in result.get("skills", [])[:5]:
+    print("-", s.get("name"), s.get("version"))
 ```
 
 ## 8. Provider 配置建议
@@ -482,6 +510,7 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 - `GET /v1/autoskill/skills/{skill_id}/export`
 - `POST /v1/autoskill/skills/search`
 - `POST /v1/autoskill/skills/import`
+- `POST /v1/autoskill/conversations/import`
 
 检索与抽取端点：
 

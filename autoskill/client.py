@@ -10,7 +10,9 @@ Responsibilities:
 
 from __future__ import annotations
 
+import json
 import inspect
+import os
 import uuid
 from dataclasses import asdict
 from typing import Any, Dict, Iterable, List, Optional
@@ -201,6 +203,93 @@ class AutoSkill:
             hint=hint,
         )
 
+    def import_openai_conversations(
+        self,
+        *,
+        user_id: str,
+        data: Optional[Any] = None,
+        file_path: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+        hint: Optional[str] = None,
+        continue_on_error: bool = True,
+        max_messages_per_conversation: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Imports OpenAI-format conversation data and runs skill extraction automatically.
+
+        Supported input shapes:
+        - single conversation: {"messages": [...]} or just [...]
+        - dataset list/jsonl of records containing OpenAI messages
+        - OpenAI-style request logs with {"body": {"messages": [...]}} / {"request": {...}}
+        """
+
+        source = data
+        abs_file = ""
+        if source is None and str(file_path or "").strip():
+            abs_file = os.path.abspath(os.path.expanduser(str(file_path)))
+            source = _load_openai_data_from_file(abs_file)
+        if source is None:
+            raise ValueError("import_openai_conversations requires data or file_path")
+
+        conversations = _extract_openai_conversations(source)
+        if not conversations:
+            return {
+                "total_conversations": 0,
+                "processed": 0,
+                "failed": 0,
+                "upserted_count": 0,
+                "skills": [],
+                "errors": [],
+                "source_file": abs_file or None,
+            }
+
+        limit_msgs = max(0, int(max_messages_per_conversation or 0))
+        base_md = dict(metadata or {})
+        base_md.setdefault("channel", "openai_import")
+        if abs_file:
+            base_md.setdefault("source_file", abs_file)
+
+        processed = 0
+        failed = 0
+        errors: List[Dict[str, Any]] = []
+        upserted_by_id: Dict[str, Skill] = {}
+
+        for idx, conv in enumerate(conversations):
+            window = list(conv[-limit_msgs:]) if limit_msgs > 0 else list(conv)
+            if not window:
+                failed += 1
+                errors.append({"index": idx, "error": "empty conversation after normalization"})
+                continue
+
+            md = dict(base_md)
+            md["import_index"] = idx
+            try:
+                updated = self.ingest(
+                    messages=window,
+                    events=None,
+                    user_id=user_id,
+                    metadata=md,
+                    hint=hint,
+                )
+                processed += 1
+                for s in (updated or []):
+                    upserted_by_id[str(getattr(s, "id", "") or "")] = s
+            except Exception as e:
+                failed += 1
+                errors.append({"index": idx, "error": str(e)})
+                if not continue_on_error:
+                    raise
+
+        return {
+            "total_conversations": len(conversations),
+            "processed": processed,
+            "failed": failed,
+            "upserted_count": len(upserted_by_id),
+            "skills": [asdict(s) for s in upserted_by_id.values()],
+            "errors": errors,
+            "source_file": abs_file or None,
+        }
+
     def search(
         self,
         query: str,
@@ -365,3 +454,151 @@ class AutoSkill:
             query=query,
             max_chars=self.config.max_context_chars,
         )
+
+
+def _load_openai_data_from_file(path: str) -> Any:
+    if not os.path.isfile(path):
+        raise ValueError(f"file not found: {path}")
+    if str(path).lower().endswith(".jsonl"):
+        rows: List[Any] = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = str(line or "").strip()
+                if not s:
+                    continue
+                try:
+                    rows.append(json.loads(s))
+                except Exception:
+                    continue
+        return rows
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
+    out: List[List[Dict[str, str]]] = []
+
+    def collect(obj: Any) -> None:
+        if isinstance(obj, list):
+            if _looks_like_messages(obj):
+                msgs = _normalize_openai_messages(obj)
+                if msgs:
+                    out.append(msgs)
+                return
+            for item in obj:
+                collect(item)
+            return
+
+        if not isinstance(obj, dict):
+            return
+
+        # Direct canonical shape: {"messages": [...]}
+        for key in ("messages", "conversation", "dialogue", "history", "chat_history"):
+            v = obj.get(key)
+            if _looks_like_messages(v):
+                msgs = _normalize_openai_messages(v)
+                if msgs:
+                    msgs = _attach_response_message(messages=msgs, record=obj)
+                    out.append(msgs)
+                return
+
+        # Request-log / batch style: {"body": {"messages": [...]}}
+        for key in ("body", "request", "input", "payload"):
+            v = obj.get(key)
+            if isinstance(v, dict) and _looks_like_messages(v.get("messages")):
+                msgs = _normalize_openai_messages(v.get("messages"))
+                if msgs:
+                    msgs = _attach_response_message(messages=msgs, record=obj)
+                    out.append(msgs)
+                return
+
+        # Dataset wrapper shapes.
+        for key in ("data", "items", "records", "conversations", "dialogues", "samples"):
+            v = obj.get(key)
+            if isinstance(v, (list, dict)):
+                collect(v)
+
+    collect(data)
+    return out
+
+
+def _looks_like_messages(raw: Any) -> bool:
+    if not isinstance(raw, list) or not raw:
+        return False
+    if not all(isinstance(x, dict) for x in raw):
+        return False
+    has_message_shape = False
+    for x in raw:
+        if "role" in x:
+            has_message_shape = True
+            break
+        if "content" in x or "text" in x:
+            has_message_shape = True
+            break
+    return has_message_shape
+
+
+def _normalize_openai_messages(raw: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower() or "user"
+        if role not in {"system", "user", "assistant", "tool"}:
+            role = "user"
+        content = _content_to_text(item.get("content")).strip()
+        if not content:
+            continue
+        out.append({"role": role, "content": content})
+    return out
+
+
+def _content_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                if "text" in item:
+                    parts.append(str(item.get("text") or ""))
+                elif "content" in item:
+                    parts.append(str(item.get("content") or ""))
+        return "".join(parts)
+    if isinstance(content, dict):
+        if "text" in content:
+            return str(content.get("text") or "")
+        if "content" in content:
+            return str(content.get("content") or "")
+    return str(content)
+
+
+def _attach_response_message(
+    *,
+    messages: List[Dict[str, str]],
+    record: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    response = record.get("response")
+    if not isinstance(response, dict):
+        return messages
+    assistant_text = ""
+    choices = response.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        msg = first.get("message") if isinstance(first.get("message"), dict) else {}
+        assistant_text = _content_to_text(msg.get("content")).strip()
+    if not assistant_text:
+        assistant_text = _content_to_text(response.get("output_text")).strip()
+    if not assistant_text:
+        return messages
+    if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content", "").strip():
+        return messages
+    out = list(messages)
+    out.append({"role": "assistant", "content": assistant_text})
+    return out

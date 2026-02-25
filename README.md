@@ -10,7 +10,8 @@ and continuously evolves existing Skills through merge + version updates.
 
 ## News
 
-- **2025-02-04**: **AutoSkill 1.0** released.
+- **2025-03-25**: **AutoSkill-Agent 1.0** coming soon (Extracting Skills for Agent).
+- **2025-02-04**: **AutoSkill 1.0** released (Extracting Skills for Diglogue).
 
 
 ## 1. Start Here: Web UI
@@ -322,6 +323,7 @@ Notes:
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 - `examples/proxy_health_check.py`: proxy endpoint health checks and large-scale eval runs.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
+- `examples/import_openai_conversations.py`: import OpenAI-format dialogue data and auto-extract skills.
 
 ## 7. Quick SDK Usage
 
@@ -347,6 +349,32 @@ sdk.ingest(
 hits = sdk.search("How should I do a safe release?", user_id="u1", limit=3)
 for h in hits:
     print(h.skill.name, h.score)
+```
+
+### 7.1 Import OpenAI Conversations and Auto-Extract Skills
+
+```python
+from autoskill import AutoSkill, AutoSkillConfig
+
+sdk = AutoSkill(
+    AutoSkillConfig(
+        llm={"provider": "internlm", "model": "intern-s1-pro"},
+        embeddings={"provider": "qwen", "model": "text-embedding-v4"},
+        store={"provider": "local", "path": "SkillBank"},
+    )
+)
+
+result = sdk.import_openai_conversations(
+    user_id="u1",
+    file_path="./data/openai_dialogues.jsonl",  # .json or .jsonl
+    hint="Focus on reusable user preferences and workflows.",
+    continue_on_error=True,
+    max_messages_per_conversation=100,
+)
+
+print("processed:", result["processed"], "upserted:", result["upserted_count"])
+for s in result.get("skills", [])[:5]:
+    print("-", s.get("name"), s.get("version"))
 ```
 
 ## 8. Provider Setup
@@ -484,6 +512,7 @@ Skill APIs:
 - `GET /v1/autoskill/skills/{skill_id}/export`
 - `POST /v1/autoskill/skills/search`
 - `POST /v1/autoskill/skills/import`
+- `POST /v1/autoskill/conversations/import`
 
 Retrieval and extraction:
 

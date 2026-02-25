@@ -3,6 +3,7 @@ AutoSkill examples package.
 
 Run:
 - `python3 -m examples.basic_ingest_search`
+- `python3 -m examples.import_openai_conversations`
 - `python3 -m examples.interactive_chat`
 - `python3 -m examples.web_ui`
 - `python3 -m examples.openai_proxy`

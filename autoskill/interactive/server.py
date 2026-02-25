@@ -1239,6 +1239,18 @@ class AutoSkillProxyRuntime:
                     code = int(payload.pop("_status", 200))
                     return _json_response(self, payload, status=code)
 
+                if path == "/v1/autoskill/conversations/import":
+                    try:
+                        payload = runtime.import_conversations_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    code = int(payload.pop("_status", 200))
+                    return _json_response(self, payload, status=code)
+
                 if path.startswith("/v1/autoskill/skills/") and path.endswith("/rollback"):
                     try:
                         payload = runtime.rollback_skill_api(path=path, body=body, headers=self.headers)
@@ -1341,6 +1353,9 @@ class AutoSkillProxyRuntime:
                     "search": "/v1/autoskill/skills/search",
                     "import": "/v1/autoskill/skills/import",
                 },
+                "conversations": {
+                    "import": "/v1/autoskill/conversations/import",
+                },
                 "retrieval": {"preview": "/v1/autoskill/retrieval/preview"},
                 "extractions": {
                     "extract_now": "/v1/autoskill/extractions",
@@ -1407,6 +1422,7 @@ class AutoSkillProxyRuntime:
                 "/v1/autoskill/skills/{skill_id}/export": {"get": {"summary": "Export one skill"}},
                 "/v1/autoskill/skills/search": {"post": {"summary": "Search skills"}},
                 "/v1/autoskill/skills/import": {"post": {"summary": "Import Agent Skills"}},
+                "/v1/autoskill/conversations/import": {"post": {"summary": "Import OpenAI-format conversations and extract skills"}},
                 "/v1/autoskill/retrieval/preview": {"post": {"summary": "Preview retrieval pipeline"}},
                 "/v1/autoskill/extractions": {
                     "get": {"summary": "List extraction events"},
@@ -1907,6 +1923,58 @@ class AutoSkillProxyRuntime:
             "object": "list",
             "imported_count": len(imported or []),
             "data": [_skill_summary(s) for s in (imported or [])],
+        }
+
+    def import_conversations_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """
+        Imports OpenAI-format dialogue data and runs extraction immediately.
+
+        Body accepts one of:
+        - {"file_path": "...json|jsonl"}
+        - {"data": ...}
+        - {"conversations": [...]}
+        - {"messages": [...]}  (single conversation)
+        """
+
+        user_id = self._resolve_user_id(body=body, headers=headers)
+        file_path = str(body.get("file_path") or "").strip()
+        data: Any = body.get("data")
+        if data is None:
+            for key in ("conversations", "dialogues", "records", "items", "dataset"):
+                if key in body:
+                    data = body.get(key)
+                    break
+        if data is None and isinstance(body.get("messages"), list):
+            data = {"messages": body.get("messages")}
+
+        if data is None and not file_path:
+            return {
+                "_status": 400,
+                **_openai_error("file_path or data/conversations/messages is required", code="invalid_request"),
+            }
+
+        hint_raw = body.get("hint")
+        hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
+        continue_on_error = _parse_bool(body.get("continue_on_error"), default=True)
+        max_msgs = max(0, int(_safe_int(body.get("max_messages_per_conversation"), 0) or 0))
+        md = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        md2 = dict(md or {})
+        md2.setdefault("channel", "proxy_conversation_import")
+
+        result = self.sdk.import_openai_conversations(
+            user_id=user_id,
+            data=data,
+            file_path=file_path,
+            metadata=md2,
+            hint=hint,
+            continue_on_error=continue_on_error,
+            max_messages_per_conversation=max_msgs,
+        )
+        return {
+            "ok": True,
+            "object": "conversation_import",
+            "user": user_id,
+            **dict(result or {}),
         }
 
     def vector_status_api(self, *, user_id: str, scope: str) -> Dict[str, Any]:
