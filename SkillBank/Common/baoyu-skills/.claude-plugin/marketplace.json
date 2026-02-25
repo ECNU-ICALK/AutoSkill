@@ -1,0 +1,52 @@
+{
+  "name": "baoyu-skills",
+  "owner": {
+    "name": "Jim Liu (宝玉)",
+    "email": "junminliu@gmail.com"
+  },
+  "metadata": {
+    "description": "Skills shared by Baoyu for improving daily work efficiency",
+    "version": "1.35.0"
+  },
+  "plugins": [
+    {
+      "name": "content-skills",
+      "description": "Content generation and publishing skills",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/baoyu-xhs-images",
+        "./skills/baoyu-post-to-x",
+        "./skills/baoyu-post-to-wechat",
+        "./skills/baoyu-article-illustrator",
+        "./skills/baoyu-cover-image",
+        "./skills/baoyu-slide-deck",
+        "./skills/baoyu-comic",
+        "./skills/baoyu-infographic"
+      ]
+    },
+    {
+      "name": "ai-generation-skills",
+      "description": "AI-powered generation backends",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/baoyu-danger-gemini-web",
+        "./skills/baoyu-image-gen"
+      ]
+    },
+    {
+      "name": "utility-skills",
+      "description": "Utility tools for content processing",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/baoyu-danger-x-to-markdown",
+        "./skills/baoyu-compress-image",
+        "./skills/baoyu-url-to-markdown",
+        "./skills/baoyu-format-markdown",
+        "./skills/baoyu-markdown-to-html"
+      ]
+    }
+  ]
+}
