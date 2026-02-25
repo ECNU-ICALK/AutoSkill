@@ -1,7 +1,7 @@
 {
   "version": 1,
   "user_id": "u39",
-  "saved_at_ms": 1772012940895,
+  "saved_at_ms": 1772025494877,
   "sessions": [
     {
       "id": "99a6efdd-a024-4348-92e9-679ae5d90f1f",
@@ -5929,7 +5929,7 @@
             "content": "关于大模型持续迭代机制的政策研究报告"
           }
         ],
-        "pending": true
+        "pending": false
       },
       "trace": {
         "version": 1,
@@ -6451,6 +6451,261 @@
               }
             ]
           },
+          "config": {
+            "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
+            "user_id": "u39",
+            "skill_scope": "all",
+            "rewrite_mode": "always",
+            "rewrite_history_turns": 6,
+            "rewrite_history_chars": 2000,
+            "rewrite_max_query_chars": 256,
+            "min_score": 0.4,
+            "top_k": 1,
+            "history_turns": 100,
+            "ingest_window": 6,
+            "extract_turn_limit": 1,
+            "extract_mode": "auto",
+            "assistant_temperature": 0.2
+          },
+          "runtime": {
+            "llm_provider": "dashscope",
+            "llm_model": "qwen-plus",
+            "thinking": {
+              "supported": false,
+              "requested": null,
+              "effective": null,
+              "auto_disabled": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "c499dbb1-850a-48b9-a0fe-a0f7f7741955",
+      "meta": {
+        "id": "c499dbb1-850a-48b9-a0fe-a0f7f7741955",
+        "title": "写一个大模型持续学习的政府报告",
+        "created_at_ms": 1772025473804,
+        "updated_at_ms": 1772025494862
+      },
+      "state": {
+        "config": {
+          "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
+          "user_id": "u39",
+          "skill_scope": "all",
+          "rewrite_mode": "always",
+          "rewrite_history_turns": 6,
+          "rewrite_history_chars": 2000,
+          "rewrite_max_query_chars": 256,
+          "min_score": 0.4,
+          "top_k": 1,
+          "history_turns": 100,
+          "ingest_window": 6,
+          "extract_turn_limit": 1,
+          "extract_mode": "auto",
+          "assistant_temperature": 0.2
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": "写一个大模型持续学习的政府报告"
+          },
+          {
+            "role": "assistant",
+            "content": "关于大模型持续学习技术演进与监管实践的政策建议报告\n\n一、背景与现状  \n当前，生成式人工智能技术快速发展，大语言模型在政务、金融、医疗等关键领域应用日益广泛。根据《生成式人工智能服务管理暂行办法》第二条，生成式人工智能服务提供者应当依法开展模型训练、推理及迭代更新活动。实践中，“持续学习”并非模型自主获取知识的过程，而是指服务提供者依据业务需求、安全评估结果和用户反馈，在人工监督下对模型进行参数微调、提示工程优化、知识库动态更新及行为对齐调整等有计划、可追溯的技术活动。该过程须严格遵循《互联网信息服务算法推荐管理规定》第十二条关于“算法模型更新应履行安全评估和备案义务”的要求。\n\n二、技术实践与监管合规情况  \n（一）主流技术路径符合现行规范  \n1．增量训练与检索增强（RAG）已纳入行业实践，其数据来源、清洗流程及标注规则均需符合《信息安全技术 个人信息安全规范》（GB/T 35273—2020）第6.3条关于数据处理最小必要原则；  \n2．在线微调（Online Fine-tuning）普遍采用“人在环路”机制，每次更新前完成内部安全测试，并依《生成式人工智能服务管理暂行办法》第七条向国家网信部门履行变更备案；  \n3．价值观对齐调整依托人工构建的指令-响应对齐语料集，其内容审核标准与《网络信息内容生态治理规定》第六条保持一致，禁止使用未经验证的自动化对齐方法。\n\n（二）监管框架持续完善  \n截至2024年，全国已有27个省级网信部门建立大模型服务备案专项通道，覆盖模型迭代类变更事项；《人工智能产业高质量发展三年行动计划（2023—2025年）》明确提出“构建覆盖模型全生命周期的持续学习监管技术支撑体系”，为后续标准制定提供政策依据。\n\n三、实施中存在的主要问题  \n（一）部分机构将“持续学习”概念泛化，混淆技术更新与自主演化，存在表述不严谨风险；  \n（二）动态知识注入缺乏统一的数据质量评估指标，个别场景出现事实性偏差未及时回溯修正；  \n（三）跨版本模型行为一致性验证机制尚未形成行业共识，影响监管可验证性；  \n（四）中小服务商在人工审核资源、安全评估能力方面存在短板，难以全面落实《暂行办法》第九条关于“建立健全模型迭代内部管理制度”的要求。\n\n四、政策建议  \n（一）加快制定《大模型持续学习技术实施指南》（推荐性国家标准），明确“持续学习”在监管语境下的操作定义、适用范围及禁止情形，杜绝“自适应”“自进化”等误导性表述；  \n（二）推动建立国家级大模型迭代安全评估实验室，面向重点行业提供版本比对测试、偏见漂移检测、事实一致性验证等公共服务；  \n（三）修订《生成式人工智能服务管理暂行办法》实施细则，增设“模型迭代日志强制留存”条款，要求记录每次更新的触发原因、数据来源、人工审核结论及备案编号，确保全生命周期责任可追溯；  \n（四）支持建设开源可信微调工具链，集成敏感词过滤、价值观校验、输出归因等模块，降低中小服务商合规成本。\n\n五、结论  \n大模型持续学习是提升服务能力的重要技术手段，其本质是受控、可审计、有人参与的工程实践。必须坚持技术发展与风险防控并重，以现行法律法规为基准，以可验证、可追溯、可问责为基本要求，系统推进制度建设、能力建设与基础设施建设，切实保障人工智能健康有序发展。\n\n单位：XXX  \n日期：XXX年XXX月XXX日"
+          }
+        ],
+        "pending": true
+      },
+      "trace": {
+        "version": 1,
+        "next_turn_seq": 2,
+        "turns": [
+          {
+            "id": "turn_1",
+            "input": "写一个大模型持续学习的政府报告\n",
+            "started_at_ms": 1772025475238,
+            "finished_at_ms": 1772025494862,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "写一个大模型持续学习的政府报告"
+              },
+              {
+                "role": "assistant",
+                "content": "关于大模型持续学习技术演进与监管实践的政策建议报告\n\n一、背景与现状  \n当前，生成式人工智能技术快速发展，大语言模型在政务、金融、医疗等关键领域应用日益广泛。根据《生成式人工智能服务管理暂行办法》第二条，生成式人工智能服务提供者应当依法开展模型训练、推理及迭代更新活动。实践中，“持续学习”并非模型自主获取知识的过程，而是指服务提供者依据业务需求、安全评估结果和用户反馈，在人工监督下对模型进行参数微调、提示工程优化、知识库动态更新及行为对齐调整等有计划、可追溯的技术活动。该过程须严格遵循《互联网信息服务算法推荐管理规定》第十二条关于“算法模型更新应履行安全评估和备案义务”的要求。\n\n二、技术实践与监管合规情况  \n（一）主流技术路径符合现行规范  \n1．增量训练与检索增强（RAG）已纳入行业实践，其数据来源、清洗流程及标注规则均需符合《信息安全技术 个人信息安全规范》（GB/T 35273—2020）第6.3条关于数据处理最小必要原则；  \n2．在线微调（Online Fine-tuning）普遍采用“人在环路”机制，每次更新前完成内部安全测试，并依《生成式人工智能服务管理暂行办法》第七条向国家网信部门履行变更备案；  \n3．价值观对齐调整依托人工构建的指令-响应对齐语料集，其内容审核标准与《网络信息内容生态治理规定》第六条保持一致，禁止使用未经验证的自动化对齐方法。\n\n（二）监管框架持续完善  \n截至2024年，全国已有27个省级网信部门建立大模型服务备案专项通道，覆盖模型迭代类变更事项；《人工智能产业高质量发展三年行动计划（2023—2025年）》明确提出“构建覆盖模型全生命周期的持续学习监管技术支撑体系”，为后续标准制定提供政策依据。\n\n三、实施中存在的主要问题  \n（一）部分机构将“持续学习”概念泛化，混淆技术更新与自主演化，存在表述不严谨风险；  \n（二）动态知识注入缺乏统一的数据质量评估指标，个别场景出现事实性偏差未及时回溯修正；  \n（三）跨版本模型行为一致性验证机制尚未形成行业共识，影响监管可验证性；  \n（四）中小服务商在人工审核资源、安全评估能力方面存在短板，难以全面落实《暂行办法》第九条关于“建立健全模型迭代内部管理制度”的要求。\n\n四、政策建议  \n（一）加快制定《大模型持续学习技术实施指南》（推荐性国家标准），明确“持续学习”在监管语境下的操作定义、适用范围及禁止情形，杜绝“自适应”“自进化”等误导性表述；  \n（二）推动建立国家级大模型迭代安全评估实验室，面向重点行业提供版本比对测试、偏见漂移检测、事实一致性验证等公共服务；  \n（三）修订《生成式人工智能服务管理暂行办法》实施细则，增设“模型迭代日志强制留存”条款，要求记录每次更新的触发原因、数据来源、人工审核结论及备案编号，确保全生命周期责任可追溯；  \n（四）支持建设开源可信微调工具链，集成敏感词过滤、价值观校验、输出归因等模块，降低中小服务商合规成本。\n\n五、结论  \n大模型持续学习是提升服务能力的重要技术手段，其本质是受控、可审计、有人参与的工程实践。必须坚持技术发展与风险防控并重，以现行法律法规为基准，以可验证、可追溯、可问责为基本要求，系统推进制度建设、能力建设与基础设施建设，切实保障人工智能健康有序发展。\n\n单位：XXX  \n日期：XXX年XXX月XXX日"
+              }
+            ],
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772025476428,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.7039665513522273,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.5"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            },
+            "extraction": null,
+            "error": ""
+          }
+        ],
+        "retrieval_events": [
+          {
+            "event_time": 1772025476428,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772025476428,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.7039665513522273,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.5"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1772025494862,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772025476428,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.7039665513522273,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.5"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          }
+        ],
+        "extraction_events": [],
+        "config_events": [
+          {
+            "event_time": 1772025473804,
+            "source": "session/new",
+            "config": {
+              "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
+              "user_id": "u39",
+              "skill_scope": "all",
+              "rewrite_mode": "always",
+              "rewrite_history_turns": 6,
+              "rewrite_history_chars": 2000,
+              "rewrite_max_query_chars": 256,
+              "min_score": 0.4,
+              "top_k": 1,
+              "history_turns": 100,
+              "ingest_window": 6,
+              "extract_turn_limit": 1,
+              "extract_mode": "auto",
+              "assistant_temperature": 0.2
+            }
+          }
+        ],
+        "last_result": {
+          "kind": "chat",
+          "chat_append": [
+            {
+              "role": "user",
+              "content": "写一个大模型持续学习的政府报告"
+            },
+            {
+              "role": "assistant",
+              "content": "关于大模型持续学习技术演进与监管实践的政策建议报告\n\n一、背景与现状  \n当前，生成式人工智能技术快速发展，大语言模型在政务、金融、医疗等关键领域应用日益广泛。根据《生成式人工智能服务管理暂行办法》第二条，生成式人工智能服务提供者应当依法开展模型训练、推理及迭代更新活动。实践中，“持续学习”并非模型自主获取知识的过程，而是指服务提供者依据业务需求、安全评估结果和用户反馈，在人工监督下对模型进行参数微调、提示工程优化、知识库动态更新及行为对齐调整等有计划、可追溯的技术活动。该过程须严格遵循《互联网信息服务算法推荐管理规定》第十二条关于“算法模型更新应履行安全评估和备案义务”的要求。\n\n二、技术实践与监管合规情况  \n（一）主流技术路径符合现行规范  \n1．增量训练与检索增强（RAG）已纳入行业实践，其数据来源、清洗流程及标注规则均需符合《信息安全技术 个人信息安全规范》（GB/T 35273—2020）第6.3条关于数据处理最小必要原则；  \n2．在线微调（Online Fine-tuning）普遍采用“人在环路”机制，每次更新前完成内部安全测试，并依《生成式人工智能服务管理暂行办法》第七条向国家网信部门履行变更备案；  \n3．价值观对齐调整依托人工构建的指令-响应对齐语料集，其内容审核标准与《网络信息内容生态治理规定》第六条保持一致，禁止使用未经验证的自动化对齐方法。\n\n（二）监管框架持续完善  \n截至2024年，全国已有27个省级网信部门建立大模型服务备案专项通道，覆盖模型迭代类变更事项；《人工智能产业高质量发展三年行动计划（2023—2025年）》明确提出“构建覆盖模型全生命周期的持续学习监管技术支撑体系”，为后续标准制定提供政策依据。\n\n三、实施中存在的主要问题  \n（一）部分机构将“持续学习”概念泛化，混淆技术更新与自主演化，存在表述不严谨风险；  \n（二）动态知识注入缺乏统一的数据质量评估指标，个别场景出现事实性偏差未及时回溯修正；  \n（三）跨版本模型行为一致性验证机制尚未形成行业共识，影响监管可验证性；  \n（四）中小服务商在人工审核资源、安全评估能力方面存在短板，难以全面落实《暂行办法》第九条关于“建立健全模型迭代内部管理制度”的要求。\n\n四、政策建议  \n（一）加快制定《大模型持续学习技术实施指南》（推荐性国家标准），明确“持续学习”在监管语境下的操作定义、适用范围及禁止情形，杜绝“自适应”“自进化”等误导性表述；  \n（二）推动建立国家级大模型迭代安全评估实验室，面向重点行业提供版本比对测试、偏见漂移检测、事实一致性验证等公共服务；  \n（三）修订《生成式人工智能服务管理暂行办法》实施细则，增设“模型迭代日志强制留存”条款，要求记录每次更新的触发原因、数据来源、人工审核结论及备案编号，确保全生命周期责任可追溯；  \n（四）支持建设开源可信微调工具链，集成敏感词过滤、价值观校验、输出归因等模块，降低中小服务商合规成本。\n\n五、结论  \n大模型持续学习是提升服务能力的重要技术手段，其本质是受控、可审计、有人参与的工程实践。必须坚持技术发展与风险防控并重，以现行法律法规为基准，以可验证、可追溯、可问责为基本要求，系统推进制度建设、能力建设与基础设施建设，切实保障人工智能健康有序发展。\n\n单位：XXX  \n日期：XXX年XXX月XXX日"
+            }
+          ],
+          "retrieval": {
+            "original_query": "写一个大模型持续学习的政府报告",
+            "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+            "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+            "event_time": 1772025476428,
+            "scope": "all",
+            "top_k": 1,
+            "min_score": 0.4,
+            "hits": [
+              {
+                "rank": 1,
+                "score": 0.7039665513522273,
+                "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                "name": "government-report-writing-policy",
+                "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                "source": "user:u39",
+                "owner": "u39",
+                "version": "0.1.5"
+              }
+            ],
+            "selected_for_use_ids": [
+              "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+            ],
+            "selected_for_context_ids": [
+              "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+            ],
+            "context_injected": true,
+            "error": null
+          },
+          "extraction": null,
           "config": {
             "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
             "user_id": "u39",

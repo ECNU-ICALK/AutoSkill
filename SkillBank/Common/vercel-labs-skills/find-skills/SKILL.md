@@ -1,4 +1,5 @@
 ---
+id: "c0feed2a-7f23-5ad3-81fe-39a0489599d6"
 name: find-skills
 description: Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.
 ---

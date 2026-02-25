@@ -1,4 +1,5 @@
 ---
+id: "c4aa373d-095b-5ec2-a525-62f7ed246a37"
 name: vercel-deploy
 description: Deploy applications and websites to Vercel. Use this skill when the user requests deployment actions such as "Deploy my app", "Deploy this to production", "Create a preview deployment", "Deploy and give me the link", or "Push this live". No authentication required - returns preview URL and claimable deployment link.
 metadata:

@@ -1,4 +1,5 @@
 ---
+id: "dd303c69-b235-53f3-8905-5a5eb61b7211"
 name: remotion-best-practices
 description: Best practices for Remotion - Video creation in React
 metadata:

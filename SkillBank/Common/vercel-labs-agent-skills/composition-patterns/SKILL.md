@@ -1,4 +1,5 @@
 ---
+id: "a5e89bbb-a722-5203-9615-ab9596e11f22"
 name: vercel-composition-patterns
 description:
   React composition patterns that scale. Use when refactoring components with

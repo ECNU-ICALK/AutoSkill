@@ -1,4 +1,5 @@
 ---
+id: "7111c111-d423-5108-98e3-6d91e90de12a"
 name: vercel-react-native-skills
 description:
   React Native and Expo best practices for building performant mobile apps. Use

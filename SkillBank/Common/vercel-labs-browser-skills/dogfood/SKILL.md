@@ -1,4 +1,5 @@
 ---
+id: "6986d0c4-b9fa-5d59-8512-63811123d7e7"
 name: dogfood
 description: Systematically explore and test a web application to find bugs, UX issues, and other problems. Use when asked to "dogfood", "QA", "exploratory test", "find issues", "bug hunt", "test this app/site/platform", or review the quality of a web application. Produces a structured report with full reproduction evidence -- step-by-step screenshots, repro videos, and detailed repro steps for every issue -- so findings can be handed directly to the responsible teams.
 allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)

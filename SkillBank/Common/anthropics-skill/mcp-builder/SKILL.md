@@ -1,4 +1,5 @@
 ---
+id: "4f8015c4-8a3d-5d6d-a9b8-0ced25ce896f"
 name: mcp-builder
 description: Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).
 license: Complete terms in LICENSE.txt

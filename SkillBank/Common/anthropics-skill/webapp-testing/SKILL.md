@@ -1,4 +1,5 @@
 ---
+id: "7f7c5662-9c20-5809-a6de-498c16672fba"
 name: webapp-testing
 description: Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.
 license: Complete terms in LICENSE.txt
