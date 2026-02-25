@@ -190,6 +190,8 @@ def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider
 
     if provider == "hashing":
         return {"provider": "hashing", "dims": 256}
+    if provider in {"none", "off", "disabled", "null", "no_embedding", "no-embedding"}:
+        return {"provider": "none"}
 
     timeout_s = int(_env("AUTOSKILL_TIMEOUT_S", "120"))
 
@@ -260,7 +262,7 @@ def main() -> None:
     parser.add_argument(
         "--embeddings-provider",
         default="",
-        help="hashing|generic|glm|dashscope|openai (default depends on llm)",
+        help="hashing|none|generic|glm|dashscope|openai (default depends on llm)",
     )
     parser.add_argument("--embeddings-model", default=None)
     default_store_dir = _env(

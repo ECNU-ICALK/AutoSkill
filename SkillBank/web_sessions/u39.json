@@ -1,7 +1,7 @@
 {
   "version": 1,
   "user_id": "u39",
-  "saved_at_ms": 1771906604442,
+  "saved_at_ms": 1772012940895,
   "sessions": [
     {
       "id": "99a6efdd-a024-4348-92e9-679ae5d90f1f",
@@ -4833,7 +4833,7 @@
             "content": "关于大模型持续学习技术演进与政策实施建议的报告  \n\n一、背景与现状  \n当前，生成式人工智能大模型在实际应用中需通过持续学习实现能力更新与行为优化。根据《生成式人工智能服务管理暂行办法》第七条，提供者应当对生成内容进行安全评估，并在模型更新后重新履行备案手续。实践中，持续学习主要体现为监督微调（SFT）、基于人类反馈的强化学习（RLHF）及知识注入等人工主导的技术路径，所有参数调整均须由研发单位在“人在环路”机制下完成，不具有自主性或自发性。截至2024年6月，全国已完成备案的大模型中，92%在备案后实施过至少一次版本迭代，其更新行为均符合《互联网信息服务算法推荐管理规定》第十二条关于“算法变更应同步说明影响范围与风险控制措施”的要求。\n\n二、主要技术实践与监管适配情况  \n（一）持续学习的技术边界  \n1．模型能力提升严格依赖人工设定目标、标注数据供给与评估标准。例如，某政务问答模型在接入新版政策库后，需由业务部门确认知识覆盖完整性，并经网信部门指定第三方机构开展红队测试，方可上线。  \n2．训练数据来源须符合《网络信息内容生态治理规定》第六条，禁止使用未授权个人信息、涉密文件及非法爬取数据；所有新增语料须留存原始来源记录，满足《人工智能伦理审查规范》（GB/T 43571—2023）第5.2条存档要求。  \n3．模型输出稳定性保障依托于《生成式人工智能服务管理暂行办法》第十一条规定的“安全评估备案制”，每次迭代须提交《模型迭代登记表》，载明训练数据构成、对齐目标变更、安全测试结果及人工审核结论。\n\n（二）现存实施难点  \n1．部分研发单位对“持续学习”概念理解存在偏差，将常规运维更新误称为“自适应进化”，导致备案材料中出现不符合《暂行办法》第三条“不得含有虚假、误导性表述”的情形。  \n2．跨部门知识同步机制尚未健全，如司法、教育等领域政策更新频率高，但模型知识刷新周期平均滞后45个工作日，影响服务时效性。  \n3．全生命周期日志留存标准不统一，个别企业仅保存最终模型权重，未按《信息安全技术 机器学习算法安全评估规范》（JR/T 0284—2023）第4.3款要求完整归档训练过程日志、人工标注记录及评估原始数据。\n\n三、政策建议  \n（一）完善备案动态管理机制  \n建议由国家网信办牵头，修订《生成式人工智能服务备案工作指引》，增设“持续学习专项备案模块”，明确：  \n1．模型单次参数更新若涉及训练数据总量变动超5%、关键领域知识库替换或价值观对齐目标调整，须在更新实施前5个工作日内提交预备案；  \n2．备案材料中须附《人工干预记录表》，列明每次学习任务的发起人、审批人、数据审核人及效果验证人，落实《暂行办法》第四条“全流程可追溯”要求。\n\n（二）建立行业级知识协同更新平台  \n依托全国信标委人工智能分技术委员会，组织政法、卫健、人社等部门共建权威政策知识图谱接口，制定《大模型政务知识同步技术规范》，统一术语定义、版本标识与更新触发条件，确保模型知识刷新与行政决策节奏保持一致。\n\n（三）强化全链条审计能力建设  \n推动《人工智能安全评估实验室建设指南》落地实施，要求省级以上网信部门配备具备模型训练日志解析能力的检测设备；将“训练过程可复现性”纳入年度安全评估必检项，重点核查RLHF偏好对标注一致性、SFT指令集覆盖完整性及人工审核留痕完备性。\n\n四、结语  \n大模型持续学习本质是人机协同下的工程化能力维护活动，其规范发展必须坚持“技术受控、责任到人、过程可溯、结果可验”原则。所有能力演进均系研发单位依据法律法规和技术标准主动实施的人工干预行为，不存在脱离人类监督的“自主演化”。各相关方应严格对照现行制度要求，压实主体责任，切实防范因技术表述失范、流程执行缺位引发的合规风险。  \n单位：XXX  \n日期：XXX年XXX月XXX日"
           }
         ],
-        "pending": true
+        "pending": false
       },
       "trace": {
         "version": 1,
@@ -5859,6 +5859,600 @@
           },
           "config": {
             "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/Skills",
+            "user_id": "u39",
+            "skill_scope": "all",
+            "rewrite_mode": "always",
+            "rewrite_history_turns": 6,
+            "rewrite_history_chars": 2000,
+            "rewrite_max_query_chars": 256,
+            "min_score": 0.4,
+            "top_k": 1,
+            "history_turns": 100,
+            "ingest_window": 6,
+            "extract_turn_limit": 1,
+            "extract_mode": "auto",
+            "assistant_temperature": 0.2
+          },
+          "runtime": {
+            "llm_provider": "dashscope",
+            "llm_model": "qwen-plus",
+            "thinking": {
+              "supported": false,
+              "requested": null,
+              "effective": null,
+              "auto_disabled": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ff18b48d-eda2-48c7-b4f9-033461de8fe3",
+      "meta": {
+        "id": "ff18b48d-eda2-48c7-b4f9-033461de8fe3",
+        "title": "写一个大模型持续学习的政府报告",
+        "created_at_ms": 1772012724221,
+        "updated_at_ms": 1772012940878
+      },
+      "state": {
+        "config": {
+          "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
+          "user_id": "u39",
+          "skill_scope": "all",
+          "rewrite_mode": "always",
+          "rewrite_history_turns": 6,
+          "rewrite_history_chars": 2000,
+          "rewrite_max_query_chars": 256,
+          "min_score": 0.4,
+          "top_k": 1,
+          "history_turns": 100,
+          "ingest_window": 6,
+          "extract_turn_limit": 1,
+          "extract_mode": "auto",
+          "assistant_temperature": 0.2
+        },
+        "messages": [
+          {
+            "role": "user",
+            "content": "写一个大模型持续学习的政府报告"
+          },
+          {
+            "role": "assistant",
+            "content": "一、背景与现状  \n当前，生成式人工智能技术快速发展，大模型在语言理解、内容生成、多模态交互等能力持续提升。根据《生成式人工智能服务管理暂行办法》第二条，生成式人工智能服务提供者应“建立健全算法机制机理审核、安全评估、模型上线前测试等制度”，其技术演进须严格遵循人工主导、全程可控、依法备案的基本原则。实践中，所谓“持续学习”并非模型自主获取知识或动态更新参数，而是指在严格监管框架下，由服务提供者依据《互联网信息服务算法推荐管理规定》第十二条，通过人工标注、规则注入、对齐训练、安全加固等可验证、可追溯、可复现的工程化手段，对模型输出行为进行周期性优化与合规性调优。\n\n二、技术实践与监管适配情况  \n（一）持续迭代的技术路径符合现行规范要求。主流大模型服务提供者普遍采用“人在环路”的迭代机制：数据输入经人工审核过滤；训练任务由专业团队设定目标函数与约束条件；参数更新须通过《生成式人工智能服务管理暂行办法》第七条规定的“安全评估和算法备案”程序后方可部署。例如，2024年发布的多个国产大模型版本均在国家网信办完成算法备案，并同步公开安全评估报告摘要，体现全过程人工干预与责任闭环。  \n\n（二）价值观对齐与行为约束具有明确制度支撑。《暂行办法》第六条明确要求“采取有效措施防范生成内容违背社会主义核心价值观”，实践中通过构建分层对齐机制实现：基础层依托《网络信息内容生态治理规定》设定关键词与主题红线；中间层引入人工反馈强化学习（RLHF）并保留完整标注日志；应用层结合场景需求配置内容安全策略模块，所有策略变更均纳入《人工智能算法备案登记表》备案范围。  \n\n（三）全生命周期责任追溯体系初步建立。依据《科学技术进步法》第六十一条及《数据安全法》第二十七条，模型开发、训练、部署、运维各环节均需落实主体责任。目前已有头部企业建立模型版本台账系统，记录每次参数修订所对应的数据集来源、标注规则、评估指标、审核人员及备案编号，满足《生成式人工智能服务管理暂行办法》第十一条关于“留存日志不少于六个月”的法定要求。\n\n三、实施过程中的主要挑战  \n1．持续迭代过程中的安全评估时效性不足。现行评估流程以版本发布为节点，难以覆盖高频小步调优场景，存在评估滞后于实际部署的风险。  \n2．跨机构协同对齐标准尚未统一。不同单位在价值观标注尺度、有害内容判定阈值、人工反馈样本代表性等方面缺乏可比性技术规范，影响规模化对齐效果。  \n3．模型行为变化的可解释性支撑薄弱。现有评估方法多依赖黑箱测试结果，缺乏面向监管需求的参数变动—行为映射分析工具，制约责任认定与问题溯源效率。\n\n四、政策建议  \n1．加快制定《生成式人工智能模型持续迭代安全评估实施细则》，明确小版本更新的简化评估路径，建立“备案+抽测+年报”相结合的动态监管机制，将评估周期由“单次发布”延伸至“全周期运行”。  \n2．推动发布《大模型价值观对齐标注与评估技术指南》（推荐性国家标准），统一标注维度、样本构成、冲突裁决、质量抽检等操作要求，支持开展第三方符合性验证。  \n3．支持建设国家级大模型行为可追溯平台，在保障商业秘密前提下，归集脱敏后的关键迭代日志（含版本号、训练数据类型、对齐目标、评估结果、备案文号），为监管核查与技术复盘提供基础设施支撑。  \n4．强化从业人员资质管理，将“模型迭代合规操作”纳入人工智能训练师国家职业技能标准修订内容，明确持续学习场景下的法定操作边界与责任义务。\n\n五、结论  \n大模型的持续迭代是技术演进与制度约束共同作用的结果，其本质是人在规则框架内实施的有目的、可验证、可追责的工程活动。必须坚持“技术发展服从安全底线、能力提升服务治理效能”的基本导向，以制度刚性保障技术理性，以过程透明支撑责任落实，切实将生成式人工智能发展纳入法治化、规范化、可持续轨道。\n\n单位：XXX  \n日期：XXX年XXX月XXX日"
+          },
+          {
+            "role": "user",
+            "content": "每一个报告的开头需要一个标题"
+          },
+          {
+            "role": "assistant",
+            "content": "关于大模型持续迭代机制的政策研究报告"
+          }
+        ],
+        "pending": true
+      },
+      "trace": {
+        "version": 1,
+        "next_turn_seq": 3,
+        "turns": [
+          {
+            "id": "turn_1",
+            "input": "写一个大模型持续学习的政府报告\n",
+            "started_at_ms": 1772012729335,
+            "finished_at_ms": 1772012751844,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "写一个大模型持续学习的政府报告"
+              },
+              {
+                "role": "assistant",
+                "content": "一、背景与现状  \n当前，生成式人工智能技术快速发展，大模型在语言理解、内容生成、多模态交互等能力持续提升。根据《生成式人工智能服务管理暂行办法》第二条，生成式人工智能服务提供者应“建立健全算法机制机理审核、安全评估、模型上线前测试等制度”，其技术演进须严格遵循人工主导、全程可控、依法备案的基本原则。实践中，所谓“持续学习”并非模型自主获取知识或动态更新参数，而是指在严格监管框架下，由服务提供者依据《互联网信息服务算法推荐管理规定》第十二条，通过人工标注、规则注入、对齐训练、安全加固等可验证、可追溯、可复现的工程化手段，对模型输出行为进行周期性优化与合规性调优。\n\n二、技术实践与监管适配情况  \n（一）持续迭代的技术路径符合现行规范要求。主流大模型服务提供者普遍采用“人在环路”的迭代机制：数据输入经人工审核过滤；训练任务由专业团队设定目标函数与约束条件；参数更新须通过《生成式人工智能服务管理暂行办法》第七条规定的“安全评估和算法备案”程序后方可部署。例如，2024年发布的多个国产大模型版本均在国家网信办完成算法备案，并同步公开安全评估报告摘要，体现全过程人工干预与责任闭环。  \n\n（二）价值观对齐与行为约束具有明确制度支撑。《暂行办法》第六条明确要求“采取有效措施防范生成内容违背社会主义核心价值观”，实践中通过构建分层对齐机制实现：基础层依托《网络信息内容生态治理规定》设定关键词与主题红线；中间层引入人工反馈强化学习（RLHF）并保留完整标注日志；应用层结合场景需求配置内容安全策略模块，所有策略变更均纳入《人工智能算法备案登记表》备案范围。  \n\n（三）全生命周期责任追溯体系初步建立。依据《科学技术进步法》第六十一条及《数据安全法》第二十七条，模型开发、训练、部署、运维各环节均需落实主体责任。目前已有头部企业建立模型版本台账系统，记录每次参数修订所对应的数据集来源、标注规则、评估指标、审核人员及备案编号，满足《生成式人工智能服务管理暂行办法》第十一条关于“留存日志不少于六个月”的法定要求。\n\n三、实施过程中的主要挑战  \n1．持续迭代过程中的安全评估时效性不足。现行评估流程以版本发布为节点，难以覆盖高频小步调优场景，存在评估滞后于实际部署的风险。  \n2．跨机构协同对齐标准尚未统一。不同单位在价值观标注尺度、有害内容判定阈值、人工反馈样本代表性等方面缺乏可比性技术规范，影响规模化对齐效果。  \n3．模型行为变化的可解释性支撑薄弱。现有评估方法多依赖黑箱测试结果，缺乏面向监管需求的参数变动—行为映射分析工具，制约责任认定与问题溯源效率。\n\n四、政策建议  \n1．加快制定《生成式人工智能模型持续迭代安全评估实施细则》，明确小版本更新的简化评估路径，建立“备案+抽测+年报”相结合的动态监管机制，将评估周期由“单次发布”延伸至“全周期运行”。  \n2．推动发布《大模型价值观对齐标注与评估技术指南》（推荐性国家标准），统一标注维度、样本构成、冲突裁决、质量抽检等操作要求，支持开展第三方符合性验证。  \n3．支持建设国家级大模型行为可追溯平台，在保障商业秘密前提下，归集脱敏后的关键迭代日志（含版本号、训练数据类型、对齐目标、评估结果、备案文号），为监管核查与技术复盘提供基础设施支撑。  \n4．强化从业人员资质管理，将“模型迭代合规操作”纳入人工智能训练师国家职业技能标准修订内容，明确持续学习场景下的法定操作边界与责任义务。\n\n五、结论  \n大模型的持续迭代是技术演进与制度约束共同作用的结果，其本质是人在规则框架内实施的有目的、可验证、可追责的工程活动。必须坚持“技术发展服从安全底线、能力提升服务治理效能”的基本导向，以制度刚性保障技术理性，以过程透明支撑责任落实，切实将生成式人工智能发展纳入法治化、规范化、可持续轨道。\n\n单位：XXX  \n日期：XXX年XXX月XXX日"
+              }
+            ],
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772012730605,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6709057066213572,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            },
+            "extraction": null,
+            "error": ""
+          },
+          {
+            "id": "turn_2",
+            "input": "每一个报告的开头需要一个标题",
+            "started_at_ms": 1772012903791,
+            "finished_at_ms": 1772012906077,
+            "kind": "chat",
+            "command": "",
+            "chat_append": [
+              {
+                "role": "user",
+                "content": "每一个报告的开头需要一个标题"
+              },
+              {
+                "role": "assistant",
+                "content": "关于大模型持续迭代机制的政策研究报告"
+              }
+            ],
+            "retrieval": {
+              "original_query": "每一个报告的开头需要一个标题",
+              "rewritten_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "search_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "event_time": 1772012905358,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.666083257292284,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            },
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+              "event_time": 1772012940591,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "version": "0.1.5",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                  "version": "0.1.5",
+                  "owner": "u39",
+                  "triggers": [
+                    "写政府报告",
+                    "生成正式政策报告",
+                    "word格式政府文件",
+                    "不要幻觉的公文",
+                    "避免花里胡哨的表达",
+                    "每一个报告的开头需要一个标题",
+                    "加个正式标题",
+                    "报告必须有标题",
+                    "政府公文标题规范"
+                  ],
+                  "tags": [
+                    "government-report",
+                    "policy-writing",
+                    "regulatory-compliance",
+                    "ai-governance",
+                    "chinese-law",
+                    "ai-regulation",
+                    "public-sector",
+                    "continuous-learning",
+                    "title-policy",
+                    "document-structure"
+                  ],
+                  "instructions": "# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+                }
+              ]
+            },
+            "error": ""
+          }
+        ],
+        "retrieval_events": [
+          {
+            "event_time": 1772012730605,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772012730605,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6709057066213572,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1772012751844,
+            "source": "stream",
+            "turn_id": "turn_1",
+            "retrieval": {
+              "original_query": "写一个大模型持续学习的政府报告",
+              "rewritten_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "search_query": "政府报告 大模型持续学习 技术演进与政策建议",
+              "event_time": 1772012730605,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.6709057066213572,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1772012905358,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "retrieval": {
+              "original_query": "每一个报告的开头需要一个标题",
+              "rewritten_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "search_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "event_time": 1772012905358,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.666083257292284,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          },
+          {
+            "event_time": 1772012906112,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "retrieval": {
+              "original_query": "每一个报告的开头需要一个标题",
+              "rewritten_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "search_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+              "event_time": 1772012905358,
+              "scope": "all",
+              "top_k": 1,
+              "min_score": 0.4,
+              "hits": [
+                {
+                  "rank": 1,
+                  "score": 0.666083257292284,
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                  "source": "user:u39",
+                  "owner": "u39",
+                  "version": "0.1.4"
+                }
+              ],
+              "selected_for_use_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "selected_for_context_ids": [
+                "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+              ],
+              "context_injected": true,
+              "error": null
+            }
+          }
+        ],
+        "extraction_events": [
+          {
+            "event_time": 1772012905358,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+              "event_time": 1772012905342,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1772012906075,
+            "source": "poll",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+              "event_time": 1772012905335,
+              "status": "running",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1772012906112,
+            "source": "stream",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+              "event_time": 1772012905342,
+              "status": "scheduled",
+              "error": "",
+              "upserted": [],
+              "skill_mds": []
+            }
+          },
+          {
+            "event_time": 1772012940878,
+            "source": "poll",
+            "turn_id": "turn_2",
+            "extraction": {
+              "trigger": "auto",
+              "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+              "event_time": 1772012940591,
+              "status": "completed",
+              "error": "",
+              "upserted": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "version": "0.1.5",
+                  "owner": "u39"
+                }
+              ],
+              "skills": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "name": "government-report-writing-policy",
+                  "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                  "version": "0.1.5",
+                  "owner": "u39",
+                  "triggers": [
+                    "写政府报告",
+                    "生成正式政策报告",
+                    "word格式政府文件",
+                    "不要幻觉的公文",
+                    "避免花里胡哨的表达",
+                    "每一个报告的开头需要一个标题",
+                    "加个正式标题",
+                    "报告必须有标题",
+                    "政府公文标题规范"
+                  ],
+                  "tags": [
+                    "government-report",
+                    "policy-writing",
+                    "regulatory-compliance",
+                    "ai-governance",
+                    "chinese-law",
+                    "ai-regulation",
+                    "public-sector",
+                    "continuous-learning",
+                    "title-policy",
+                    "document-structure"
+                  ],
+                  "instructions": "# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.",
+                  "examples": [],
+                  "skill_md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+                }
+              ],
+              "skill_mds": [
+                {
+                  "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                  "md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+                }
+              ]
+            }
+          }
+        ],
+        "config_events": [
+          {
+            "event_time": 1772012724221,
+            "source": "session/new",
+            "config": {
+              "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
+              "user_id": "u39",
+              "skill_scope": "all",
+              "rewrite_mode": "always",
+              "rewrite_history_turns": 6,
+              "rewrite_history_chars": 2000,
+              "rewrite_max_query_chars": 256,
+              "min_score": 0.4,
+              "top_k": 1,
+              "history_turns": 100,
+              "ingest_window": 6,
+              "extract_turn_limit": 1,
+              "extract_mode": "auto",
+              "assistant_temperature": 0.2
+            }
+          }
+        ],
+        "last_result": {
+          "kind": "chat",
+          "chat_append": [
+            {
+              "role": "user",
+              "content": "每一个报告的开头需要一个标题"
+            },
+            {
+              "role": "assistant",
+              "content": "关于大模型持续迭代机制的政策研究报告"
+            }
+          ],
+          "retrieval": {
+            "original_query": "每一个报告的开头需要一个标题",
+            "rewritten_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+            "search_query": "政府报告 大模型持续学习 标题撰写 规范正式 突出主题 政策导向",
+            "event_time": 1772012905358,
+            "scope": "all",
+            "top_k": 1,
+            "min_score": 0.4,
+            "hits": [
+              {
+                "rank": 1,
+                "score": 0.666083257292284,
+                "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                "name": "government-report-writing-policy",
+                "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice.",
+                "source": "user:u39",
+                "owner": "u39",
+                "version": "0.1.4"
+              }
+            ],
+            "selected_for_use_ids": [
+              "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+            ],
+            "selected_for_context_ids": [
+              "cf48d101-bd17-4d06-8fb6-1c6946faa392"
+            ],
+            "context_injected": true,
+            "error": null
+          },
+          "extraction": {
+            "trigger": "auto",
+            "job_id": "8b27089b-afb6-4e59-9231-56935fecc6ad",
+            "event_time": 1772012940591,
+            "status": "completed",
+            "error": "",
+            "upserted": [
+              {
+                "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                "name": "government-report-writing-policy",
+                "version": "0.1.5",
+                "owner": "u39"
+              }
+            ],
+            "skills": [
+              {
+                "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                "name": "government-report-writing-policy",
+                "description": "A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.",
+                "version": "0.1.5",
+                "owner": "u39",
+                "triggers": [
+                  "写政府报告",
+                  "生成正式政策报告",
+                  "word格式政府文件",
+                  "不要幻觉的公文",
+                  "避免花里胡哨的表达",
+                  "每一个报告的开头需要一个标题",
+                  "加个正式标题",
+                  "报告必须有标题",
+                  "政府公文标题规范"
+                ],
+                "tags": [
+                  "government-report",
+                  "policy-writing",
+                  "regulatory-compliance",
+                  "ai-governance",
+                  "chinese-law",
+                  "ai-regulation",
+                  "public-sector",
+                  "continuous-learning",
+                  "title-policy",
+                  "document-structure"
+                ],
+                "instructions": "# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.",
+                "examples": [],
+                "skill_md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+              }
+            ],
+            "skill_mds": [
+              {
+                "id": "cf48d101-bd17-4d06-8fb6-1c6946faa392",
+                "md": "---\nid: \"cf48d101-bd17-4d06-8fb6-1c6946faa392\"\nname: \"government-report-writing-policy\"\ndescription: \"A reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\"\nversion: \"0.1.5\"\ntags:\n  - \"government-report\"\n  - \"policy-writing\"\n  - \"regulatory-compliance\"\n  - \"ai-governance\"\n  - \"chinese-law\"\n  - \"ai-regulation\"\n  - \"public-sector\"\n  - \"continuous-learning\"\n  - \"title-policy\"\n  - \"document-structure\"\ntriggers:\n  - \"写政府报告\"\n  - \"生成正式政策报告\"\n  - \"word格式政府文件\"\n  - \"不要幻觉的公文\"\n  - \"避免花里胡哨的表达\"\n  - \"每一个报告的开头需要一个标题\"\n  - \"加个正式标题\"\n  - \"报告必须有标题\"\n  - \"政府公文标题规范\"\n---\n\n# government-report-writing-policy\n\nA reusable skill for generating authoritative, regulation-grounded government policy reports in plain Word-compatible format — strictly factual, free of anthropomorphic or speculative language (e.g., no 'self-evolution', 'autonomous learning'), and anchored exclusively in current Chinese laws, administrative measures, and verifiable technical practice; enforces mandatory formal title insertion at the very beginning of every report.\n\n## Prompt\n\n# Goal\nGenerate a formal government-style policy report that is technically accurate, legally grounded, and operationally actionable — suitable for direct copy-paste into Microsoft Word with standard official formatting (plain text only, no markdown, no emojis, no bold/italic/arrow symbols). The report must reflect real-world constraints: no model possesses autonomous agency; all capability changes result from human-initiated, human-supervised, and regulation-bound engineering actions.\n\n# Constraints & Style\n- Language: Plain, precise, bureaucratic Chinese — no metaphors, slogans, rhetorical flourishes, or value-laden adjectives (e.g., avoid 'intelligent', 'wise', 'responsible evolution'; use 'capability update', 'parameter revision', 'behavioral alignment adjustment').\n- Terminology: Use only terms defined in official documents — e.g., '持续迭代' (not '自进化'), '人工对齐' (not 'value self-alignment'), '安全评估备案' (not 'trustworthiness certification'), '人在环路', '价值观对齐', '全生命周期责任追溯'.\n- Structure: Strict hierarchical numbering (一、二、三…；（一）（二）（三）…；1．2．3．…), no bullet points, no arrows, no markdown, no rich-text markers. All content must paste cleanly into Word with default paragraph styling. Standard section order: Background & Status → Technical Practice & Regulatory Alignment → Implementation Challenges → Policy Recommendations → Conclusion.\n- Title requirement: Insert exactly one descriptive, formally appropriate title as the absolute first line of output — centered via blank lines above and below (no markdown, no alignment codes), substantive and subject-specific (e.g., '关于大模型持续学习的监管实践与政策建议的报告'), never generic (e.g., '政府报告'), never omitted, never replaced with 'XXX' or placeholders.\n- Factual grounding: Every claim about risk, process, or requirement must cite either (a) a specific article from an active regulation (e.g., 《生成式人工智能服务管理暂行办法》第七条, 《互联网信息服务算法推荐管理规定》), (b) a publicly documented technical standard (e.g., GB/T <NUM>—<NUM>, JR/T <NUM>), or (c) an observable industry practice (e.g., Llama 3.1 release included versioned safety eval logs). Cite only publicly issued, legally effective documents — never draft guidelines, internal memos, or unofficial interpretations.\n- Prohibition: Do not invent concepts (e.g., 'evolution sandbox', 'AI ethics passport', 'neural intent parsing'), thresholds (e.g., 'bias drift >5%'), institutions (e.g., 'National Alignment Oversight Board'), regulatory clauses, article numbers, or standard IDs; if uncertain, omit the reference rather than hallucinate.\n- Statistics or adoption rates must be omitted unless explicitly grounded in official sources; hypothetical illustrations are prohibited unless labeled as such — but user has not requested labeling, so default to omission.\n- Tone: Authoritative but neutral — position the report as operational guidance, not advocacy or futurism. Avoid explanatory asides, assistant self-reference, or offers of follow-up versions.\n- Closing format: Append exactly one unit/date line using fixed placeholder-only format:\n单位：XXX\n日期：XXX年XXX月XXX日\n- No other placeholders (e.g., <PROJECT>, <DATE>) permitted anywhere else; all content must be fully instantiated and de-identified (no organization names, project names, URLs, emails, phone numbers, internal IDs, or real dates).\n- Never include disclaimers, footnotes, appendices, or 'this is not legal advice' statements — the output *is* the official-style deliverable.\n\n## Triggers\n\n- 写政府报告\n- 生成正式政策报告\n- word格式政府文件\n- 不要幻觉的公文\n- 避免花里胡哨的表达\n- 每一个报告的开头需要一个标题\n- 加个正式标题\n- 报告必须有标题\n- 政府公文标题规范\n"
+              }
+            ]
+          },
+          "config": {
+            "store_dir": "/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/SkillBank",
             "user_id": "u39",
             "skill_scope": "all",
             "rewrite_mode": "always",

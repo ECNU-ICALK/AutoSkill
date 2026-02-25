@@ -292,9 +292,19 @@ def run_service_startup_maintenance(
     - AUTOSKILL_AUTO_IMPORT_OVERWRITE (default: 0)
     - AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES (default: 1)
     - AUTOSKILL_AUTO_IMPORT_MAX_DEPTH (default: 6)
+    - AUTOSKILL_AUTO_REFRESH_SKILLS (default: 1)
+    - AUTOSKILL_AUTO_REFRESH_FORCE_VECTORS (default: 0)
+    - AUTOSKILL_AUTO_REFRESH_BLOCKING (default: 1)
     """
 
-    out: Dict[str, Any] = {"ran": False, "provider": "", "store_root": "", "normalize": None, "imports": []}
+    out: Dict[str, Any] = {
+        "ran": False,
+        "provider": "",
+        "store_root": "",
+        "normalize": None,
+        "imports": [],
+        "refresh": None,
+    }
     try:
         cfg = dict(getattr(getattr(sdk, "config", None), "store", {}) or {})
         provider = str(cfg.get("provider") or "local").strip().lower()
@@ -333,79 +343,131 @@ def run_service_startup_maintenance(
             seen.add(ad)
             auto_import_dirs.append(ad)
 
-        if not auto_import_dirs:
-            return out
-
-        scope = str(
-            os.getenv("AUTOSKILL_AUTO_IMPORT_SCOPE")
-            or cfg.get("auto_import_scope")
-            or "common"
-        ).strip().lower()
-        if scope not in {"common", "user"}:
-            scope = "common"
-        overwrite = _to_bool(
-            os.getenv("AUTOSKILL_AUTO_IMPORT_OVERWRITE"),
-            default=_to_bool(cfg.get("auto_import_overwrite"), False),
-        )
-        include_files = _to_bool(
-            os.getenv("AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES"),
-            default=_to_bool(cfg.get("auto_import_include_files"), True),
-        )
-        library_name = str(
-            os.getenv("AUTOSKILL_AUTO_IMPORT_LIBRARY")
-            or cfg.get("auto_import_library")
-            or ""
-        ).strip()
-        import_user = str(cfg.get("auto_import_user_id") or default_user_id or "u1").strip() or "u1"
-
-        for src in auto_import_dirs:
-            if scope == "common":
-                stat = import_agent_skills_to_common(
-                    store_root=store_root,
-                    source_root=src,
-                    library_name=library_name,
-                    overwrite=overwrite,
-                    include_files=include_files,
-                    max_depth=max_depth,
-                )
-                out["imports"].append({"scope": "common", **stat})
-                print(
-                    f"{log_prefix} auto-import common: src={src} imported={stat['imported']} skipped={stat['skipped']} errors={len(stat['errors'])}"
-                )
-                continue
-
-            try:
-                imported = sdk.import_agent_skill_dirs(
-                    root_dir=src,
-                    user_id=import_user,
-                    overwrite=overwrite,
-                    include_files=include_files,
-                    max_depth=max_depth,
-                    reassign_ids=True,
-                )
-                stat = {
-                    "scope": "user",
-                    "source_root": src,
-                    "user_id": import_user,
-                    "imported": len(imported or []),
-                    "skipped": 0,
-                    "errors": [],
-                }
-            except Exception as e:
-                stat = {
-                    "scope": "user",
-                    "source_root": src,
-                    "user_id": import_user,
-                    "imported": 0,
-                    "skipped": 0,
-                    "errors": [str(e)],
-                }
-            out["imports"].append(stat)
-            print(
-                f"{log_prefix} auto-import user: src={src} user={import_user} imported={stat['imported']} errors={len(stat['errors'])}"
+        if auto_import_dirs:
+            scope = str(
+                os.getenv("AUTOSKILL_AUTO_IMPORT_SCOPE")
+                or cfg.get("auto_import_scope")
+                or "common"
+            ).strip().lower()
+            if scope not in {"common", "user"}:
+                scope = "common"
+            overwrite = _to_bool(
+                os.getenv("AUTOSKILL_AUTO_IMPORT_OVERWRITE"),
+                default=_to_bool(cfg.get("auto_import_overwrite"), False),
             )
+            include_files = _to_bool(
+                os.getenv("AUTOSKILL_AUTO_IMPORT_INCLUDE_FILES"),
+                default=_to_bool(cfg.get("auto_import_include_files"), True),
+            )
+            library_name = str(
+                os.getenv("AUTOSKILL_AUTO_IMPORT_LIBRARY")
+                or cfg.get("auto_import_library")
+                or ""
+            ).strip()
+            import_user = str(cfg.get("auto_import_user_id") or default_user_id or "u1").strip() or "u1"
+
+            for src in auto_import_dirs:
+                if scope == "common":
+                    stat = import_agent_skills_to_common(
+                        store_root=store_root,
+                        source_root=src,
+                        library_name=library_name,
+                        overwrite=overwrite,
+                        include_files=include_files,
+                        max_depth=max_depth,
+                    )
+                    out["imports"].append({"scope": "common", **stat})
+                    print(
+                        f"{log_prefix} auto-import common: src={src} imported={stat['imported']} skipped={stat['skipped']} errors={len(stat['errors'])}"
+                    )
+                    continue
+
+                try:
+                    imported = sdk.import_agent_skill_dirs(
+                        root_dir=src,
+                        user_id=import_user,
+                        overwrite=overwrite,
+                        include_files=include_files,
+                        max_depth=max_depth,
+                        reassign_ids=True,
+                    )
+                    stat = {
+                        "scope": "user",
+                        "source_root": src,
+                        "user_id": import_user,
+                        "imported": len(imported or []),
+                        "skipped": 0,
+                        "errors": [],
+                    }
+                except Exception as e:
+                    stat = {
+                        "scope": "user",
+                        "source_root": src,
+                        "user_id": import_user,
+                        "imported": 0,
+                        "skipped": 0,
+                        "errors": [str(e)],
+                    }
+                out["imports"].append(stat)
+                print(
+                    f"{log_prefix} auto-import user: src={src} user={import_user} imported={stat['imported']} errors={len(stat['errors'])}"
+                )
+
+        refresh_enabled = _to_bool(os.getenv("AUTOSKILL_AUTO_REFRESH_SKILLS"), default=True)
+        refresh_force_vectors = _to_bool(
+            os.getenv("AUTOSKILL_AUTO_REFRESH_FORCE_VECTORS"),
+            default=False,
+        )
+        refresh_blocking = _to_bool(
+            os.getenv("AUTOSKILL_AUTO_REFRESH_BLOCKING"),
+            default=True,
+        )
+        if refresh_enabled:
+            stat = _refresh_local_store_runtime(
+                sdk=sdk,
+                force_vectors=refresh_force_vectors,
+                blocking=refresh_blocking,
+            )
+            out["refresh"] = stat
+            if isinstance(stat, dict):
+                print(
+                    f"{log_prefix} refresh skills: reloaded={stat.get('reloaded', 0)} vectors_rebuilt={stat.get('vectors_rebuilt_total', 0)} users={len(stat.get('users') or [])}"
+                )
     except Exception as e:
         out["error"] = str(e)
         print(f"{log_prefix} startup maintenance failed: {e}")
     return out
 
+
+def _refresh_local_store_runtime(
+    *,
+    sdk: Any,
+    force_vectors: bool,
+    blocking: bool,
+) -> Optional[Dict[str, Any]]:
+    """
+    Best-effort local-store refresh hook:
+    - reload disk skills into memory
+    - refresh BM25 cache
+    - refresh vector mappings
+    """
+
+    store = getattr(sdk, "store", None)
+    if store is None:
+        return None
+    fn = getattr(store, "refresh_from_disk", None)
+    if not callable(fn):
+        return None
+    try:
+        out = fn(
+            rebuild_vectors=True,
+            force_rebuild_vectors=bool(force_vectors),
+            blocking=bool(blocking),
+        )
+    except TypeError:
+        out = fn()
+    if out is None:
+        return None
+    if isinstance(out, dict):
+        return dict(out)
+    return {"result": out}

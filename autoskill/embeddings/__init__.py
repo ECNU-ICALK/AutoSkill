@@ -2,6 +2,7 @@
 Embedding provider layer.
 
 Built-in providers:
+- `none`: disable embeddings (keyword/BM25 retrieval fallback)
 - `hashing`: deterministic offline embeddings (for demos/tests)
 - `openai`: OpenAI embeddings
 - `generic`: OpenAI-compatible custom endpoint (optional API key)

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...embeddings.base import EmbeddingModel
 from ...models import Skill, SkillHit, SkillStatus
+from .hybrid_rank import blend_scores, bm25_normalized_scores
 from .base import SkillStore
 
 
@@ -42,21 +43,34 @@ def _skill_to_text(skill: Skill) -> str:
 @dataclass
 class _Record:
     skill: Skill
-    vector: List[float]
+    vector: Optional[List[float]]
     raw: Optional[Dict[str, Any]] = None
 
 
 class InMemorySkillStore(SkillStore):
-    def __init__(self, *, embeddings: EmbeddingModel) -> None:
+    def __init__(self, *, embeddings: EmbeddingModel, bm25_weight: float = 0.1) -> None:
         self._embeddings = embeddings
+        self._embedding_disabled = bool(getattr(embeddings, "disabled", False))
+        self._bm25_weight = float(bm25_weight)
+        if self._bm25_weight < 0.0:
+            self._bm25_weight = 0.0
+        if self._bm25_weight > 1.0:
+            self._bm25_weight = 1.0
         self._lock = threading.RLock()
         self._records: Dict[str, _Record] = {}
+        self._bm25_docs_by_id: Dict[str, str] = {}
 
     def upsert(self, skill: Skill, *, raw: Optional[Dict[str, Any]] = None) -> None:
-        text = _skill_to_text(skill)
-        vector = self._embeddings.embed([text])[0]
+        vector: Optional[List[float]] = None
+        if not self._embedding_disabled:
+            text = _skill_to_text(skill)
+            try:
+                vector = [float(x) for x in self._embeddings.embed([text])[0]]
+            except Exception:
+                vector = None
         with self._lock:
             self._records[skill.id] = _Record(skill=skill, vector=vector, raw=raw)
+            self._bm25_docs_by_id[str(skill.id)] = _skill_to_text(skill)
 
     def get(self, skill_id: str) -> Optional[Skill]:
         with self._lock:
@@ -65,7 +79,9 @@ class InMemorySkillStore(SkillStore):
 
     def delete(self, skill_id: str) -> bool:
         with self._lock:
-            return self._records.pop(skill_id, None) is not None
+            removed = self._records.pop(skill_id, None) is not None
+            self._bm25_docs_by_id.pop(str(skill_id), None)
+            return removed
 
     def list(self, *, user_id: str) -> List[Skill]:
         with self._lock:
@@ -93,9 +109,9 @@ class InMemorySkillStore(SkillStore):
             else:
                 want_ids = [want_ids_raw]
             want_id_set = {str(x).strip() for x in want_ids if str(x).strip()} or None
-        qvec = self._embeddings.embed([query])[0]
         with self._lock:
-            candidates: List[Tuple[float, Skill]] = []
+            docs_by_id: Dict[str, str] = {}
+            recs: List[_Record] = []
             for rec in self._records.values():
                 skill = rec.skill
                 if skill.user_id != user_id:
@@ -107,12 +123,49 @@ class InMemorySkillStore(SkillStore):
 
                 if not _passes_filters(skill, filters):
                     continue
-                score = _cosine(qvec, rec.vector)
-                candidates.append((score, skill))
+                recs.append(rec)
+                sid = str(skill.id)
+                txt = self._bm25_docs_by_id.get(sid)
+                if not txt:
+                    txt = _skill_to_text(skill)
+                    self._bm25_docs_by_id[sid] = txt
+                docs_by_id[sid] = txt
+
+        if not recs:
+            return []
+
+        bm25_scores = bm25_normalized_scores(query=query, docs=docs_by_id)
+
+        vector_scores: Dict[str, float] = {}
+        use_vector = False
+        if not self._embedding_disabled:
+            try:
+                qvec = self._embeddings.embed([query])[0]
+                use_vector = bool(qvec)
+            except Exception:
+                qvec = []
+                use_vector = False
+            if use_vector:
+                for rec in recs:
+                    vec = rec.vector or []
+                    if not vec:
+                        continue
+                    vector_scores[rec.skill.id] = _cosine(qvec, vec)
+
+        merged_scores = blend_scores(
+            vector_scores=vector_scores,
+            bm25_scores=bm25_scores,
+            bm25_weight=self._bm25_weight,
+            use_vector=use_vector,
+        )
+
+        candidates: List[Tuple[float, Skill]] = []
+        for rec in recs:
+            sid = rec.skill.id
+            candidates.append((float(merged_scores.get(sid, 0.0)), rec.skill))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        hits = [SkillHit(skill=s, score=float(sc)) for sc, s in candidates[:limit]]
-        return hits
+        return [SkillHit(skill=s, score=float(sc)) for sc, s in candidates[:limit]]
 
 
 def _passes_filters(skill: Skill, filters: Dict[str, Any]) -> bool:

@@ -90,9 +90,14 @@ def _vector_index_name_from_embeddings(config: AutoSkillConfig) -> str:
 def build_store(config: AutoSkillConfig) -> SkillStore:
     provider = (config.store.get("provider") or "inmemory").lower()
     embeddings = build_embeddings(config.embeddings)
+    raw_bm25_weight = config.store.get("bm25_weight", config.bm25_weight)
+    try:
+        bm25_weight = float(raw_bm25_weight)
+    except Exception:
+        bm25_weight = float(config.bm25_weight)
 
     if provider == "inmemory":
-        return InMemorySkillStore(embeddings=embeddings)
+        return InMemorySkillStore(embeddings=embeddings, bm25_weight=bm25_weight)
 
     if provider in {"local", "dir", "skill_dir", "skills", "filesystem"}:
         # Filesystem store: one skill per directory (SKILL.md + optional resources).
@@ -155,6 +160,12 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
         )
         include_libraries = bool(config.store.get("include_libraries", True))
         include_legacy_root = bool(config.store.get("include_legacy_root", False))
+        keyword_index_dirname = str(config.store.get("keyword_index_dirname", "index"))
+        bm25_index_name = str(config.store.get("bm25_index_name", "skills-bm25"))
+        bm25_startup_mode = str(
+            config.store.get("bm25_startup_mode", "incremental")
+        ).strip().lower()
+        bm25_health_strict = bool(config.store.get("bm25_health_strict", False))
 
         library_dirs: List[Tuple[str, str]] = []
         raw_libs = (
@@ -192,6 +203,7 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
 
         return LocalSkillStore(
             embeddings=embeddings,
+            bm25_weight=bm25_weight,
             path=path,
             max_depth=max_depth,
             cache_vectors=cache_vectors,
@@ -204,6 +216,10 @@ def build_store(config: AutoSkillConfig) -> SkillStore:
             library_dirs=library_dirs or None,
             include_libraries=include_libraries,
             include_legacy_root=include_legacy_root,
+            keyword_index_dirname=keyword_index_dirname,
+            bm25_index_name=bm25_index_name,
+            bm25_startup_mode=bm25_startup_mode,
+            bm25_health_strict=bm25_health_strict,
         )
 
     raise ValueError(f"Unknown store provider: {provider}")

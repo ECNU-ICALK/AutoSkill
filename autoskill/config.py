@@ -62,6 +62,8 @@ class AutoSkillConfig:
     default_search_limit: int = 5
     # "chars" here means sizing units: CJK ideographs count by character; ASCII/English counts by word.
     max_context_chars: int = 6_000
+    # Hybrid retrieval weight: final = (1 - bm25_weight) * embedding + bm25_weight * BM25.
+    bm25_weight: float = 0.1
 
     redact_sources_before_llm: bool = True
 
@@ -87,6 +89,7 @@ class AutoSkillConfig:
             "max_similar_skills_to_consider",
             "default_search_limit",
             "max_context_chars",
+            "bm25_weight",
             "redact_sources_before_llm",
             "store_sources",
         }
@@ -102,6 +105,7 @@ class AutoSkillConfig:
             max_similar_skills_to_consider=int(data.get("max_similar_skills_to_consider", 5)),
             default_search_limit=int(data.get("default_search_limit", 5)),
             max_context_chars=int(data.get("max_context_chars", 6_000)),
+            bm25_weight=float(data.get("bm25_weight", 0.1)),
             redact_sources_before_llm=bool(data.get("redact_sources_before_llm", True)),
             store_sources=bool(data.get("store_sources", True)),
             extra=extra or None,

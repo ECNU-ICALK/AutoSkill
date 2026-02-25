@@ -18,6 +18,7 @@ from .base import EmbeddingModel
 from .bigmodel import BigModelEmbedding3
 from .generic import GenericEmbedding
 from .hashing import HashingEmbedding
+from .none import DisabledEmbedding
 from .openai import OpenAIEmbedding
 
 EmbeddingBuilder = Callable[[Dict[str, Any]], EmbeddingModel]
@@ -29,6 +30,12 @@ _EMBEDDING_ALIASES: Dict[str, str] = {
     "custom": "generic",
     "openai-compatible": "generic",
     "openai_compatible": "generic",
+    # No-embedding mode (BM25-only retrieval fallback).
+    "off": "none",
+    "disabled": "none",
+    "null": "none",
+    "no_embedding": "none",
+    "no-embedding": "none",
     # BigModel / GLM aliases.
     "bigmodel": "glm",
     "zhipu": "glm",
@@ -100,6 +107,10 @@ def _build_hashing(config: Dict[str, Any]) -> EmbeddingModel:
     return HashingEmbedding(dims=int(config.get("dims", 256)))
 
 
+def _build_none(config: Dict[str, Any]) -> EmbeddingModel:
+    return DisabledEmbedding()
+
+
 def _build_openai(config: Dict[str, Any]) -> EmbeddingModel:
     return OpenAIEmbedding(
         model=str(config.get("model", "text-embedding-3-small")),
@@ -168,6 +179,7 @@ def _build_glm(config: Dict[str, Any]) -> EmbeddingModel:
 def _ensure_builtins_registered() -> None:
     if _EMBEDDING_BUILDERS:
         return
+    register_embedding_connector("none", _build_none, aliases=["off", "disabled", "null", "no_embedding", "no-embedding"])
     register_embedding_connector("hashing", _build_hashing)
     register_embedding_connector("openai", _build_openai)
     register_embedding_connector("generic", _build_generic, aliases=["openai-compatible", "openai_compatible", "universal", "custom"])
@@ -204,4 +216,3 @@ def build_embeddings(config: Dict[str, Any]) -> EmbeddingModel:
             f"Available: {', '.join(list_embedding_connectors())}"
         )
     return builder(cfg)
-

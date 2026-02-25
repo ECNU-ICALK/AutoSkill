@@ -1170,7 +1170,7 @@ def main() -> None:
     parser.add_argument(
         "--embeddings-provider",
         default="",
-        help="hashing|generic|glm|dashscope|openai (default depends on llm)",
+        help="hashing|none|generic|glm|dashscope|openai (default depends on llm)",
     )
     parser.add_argument("--embeddings-model", default=None)
     default_store_dir = _env(

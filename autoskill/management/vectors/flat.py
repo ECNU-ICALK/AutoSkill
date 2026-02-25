@@ -63,6 +63,12 @@ class FlatFileVectorIndex(VectorIndex):
         with self._lock:
             return k in self._id_to_pos
 
+    def ids(self) -> List[str]:
+        """Returns all indexed keys (best-effort helper for maintenance sync)."""
+
+        with self._lock:
+            return list(self._ids)
+
     def get(self, key: str) -> Optional[List[float]]:
         """Returns one vector by key, or None when key/dims are missing."""
 

@@ -23,6 +23,8 @@ Notes:
 from __future__ import annotations
 
 import collections
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -35,6 +37,8 @@ from ..formats.agent_skill import load_agent_skill_dir, upsert_skill_md_id
 from ..identity import META_IDENTITY_DESC_NORM, identity_desc_norm_from_fields, normalize_identity_text
 from ...models import Skill, SkillHit, SkillStatus
 from ..vectors import FlatFileVectorIndex, VectorIndex
+from .bm25_index import PersistentBM25Index
+from .hybrid_rank import blend_scores, bm25_normalized_scores
 from .base import SkillStore
 
 
@@ -54,6 +58,10 @@ def _skill_to_text(skill: Skill) -> str:
         f"Triggers:\n{triggers}\n"
         f"Tags: {tags}\n"
     )
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()
 
 
 def _passes_filters(skill: Skill, filters: Dict[str, Any]) -> bool:
@@ -169,6 +177,7 @@ class LocalSkillStore(SkillStore):
         self,
         *,
         embeddings: EmbeddingModel,
+        bm25_weight: float = 0.1,
         path: str,
         max_depth: int = 6,
         cache_vectors: bool = True,
@@ -181,6 +190,10 @@ class LocalSkillStore(SkillStore):
         library_dirs: Optional[List[Tuple[str, str]]] = None,
         include_libraries: bool = True,
         include_legacy_root: bool = False,
+        keyword_index_dirname: str = "index",
+        bm25_index_name: str = "skills-bm25",
+        bm25_startup_mode: str = "incremental",
+        bm25_health_strict: bool = False,
     ) -> None:
         """
         Creates a filesystem-backed skill store with optional persistent vector cache.
@@ -192,9 +205,16 @@ class LocalSkillStore(SkillStore):
         """
 
         self._embeddings = embeddings
+        self._embedding_disabled = bool(getattr(embeddings, "disabled", False))
+        self._bm25_weight = float(bm25_weight)
+        if self._bm25_weight < 0.0:
+            self._bm25_weight = 0.0
+        if self._bm25_weight > 1.0:
+            self._bm25_weight = 1.0
         self._root_dir = os.path.abspath(os.path.expanduser(str(path)))
         self._max_depth = max(0, int(max_depth))
         self._cache_vectors = bool(cache_vectors)
+        self._vector_index_name = str(vector_index_name or "skills").strip() or "skills"
         self._vector_cache_dir = os.path.join(
             self._root_dir, str(vector_cache_dirname).replace("/", os.sep)
         )
@@ -208,6 +228,14 @@ class LocalSkillStore(SkillStore):
         self._library_dirs = list(library_dirs or [])
         self._include_libraries = bool(include_libraries)
         self._include_legacy_root = bool(include_legacy_root)
+        mode = str(bm25_startup_mode or "incremental").strip().lower()
+        if mode not in {"incremental", "rebuild"}:
+            mode = "incremental"
+        self._bm25_startup_mode = mode
+        self._bm25_health_strict = bool(bm25_health_strict)
+        self._keyword_index_dir = os.path.join(
+            self._root_dir, str(keyword_index_dirname).replace("/", os.sep)
+        )
 
         self._lock = threading.RLock()
         self._records: Dict[str, _Record] = {}
@@ -218,10 +246,23 @@ class LocalSkillStore(SkillStore):
         # O(1) exact dedupe index for user skills by normalized description identity.
         self._identity_desc_index_by_user: Dict[str, Dict[str, set[str]]] = {}
         self._identity_desc_key_by_skill: Dict[str, Tuple[str, str]] = {}
+        # BM25 doc cache keyed by skill id; updated on upsert/delete/load.
+        self._bm25_docs_by_id: Dict[str, str] = {}
+        self._bm25_doc_hash_by_id: Dict[str, str] = {}
+        self._bm25_index = PersistentBM25Index(
+            dir_path=self._keyword_index_dir,
+            name=str(bm25_index_name or "skills-bm25"),
+        )
+        self._bm25_health_checked = False
+        self._vector_doc_hash_by_id: Dict[str, str] = {}
+        self._vector_doc_hash_path = os.path.join(
+            self._vector_cache_dir, f"{self._vector_index_name}.doc_hash.json"
+        )
 
         os.makedirs(self._root_dir, exist_ok=True)
         if self._cache_vectors:
             os.makedirs(self._vector_cache_dir, exist_ok=True)
+            self._load_vector_doc_hash_manifest()
             if vector_index is not None:
                 self._index = vector_index
                 if not self._vector_backend_name:
@@ -229,7 +270,7 @@ class LocalSkillStore(SkillStore):
             else:
                 self._maybe_migrate_legacy_vector_cache()
                 self._index = FlatFileVectorIndex(
-                    dir_path=self._vector_cache_dir, name=str(vector_index_name or "skills")
+                    dir_path=self._vector_cache_dir, name=self._vector_index_name
                 )
                 if not self._vector_backend_name:
                     self._vector_backend_name = "flat"
@@ -293,10 +334,30 @@ class LocalSkillStore(SkillStore):
             os.makedirs(dir_path, exist_ok=True)
             self._write_skill_files(skill=skill, dir_path=dir_path)
 
-            vector = self._embed_skill(skill)
+            vector: Optional[List[float]] = None
+            if not self._embedding_disabled:
+                try:
+                    vector = self._embed_skill(skill)
+                except Exception:
+                    vector = None
             if self._cache_vectors and self._index is not None:
-                self._index.upsert(skill.id, vector)
-                self._index.save()
+                if vector is not None:
+                    self._index.upsert(skill.id, vector)
+                    self._index.save()
+                    self._set_vector_doc_hash_locked(skill)
+                else:
+                    # Avoid stale vector hits after skill text changed but embedding failed/disabled.
+                    try:
+                        if self._index.delete(skill.id):
+                            self._index.save()
+                    except Exception:
+                        pass
+                    self._remove_vector_doc_hash_locked(skill.id)
+            else:
+                if vector is not None:
+                    self._set_vector_doc_hash_locked(skill)
+                else:
+                    self._remove_vector_doc_hash_locked(skill.id)
 
             self._deindex_identity_desc_locked(skill.id)
             self._records[skill.id] = _Record(
@@ -307,6 +368,8 @@ class LocalSkillStore(SkillStore):
                 owner=user_id,
             )
             self._index_identity_desc_locked(self._records[skill.id])
+            self._set_bm25_doc_locked(skill)
+            self._save_vector_doc_hash_manifest_locked()
 
     def get(self, skill_id: str) -> Optional[Skill]:
         """Returns a skill by id if loaded in memory."""
@@ -327,6 +390,8 @@ class LocalSkillStore(SkillStore):
 
             self._records.pop(skill_id, None)
             self._deindex_identity_desc_locked(skill_id)
+            self._remove_bm25_doc_locked(skill_id)
+            self._remove_vector_doc_hash_locked(skill_id)
             try:
                 shutil.rmtree(rec.dir_path)
             except Exception:
@@ -337,6 +402,7 @@ class LocalSkillStore(SkillStore):
                         self._index.save()
                 except Exception:
                     pass
+            self._save_vector_doc_hash_manifest_locked()
             return True
 
     def list(self, *, user_id: str) -> List[Skill]:
@@ -361,7 +427,7 @@ class LocalSkillStore(SkillStore):
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
         """
-        Searches relevant skills by vector similarity.
+        Searches relevant skills by hybrid similarity (vector + BM25 keyword).
 
         Behavior notes:
         - supports `scope` filters (`user` / `library` / `all`)
@@ -384,8 +450,6 @@ class LocalSkillStore(SkillStore):
                 want_ids = [want_ids_raw]
             want_id_set = {str(x).strip() for x in want_ids if str(x).strip()} or None
         uid = str(user_id or "").strip()
-        qvec = self._embeddings.embed([query])[0]
-        qdims = len(qvec or [])
 
         with self._lock:
             candidate_records: List[_Record] = []
@@ -416,43 +480,87 @@ class LocalSkillStore(SkillStore):
             if not filtered_records:
                 return []
 
-            # Persistent vector index path (recommended).
-            if self._cache_vectors and self._index is not None:
-                if qdims and self._index.dims is not None and int(self._index.dims) != int(qdims):
-                    self._index.reset(dims=qdims)
-                    self._index.save()
+            # BM25 scores are always available and serve as both supplement and fallback.
+            docs_by_id: Dict[str, str] = {
+                str(r.skill.id): (
+                    self._bm25_docs_by_id.get(str(r.skill.id))
+                    or _skill_to_text(r.skill)
+                )
+                for r in filtered_records
+            }
+            for sid, txt in list(docs_by_id.items()):
+                if sid and txt and sid not in self._bm25_docs_by_id:
+                    self._bm25_docs_by_id[sid] = txt
+            if self._bm25_index is not None:
+                bm25_scores = self._bm25_index.search_scores(
+                    query=query,
+                    keys=list(docs_by_id.keys()),
+                    top_k=0,
+                )
+            else:
+                bm25_scores = bm25_normalized_scores(query=query, docs=docs_by_id)
 
-                missing = [r for r in filtered_records if not self._index.has(r.skill.id)]
-                if missing:
-                    if allow_partial_vectors:
-                        self._schedule_embed_records(missing)
-                    else:
-                        self._embed_missing_records(missing)
+            vector_scores: Dict[str, float] = {}
+            use_vector = False
+            qvec: List[float] = []
+            qdims = 0
+            if not self._embedding_disabled:
+                try:
+                    qvec = self._embeddings.embed([query])[0]
+                    qdims = len(qvec or [])
+                    use_vector = bool(qvec)
+                except Exception:
+                    use_vector = False
+
+            if use_vector:
+                # Persistent vector index path (recommended).
+                if self._cache_vectors and self._index is not None:
+                    if qdims and self._index.dims is not None and int(self._index.dims) != int(qdims):
+                        self._index.reset(dims=qdims)
                         self._index.save()
 
-                keys = [r.skill.id for r in filtered_records]
-                ranked = self._index.search(qvec, keys=keys, top_k=int(limit))
-                hits: List[SkillHit] = []
-                for sid, score in ranked:
-                    rec2 = self._records.get(sid)
-                    if rec2 is None:
-                        continue
-                    hits.append(SkillHit(skill=rec2.skill, score=float(score)))
-                return hits
+                    missing = [r for r in filtered_records if not self._has_fresh_vector_locked(r)]
+                    if missing:
+                        if allow_partial_vectors:
+                            self._schedule_embed_records(missing)
+                        else:
+                            self._embed_missing_records(missing)
+                            self._index.save()
 
-            # Fallback: in-memory scan (no persistent vector index).
-            missing2 = [
-                r for r in filtered_records if r.vector is None or (qdims and len(r.vector) != qdims)
-            ]
-            if missing2:
-                if allow_partial_vectors:
-                    self._schedule_embed_records(missing2)
+                    keys = [r.skill.id for r in filtered_records]
+                    top_k = max(1, min(len(keys), max(int(limit) * 8, 64)))
+                    ranked = self._index.search(qvec, keys=keys, top_k=top_k)
+                    for sid, score in ranked:
+                        vector_scores[str(sid)] = float(score)
                 else:
-                    self._embed_missing_records(missing2)
+                    # Fallback: in-memory scan (no persistent vector index).
+                    missing2 = [
+                        r
+                        for r in filtered_records
+                        if (not self._has_fresh_vector_locked(r))
+                        or (qdims and (r.vector is None or len(r.vector) != qdims))
+                    ]
+                    if missing2:
+                        if allow_partial_vectors:
+                            self._schedule_embed_records(missing2)
+                        else:
+                            self._embed_missing_records(missing2)
+
+                    for rec in filtered_records:
+                        sid = str(rec.skill.id)
+                        vector_scores[sid] = _dot(qvec, rec.vector or [])
+
+            merged_scores = blend_scores(
+                vector_scores=vector_scores,
+                bm25_scores=bm25_scores,
+                bm25_weight=self._bm25_weight,
+                use_vector=use_vector,
+            )
 
             candidates: List[Tuple[float, Skill]] = []
             for rec in filtered_records:
-                score = _dot(qvec, rec.vector or [])
+                sid = str(rec.skill.id)
+                score = float(merged_scores.get(sid, 0.0))
                 candidates.append((score, rec.skill))
 
             candidates.sort(key=lambda x: x[0], reverse=True)
@@ -488,10 +596,10 @@ class LocalSkillStore(SkillStore):
             records = self._collect_records_for_scope_locked(user_id=uid, scope=scope_s)
             total = len(records)
             if self._cache_vectors and self._index is not None:
-                indexed = sum(1 for r in records if self._index.has(r.skill.id))
+                indexed = sum(1 for r in records if self._has_fresh_vector_locked(r))
                 dims = self._index.dims
             else:
-                indexed = sum(1 for r in records if r.vector is not None)
+                indexed = sum(1 for r in records if self._has_fresh_vector_locked(r))
                 dims = len(records[0].vector or []) if records and records[0].vector else None
 
         with self._bg_embed_lock:
@@ -543,16 +651,19 @@ class LocalSkillStore(SkillStore):
                 if force:
                     if scope_s == "all":
                         self._index.reset(dims=None)
+                        self._vector_doc_hash_by_id = {}
                     else:
                         for rec in records:
                             self._index.delete(rec.skill.id)
+                            self._remove_vector_doc_hash_locked(rec.skill.id)
                     self._index.save()
-                missing = records if force else [r for r in records if not self._index.has(r.skill.id)]
+                missing = records if force else [r for r in records if not self._has_fresh_vector_locked(r)]
             else:
                 if force:
                     for rec in records:
                         rec.vector = None
-                missing = records if force else [r for r in records if r.vector is None]
+                        self._remove_vector_doc_hash_locked(rec.skill.id)
+                missing = records if force else [r for r in records if not self._has_fresh_vector_locked(r)]
 
             if not missing:
                 return 0
@@ -563,7 +674,74 @@ class LocalSkillStore(SkillStore):
             self._embed_missing_records(missing)
             if self._cache_vectors and self._index is not None:
                 self._index.save()
+            self._save_vector_doc_hash_manifest_locked()
             return int(len(missing))
+
+    def refresh_from_disk(
+        self,
+        *,
+        rebuild_vectors: bool = True,
+        force_rebuild_vectors: bool = False,
+        blocking: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Reloads skills from disk and optionally refreshes retrieval indices.
+
+        This is designed for startup/offline maintenance so that:
+        - newly imported skill folders become visible immediately
+        - normalized/rewritten SKILL.md ids are reflected in memory
+        - BM25 and vector mappings are kept in sync with latest ids
+        """
+
+        self._load_existing()
+        with self._lock:
+            users = sorted(
+                {
+                    str(r.owner or "").strip()
+                    for r in self._records.values()
+                    if r.scope == "user"
+                    and str(r.owner or "").strip()
+                    and r.skill.status != SkillStatus.ARCHIVED
+                }
+            )
+            has_library = any(
+                r.scope == "library" and r.skill.status != SkillStatus.ARCHIVED
+                for r in self._records.values()
+            )
+            total = int(sum(1 for r in self._records.values() if r.skill.status != SkillStatus.ARCHIVED))
+
+        rebuilt_user = 0
+        rebuilt_library = 0
+        if rebuild_vectors:
+            for uid in users:
+                rebuilt_user += int(
+                    self.rebuild_vectors(
+                        user_id=uid,
+                        scope="user",
+                        force=bool(force_rebuild_vectors),
+                        blocking=bool(blocking),
+                    )
+                )
+            if has_library:
+                rebuilt_library = int(
+                    self.rebuild_vectors(
+                        user_id=(users[0] if users else "u1"),
+                        scope="library",
+                        force=bool(force_rebuild_vectors),
+                        blocking=bool(blocking),
+                    )
+                )
+
+        return {
+            "reloaded": total,
+            "users": users,
+            "rebuild_vectors": bool(rebuild_vectors),
+            "force_rebuild_vectors": bool(force_rebuild_vectors),
+            "blocking": bool(blocking),
+            "vectors_rebuilt_user": int(rebuilt_user),
+            "vectors_rebuilt_library": int(rebuilt_library),
+            "vectors_rebuilt_total": int(rebuilt_user + rebuilt_library),
+        }
 
     def _collect_records_for_scope_locked(self, *, user_id: str, scope: str) -> List[_Record]:
         """
@@ -707,6 +885,25 @@ class LocalSkillStore(SkillStore):
             self._normalize_loaded_user_dirs(loaded)
             self._records = loaded
             self._rebuild_identity_desc_index_locked()
+            self._rebuild_bm25_docs_locked()
+            self._bm25_health_checked = False
+            if self._bm25_startup_mode == "rebuild":
+                if self._bm25_index is not None:
+                    try:
+                        stat = self._bm25_index.rebuild_from_docs(self._bm25_docs_by_id)
+                        print(
+                            "[autoskill][bm25] startup rebuild: "
+                            f"docs={stat.get('docs', 0)} built={stat.get('built', 0)}"
+                        )
+                    except Exception as e:
+                        print(f"[autoskill][bm25] startup rebuild failed: {e}")
+                        self._ensure_bm25_index_health_locked(force=True)
+                        self._sync_bm25_index_locked()
+            else:
+                self._ensure_bm25_index_health_locked(force=True)
+                self._sync_bm25_index_locked()
+            self._sync_vector_doc_hash_locked()
+            self._sync_vector_index_locked()
 
     def _normalize_loaded_user_dirs(self, loaded: Dict[str, _Record]) -> None:
         """
@@ -860,6 +1057,215 @@ class LocalSkillStore(SkillStore):
         for rec in self._records.values():
             self._index_identity_desc_locked(rec)
 
+    def _rebuild_bm25_docs_locked(self) -> None:
+        self._bm25_docs_by_id = {}
+        self._bm25_doc_hash_by_id = {}
+        for rec in self._records.values():
+            sid = str(getattr(rec.skill, "id", "") or "").strip()
+            if not sid:
+                continue
+            txt = _skill_to_text(rec.skill)
+            self._bm25_docs_by_id[sid] = txt
+            self._bm25_doc_hash_by_id[sid] = _hash_text(txt)
+
+    def _set_bm25_doc_locked(self, skill: Skill) -> None:
+        sid = str(getattr(skill, "id", "") or "").strip()
+        if not sid:
+            return
+        txt = _skill_to_text(skill)
+        self._bm25_docs_by_id[sid] = txt
+        h = _hash_text(txt)
+        self._bm25_doc_hash_by_id[sid] = h
+        if self._bm25_index is not None:
+            existing_hash = self._bm25_index.doc_hash_of(sid)
+            if existing_hash and existing_hash == h and self._bm25_index.has(sid):
+                changed = False
+            else:
+                changed = self._bm25_index.upsert(sid, txt)
+            if changed:
+                self._bm25_index.save()
+
+    def _remove_bm25_doc_locked(self, skill_id: str) -> None:
+        sid = str(skill_id or "").strip()
+        if not sid:
+            return
+        self._bm25_docs_by_id.pop(sid, None)
+        self._bm25_doc_hash_by_id.pop(sid, None)
+        if self._bm25_index is not None:
+            changed = self._bm25_index.delete(sid)
+            if changed:
+                self._bm25_index.save()
+
+    def _sync_bm25_index_locked(self) -> None:
+        if self._bm25_index is None:
+            return
+        self._ensure_bm25_index_health_locked(force=False)
+        live = set(self._bm25_docs_by_id.keys())
+        changed = False
+        for sid in self._bm25_index.ids():
+            if sid not in live:
+                changed = self._bm25_index.delete(sid) or changed
+        for sid, txt in self._bm25_docs_by_id.items():
+            want_hash = str(self._bm25_doc_hash_by_id.get(sid) or "")
+            have_hash = self._bm25_index.doc_hash_of(sid)
+            if have_hash and want_hash and have_hash == want_hash and self._bm25_index.has(sid):
+                continue
+            changed = self._bm25_index.upsert(sid, txt) or changed
+        if changed:
+            self._bm25_index.save()
+
+    def _ensure_bm25_index_health_locked(self, *, force: bool = False) -> None:
+        """
+        Detects local BM25 index corruption/inconsistency and auto-repairs when needed.
+
+        Repair strategy: rebuild postings/statistics from in-memory `_bm25_docs_by_id`.
+        """
+
+        if self._bm25_index is None:
+            return
+        if self._bm25_health_checked and not force:
+            return
+        if force:
+            try:
+                # Re-read persisted files to detect on-disk corruption/mismatch at startup refresh.
+                self._bm25_index.load()
+            except Exception:
+                pass
+        try:
+            report = self._bm25_index.validate(strict=self._bm25_health_strict)
+        except Exception:
+            report = {"ok": False, "issues": ["validate_error"]}
+        if bool(report.get("ok")):
+            self._bm25_health_checked = True
+            return
+        try:
+            rebuilt = self._bm25_index.rebuild_from_docs(self._bm25_docs_by_id)
+            print(
+                "[autoskill][bm25] index unhealthy; auto-rebuilt "
+                f"(docs={rebuilt.get('docs', 0)}, built={rebuilt.get('built', 0)}), "
+                f"issues={report.get('issues', [])}"
+            )
+        except Exception as e:
+            print(
+                "[autoskill][bm25] index unhealthy; auto-rebuild failed "
+                f"issues={report.get('issues', [])}, error={e}"
+            )
+        self._bm25_health_checked = True
+
+    def _load_vector_doc_hash_manifest(self) -> None:
+        self._vector_doc_hash_by_id = {}
+        if not self._cache_vectors:
+            return
+        path = str(self._vector_doc_hash_path or "").strip()
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+            if not isinstance(obj, dict):
+                return
+            out: Dict[str, str] = {}
+            for sid, h in obj.items():
+                s = str(sid or "").strip()
+                hh = str(h or "").strip()
+                if s and hh:
+                    out[s] = hh
+            self._vector_doc_hash_by_id = out
+        except Exception:
+            self._vector_doc_hash_by_id = {}
+
+    def _save_vector_doc_hash_manifest_locked(self) -> None:
+        if not self._cache_vectors:
+            return
+        path = str(self._vector_doc_hash_path or "").strip()
+        if not path:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._vector_doc_hash_by_id, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp, path)
+        except Exception:
+            return
+
+    def _skill_text_hash(self, skill: Skill) -> str:
+        return _hash_text(_skill_to_text(skill))
+
+    def _set_vector_doc_hash_locked(self, skill: Skill) -> None:
+        sid = str(getattr(skill, "id", "") or "").strip()
+        if not sid:
+            return
+        self._vector_doc_hash_by_id[sid] = self._skill_text_hash(skill)
+
+    def _remove_vector_doc_hash_locked(self, skill_id: str) -> None:
+        sid = str(skill_id or "").strip()
+        if not sid:
+            return
+        self._vector_doc_hash_by_id.pop(sid, None)
+
+    def _sync_vector_doc_hash_locked(self) -> None:
+        live_ids = {str(sid).strip() for sid in self._records.keys() if str(sid).strip()}
+        changed = False
+        for sid in list(self._vector_doc_hash_by_id.keys()):
+            if sid in live_ids:
+                continue
+            self._vector_doc_hash_by_id.pop(sid, None)
+            changed = True
+        if changed:
+            self._save_vector_doc_hash_manifest_locked()
+
+    def _has_fresh_vector_locked(self, rec: _Record) -> bool:
+        sid = str(getattr(rec.skill, "id", "") or "").strip()
+        if not sid:
+            return False
+        if self._cache_vectors and self._index is not None:
+            if not self._index.has(sid):
+                return False
+        else:
+            if rec.vector is None:
+                return False
+        want_hash = self._skill_text_hash(rec.skill)
+        got_hash = str(self._vector_doc_hash_by_id.get(sid) or "").strip()
+        return bool(got_hash and got_hash == want_hash)
+
+    def _sync_vector_index_locked(self) -> None:
+        """
+        Best-effort cleanup of stale vector ids that are no longer present in records.
+
+        Currently guaranteed for flat index (and any backend exposing `ids()`).
+        """
+
+        if self._index is None:
+            return
+        ids_fn = getattr(self._index, "ids", None)
+        if not callable(ids_fn):
+            return
+        try:
+            indexed_ids = [str(x).strip() for x in (ids_fn() or []) if str(x).strip()]
+        except Exception:
+            return
+        live_ids = {str(sid).strip() for sid in self._records.keys() if str(sid).strip()}
+        changed = False
+        hash_changed = False
+        for sid in indexed_ids:
+            if sid in live_ids:
+                continue
+            try:
+                changed = bool(self._index.delete(sid)) or changed
+            except Exception:
+                continue
+            if sid in self._vector_doc_hash_by_id:
+                self._vector_doc_hash_by_id.pop(sid, None)
+                hash_changed = True
+        if changed:
+            try:
+                self._index.save()
+            except Exception:
+                pass
+        if hash_changed:
+            self._save_vector_doc_hash_manifest_locked()
+
     def _deindex_identity_desc_locked(self, skill_id: str) -> None:
         sid = str(skill_id or "").strip()
         if not sid:
@@ -1009,6 +1415,9 @@ class LocalSkillStore(SkillStore):
     def _embed_missing_records(self, records: List[_Record]) -> None:
         """Batch-embeds missing vectors and writes results to cache/index."""
 
+        if self._embedding_disabled:
+            return
+
         batch_size = 32
         skills = [r.skill for r in records]
         texts = [_skill_to_text(s) for s in skills]
@@ -1016,7 +1425,10 @@ class LocalSkillStore(SkillStore):
         for i in range(0, len(texts), batch_size):
             chunk_texts = texts[i : i + batch_size]
             chunk_skills = skills[i : i + batch_size]
-            vectors = self._embeddings.embed(chunk_texts)
+            try:
+                vectors = self._embeddings.embed(chunk_texts)
+            except Exception:
+                return
             for s, v in zip(chunk_skills, vectors):
                 rec = self._records.get(s.id)
                 if rec is None:
@@ -1026,6 +1438,8 @@ class LocalSkillStore(SkillStore):
                     self._index.upsert(s.id, vec)
                 else:
                     rec.vector = vec
+                self._set_vector_doc_hash_locked(s)
+        self._save_vector_doc_hash_manifest_locked()
 
     def _schedule_embed_records(self, records: List[_Record]) -> int:
         """
@@ -1033,6 +1447,9 @@ class LocalSkillStore(SkillStore):
 
         Returns how many unique skill IDs were newly scheduled.
         """
+
+        if self._embedding_disabled:
+            return 0
 
         queued = 0
         with self._bg_embed_lock:
@@ -1085,12 +1502,8 @@ class LocalSkillStore(SkillStore):
                     rec = self._records.get(sid)
                     if rec is None:
                         continue
-                    if self._cache_vectors and self._index is not None:
-                        if self._index.has(sid):
-                            continue
-                    else:
-                        if rec.vector is not None:
-                            continue
+                    if self._has_fresh_vector_locked(rec):
+                        continue
                     work.append((sid, _skill_to_text(rec.skill)))
 
             if not work:
@@ -1105,6 +1518,7 @@ class LocalSkillStore(SkillStore):
 
             with self._lock:
                 changed = False
+                hash_changed = False
                 for (sid, _txt), vec in zip(work, vectors):
                     rec = self._records.get(sid)
                     if rec is None:
@@ -1115,8 +1529,12 @@ class LocalSkillStore(SkillStore):
                         changed = True
                     else:
                         rec.vector = vec_f
+                    self._set_vector_doc_hash_locked(rec.skill)
+                    hash_changed = True
                 if changed and self._index is not None:
                     self._index.save()
+                if hash_changed:
+                    self._save_vector_doc_hash_manifest_locked()
 
             self._mark_embed_done(batch_ids)
 
