@@ -545,12 +545,13 @@ python3 -m examples.auto_evalution \
 
 ### 9.6 OpenClaw Plugin (autoskill)
 
-Deploy the sidecar plugin locally:
+Deploy sidecar + native OpenClaw adapter (auto wiring):
 
 ```bash
 python3 OpenClaw-Plugin/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
   --llm-provider internlm \
   --llm-model intern-s1-pro \
   --embeddings-provider qwen \
@@ -561,11 +562,22 @@ python3 OpenClaw-Plugin/install.py \
 Full plugin guide (install, wiring, runtime flow, verification):
 - `OpenClaw-Plugin/README.md`
 
+The installer automatically:
+- installs sidecar scripts
+- installs native lifecycle adapter (`before_agent_start` / `agent_end`)
+- writes adapter load path + plugin entry into `~/.openclaw/openclaw.json`
+- enables adapter entry by default
+
+Important:
+- After installation, restart OpenClaw runtime once so new plugin config is loaded.
+
 This plugin is a skill service (retrieval + offline evolution), not a chat proxy.
 
 - `base_url`: `http://127.0.0.1:9100/v1`
 - `api_key`: value of `AUTOSKILL_PROXY_API_KEY` (or empty if disabled)
-- main endpoint: `POST /v1/autoskill/openclaw/turn`
+- hook endpoint: `POST /v1/autoskill/openclaw/hooks/before_agent_start`
+- hook endpoint: `POST /v1/autoskill/openclaw/hooks/agent_end`
+- compatibility endpoint: `POST /v1/autoskill/openclaw/turn`
 
 Service examples:
 

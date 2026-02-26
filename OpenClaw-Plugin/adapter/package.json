@@ -1,0 +1,23 @@
+{
+  "name": "autoskill-openclaw-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw lifecycle adapter for AutoSkill sidecar.",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "clawbot": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "moltbot": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}
+

@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
+from typing import Optional
+
+ADAPTER_PLUGIN_ID = "autoskill-openclaw-adapter"
 
 
 def _write_text(path: Path, content: str, executable: bool = False) -> None:
@@ -19,6 +24,82 @@ def _write_text(path: Path, content: str, executable: bool = False) -> None:
 def _default_repo_dir() -> Path:
     # OpenClaw-Plugin/install.py -> repo root is parent directory.
     return Path(__file__).resolve().parents[1]
+
+
+def _default_adapter_dir(workspace_dir: Path) -> Path:
+    return (workspace_dir / "extensions" / ADAPTER_PLUGIN_ID).resolve()
+
+
+def _sync_tree(src: Path, dst: Path) -> None:
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+
+
+def _load_json_dict(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"Invalid JSON file: {path}. Please fix it before installation.") from e
+    return obj if isinstance(obj, dict) else {}
+
+
+def _save_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _upsert_openclaw_plugin_config(
+    *,
+    workspace_dir: Path,
+    adapter_dir: Path,
+    proxy_port: int,
+) -> Path:
+    conf_path = (workspace_dir / "openclaw.json").resolve()
+    root = _load_json_dict(conf_path)
+    plugins = root.get("plugins")
+    if not isinstance(plugins, dict):
+        plugins = {}
+        root["plugins"] = plugins
+
+    load = plugins.get("load")
+    if not isinstance(load, dict):
+        load = {}
+        plugins["load"] = load
+    paths = load.get("paths")
+    if not isinstance(paths, list):
+        paths = []
+        load["paths"] = paths
+    adapter_dir_s = str(adapter_dir)
+    if adapter_dir_s not in [str(x) for x in paths]:
+        paths.append(adapter_dir_s)
+
+    entries = plugins.get("entries")
+    if not isinstance(entries, dict):
+        entries = {}
+        plugins["entries"] = entries
+    entry = entries.get(ADAPTER_PLUGIN_ID)
+    if not isinstance(entry, dict):
+        entry = {}
+    # One-click behavior: always enable adapter after installation.
+    entry["enabled"] = True
+    cfg = entry.get("config")
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg.setdefault("baseUrl", f"http://127.0.0.1:{int(proxy_port)}/v1")
+    cfg.setdefault("skillScope", "all")
+    cfg.setdefault("topK", 1)
+    cfg.setdefault("minScore", 0.4)
+    cfg.setdefault("recallEnabled", True)
+    cfg.setdefault("extractOnAgentEnd", True)
+    cfg.setdefault("successOnly", True)
+    entry["config"] = cfg
+    entries[ADAPTER_PLUGIN_ID] = entry
+
+    _save_json(conf_path, root)
+    return conf_path
 
 
 def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Path) -> str:
@@ -45,6 +126,7 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         f"AUTOSKILL_LLM_MODEL={args.llm_model}\n"
         f"AUTOSKILL_EMBEDDINGS_PROVIDER={args.embeddings_provider}\n"
         f"AUTOSKILL_EMBEDDINGS_MODEL={args.embeddings_model}\n"
+        f"AUTOSKILL_PROXY_MODELS={args.served_models_json}\n"
         f"AUTOSKILL_PROXY_MODELS_JSON={args.served_models_json}\n"
         "AUTOSKILL_PROXY_API_KEY=\n"
         "INTERNLM_API_KEY=\n"
@@ -130,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Install AutoSkill OpenClaw plugin sidecar.")
     parser.add_argument("--workspace-dir", default="~/.openclaw")
     parser.add_argument("--install-dir", default="~/.openclaw/plugins/autoskill-openclaw-plugin")
+    parser.add_argument(
+        "--adapter-dir",
+        default="",
+        help="OpenClaw adapter install dir (default: <workspace>/extensions/autoskill-openclaw-adapter).",
+    )
     parser.add_argument("--repo-dir", default="", help="AutoSkill repository root directory.")
     parser.add_argument("--python-bin", default="python3")
     parser.add_argument("--proxy-port", type=int, default=9100)
@@ -142,6 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--served-models-json",
         default='[{"id":"intern-s1-pro","object":"model","owned_by":"internlm"}]',
         help="JSON list exposed by /v1/models",
+    )
+    parser.add_argument(
+        "--skip-openclaw-config-update",
+        action="store_true",
+        help="Do not write plugin load/config into ~/.openclaw/openclaw.json.",
     )
     parser.add_argument("--start", action="store_true")
     return parser
@@ -156,6 +248,11 @@ def main() -> None:
         if str(args.repo_dir).strip()
         else _default_repo_dir().resolve()
     )
+    adapter_dir = (
+        Path(os.path.expanduser(str(args.adapter_dir))).resolve()
+        if str(args.adapter_dir).strip()
+        else _default_adapter_dir(workspace_dir)
+    )
 
     if not (repo_dir / "OpenClaw-Plugin" / "run_proxy.py").exists():
         raise SystemExit(f"Invalid repo dir, missing OpenClaw-Plugin/run_proxy.py: {repo_dir}")
@@ -163,6 +260,13 @@ def main() -> None:
         raise SystemExit(f"Invalid repo dir, missing OpenClaw-Plugin/service_runtime.py: {repo_dir}")
     if not (repo_dir / "examples" / "interactive_chat.py").exists():
         raise SystemExit(f"Invalid repo dir, missing examples/interactive_chat.py: {repo_dir}")
+    adapter_src = (repo_dir / "OpenClaw-Plugin" / "adapter").resolve()
+    if not (adapter_src / "index.js").exists():
+        raise SystemExit(f"Invalid repo dir, missing OpenClaw-Plugin/adapter/index.js: {repo_dir}")
+    if not (adapter_src / "openclaw.plugin.json").exists():
+        raise SystemExit(f"Invalid repo dir, missing OpenClaw-Plugin/adapter/openclaw.plugin.json: {repo_dir}")
+    if not (adapter_src / "package.json").exists():
+        raise SystemExit(f"Invalid repo dir, missing OpenClaw-Plugin/adapter/package.json: {repo_dir}")
 
     install_dir.mkdir(parents=True, exist_ok=True)
     (workspace_dir / "autoskill" / "SkillBank").mkdir(parents=True, exist_ok=True)
@@ -176,22 +280,39 @@ def main() -> None:
     _write_text(install_dir / "start.sh", _start_sh(), executable=True)
     _write_text(install_dir / "stop.sh", _stop_sh(), executable=True)
     _write_text(install_dir / "status.sh", _status_sh(), executable=True)
+    _sync_tree(adapter_src, adapter_dir)
+
+    conf_path: Optional[Path] = None
+    if not bool(args.skip_openclaw_config_update):
+        conf_path = _upsert_openclaw_plugin_config(
+            workspace_dir=workspace_dir,
+            adapter_dir=adapter_dir,
+            proxy_port=int(args.proxy_port),
+        )
 
     print("[autoskill-openclaw-plugin] installed")
     print("[autoskill-openclaw-plugin] install_dir:", install_dir)
+    print("[autoskill-openclaw-plugin] adapter_dir:", adapter_dir)
     print("[autoskill-openclaw-plugin] env:", env_path)
     print("[autoskill-openclaw-plugin] start:", install_dir / "start.sh")
     print("[autoskill-openclaw-plugin] stop:", install_dir / "stop.sh")
     print("[autoskill-openclaw-plugin] status:", install_dir / "status.sh")
+    if conf_path is not None:
+        print("[autoskill-openclaw-plugin] openclaw config updated:", conf_path)
     print("")
-    print("OpenClaw plugin endpoint suggestion:")
+    print("OpenClaw plugin endpoints:")
     print(f"  base_url: http://127.0.0.1:{int(args.proxy_port)}/v1")
-    print("  main API: POST /v1/autoskill/openclaw/turn")
+    print("  hook API: POST /v1/autoskill/openclaw/hooks/before_agent_start")
+    print("  hook API: POST /v1/autoskill/openclaw/hooks/agent_end")
+    print("  compat API: POST /v1/autoskill/openclaw/turn")
     print("  api_key : <AUTOSKILL_PROXY_API_KEY or empty>")
     print("")
-    print("If OpenClaw supports custom headers, pass:")
-    print("  X-AutoSkill-User: <your_user_id>")
-    print("or include user in request body.")
+    print("Adapter plugin id:")
+    print(f"  {ADAPTER_PLUGIN_ID}")
+    print("")
+    if conf_path is None:
+        print("Note: --skip-openclaw-config-update was used.")
+        print("      Please add adapter path and plugin entry into openclaw.json manually.")
 
     if args.start:
         subprocess.run([str(install_dir / "start.sh")], check=False)

@@ -13,6 +13,12 @@
 - Runtime install path (created by installer):
 - `~/.openclaw/plugins/autoskill-openclaw-plugin`
 
+- OpenClaw native adapter path (auto-installed):
+- `~/.openclaw/extensions/autoskill-openclaw-adapter`
+
+- OpenClaw config (auto-updated by installer):
+- `~/.openclaw/openclaw.json`
+
 - Skill storage (default):
 - `~/.openclaw/autoskill/SkillBank`
 
@@ -58,6 +64,9 @@ Recommended hook lifecycle:
 Note:
 - `agent_end` supports success gating (`success`/`task_success`/`objective_met`).
 - Existing `/v1/autoskill/openclaw/turn` remains available for single-call integration.
+- The installer writes adapter load path + plugin entry into `~/.openclaw/openclaw.json`, so no manual hook wiring is required.
+- If `openclaw.json` is invalid JSON, installer will stop instead of overwriting it.
+- The adapter uses OpenClaw native hook registration (`registerHook`) with fallback to `on` for compatibility.
 
 ## 4. Prerequisites
 
@@ -76,6 +85,7 @@ python3 -m pip install -e .
 python3 OpenClaw-Plugin/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
   --repo-dir "$(pwd)" \
   --llm-provider internlm \
   --llm-model intern-s1-pro \
@@ -91,6 +101,7 @@ python3 -m pip install -e .
 python3 OpenClaw-Plugin/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
   --repo-dir "$(pwd)" \
   --llm-provider internlm \
   --llm-model intern-s1-pro \
@@ -105,10 +116,14 @@ Generated files:
 - `~/.openclaw/plugins/autoskill-openclaw-plugin/start.sh`
 - `~/.openclaw/plugins/autoskill-openclaw-plugin/stop.sh`
 - `~/.openclaw/plugins/autoskill-openclaw-plugin/status.sh`
+- `~/.openclaw/extensions/autoskill-openclaw-adapter/index.js`
+- `~/.openclaw/extensions/autoskill-openclaw-adapter/openclaw.plugin.json`
+- `~/.openclaw/extensions/autoskill-openclaw-adapter/package.json`
+- `~/.openclaw/openclaw.json` (updated: `plugins.load.paths` + `plugins.entries.autoskill-openclaw-adapter`)
 
 ## 6. Startup Workflows
 
-### Workflow A: Start Service First, Then Connect OpenClaw
+### Workflow A: Install Once, Then Start Sidecar
 
 1. Edit plugin env:
 
@@ -136,13 +151,20 @@ curl http://127.0.0.1:9100/health
 curl http://127.0.0.1:9100/v1/autoskill/capabilities
 ```
 
-4. Connect OpenClaw to:
+4. Restart OpenClaw runtime so it reloads plugin config from `~/.openclaw/openclaw.json`.
 
-- `base_url`: `http://127.0.0.1:9100/v1`
-- `api_key`: `AUTOSKILL_PROXY_API_KEY` value (or empty)
-- hook endpoint (recommended): `POST /v1/autoskill/openclaw/hooks/before_agent_start`
-- hook endpoint (recommended): `POST /v1/autoskill/openclaw/hooks/agent_end`
-- compatibility endpoint: `POST /v1/autoskill/openclaw/turn`
+5. (Optional) confirm adapter entry:
+
+```bash
+cat ~/.openclaw/openclaw.json
+```
+
+Expected fields:
+- `plugins.load.paths` includes `~/.openclaw/extensions/autoskill-openclaw-adapter`
+- `plugins.entries.autoskill-openclaw-adapter.enabled = true`
+- `plugins.entries.autoskill-openclaw-adapter.config.baseUrl = http://127.0.0.1:9100/v1`
+- If sidecar auth is enabled, set `plugins.entries.autoskill-openclaw-adapter.config.apiKey`
+  or provide `AUTOSKILL_PROXY_API_KEY` in OpenClaw runtime environment.
 
 ### Workflow B: Install and Start in One Command
 
@@ -150,6 +172,7 @@ curl http://127.0.0.1:9100/v1/autoskill/capabilities
 python3 OpenClaw-Plugin/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
   --repo-dir "$(pwd)" \
   --llm-provider internlm \
   --llm-model intern-s1-pro \
@@ -162,6 +185,15 @@ Then verify:
 
 ```bash
 curl http://127.0.0.1:9100/health
+```
+
+Important:
+- Restart OpenClaw runtime once after installation/start, otherwise the adapter hook config may not be loaded yet.
+
+If you do not want auto config patch:
+
+```bash
+python3 OpenClaw-Plugin/install.py --skip-openclaw-config-update
 ```
 
 ## 7. OpenClaw Call Examples

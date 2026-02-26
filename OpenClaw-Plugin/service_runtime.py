@@ -91,7 +91,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
 
     def openclaw_before_agent_start_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
         """
-        MemOS-style pre-run hook:
+        pre-run hook:
         - retrieve related skills
         - return context text + a ready-to-inject system message
         """

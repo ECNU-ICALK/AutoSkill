@@ -1,0 +1,83 @@
+{
+  "id": "autoskill-openclaw-adapter",
+  "name": "AutoSkill OpenClaw Adapter",
+  "description": "Inject retrieved skills before each run and schedule skill evolution after successful runs.",
+  "version": "0.1.0",
+  "kind": "lifecycle",
+  "main": "./index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:9100/v1",
+        "description": "AutoSkill sidecar base URL."
+      },
+      "apiKey": {
+        "type": "string",
+        "default": "",
+        "description": "Optional API key for the AutoSkill sidecar."
+      },
+      "userId": {
+        "type": "string",
+        "default": "",
+        "description": "Optional fixed user id override."
+      },
+      "skillScope": {
+        "type": "string",
+        "enum": [
+          "all",
+          "user",
+          "library"
+        ],
+        "default": "all"
+      },
+      "topK": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 1
+      },
+      "minScore": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.4
+      },
+      "recallEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "extractOnAgentEnd": {
+        "type": "boolean",
+        "default": true
+      },
+      "successOnly": {
+        "type": "boolean",
+        "default": true
+      },
+      "includeUserFeedback": {
+        "type": "boolean",
+        "default": true
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "maximum": 30000,
+        "default": 5000
+      },
+      "retries": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 3,
+        "default": 1
+      },
+      "logPayload": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "additionalProperties": false
+  }
+}
+

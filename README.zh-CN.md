@@ -543,12 +543,13 @@ python3 -m examples.auto_evalution \
 
 ### 9.6 OpenClaw 插件
 
-本地部署侧车插件：
+本地部署侧车服务 + OpenClaw 原生适配器（自动接线）：
 
 ```bash
 python3 OpenClaw-Plugin/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
   --llm-provider internlm \
   --llm-model intern-s1-pro \
   --embeddings-provider qwen \
@@ -559,11 +560,22 @@ python3 OpenClaw-Plugin/install.py \
 完整插件说明（安装、接入、运行逻辑、验证）：
 - `OpenClaw-Plugin/README.md`
 
+安装脚本会自动：
+- 安装 sidecar 运行脚本
+- 安装生命周期适配器（`before_agent_start` / `agent_end`）
+- 写入 `~/.openclaw/openclaw.json` 的 `plugins.load.paths + plugins.entries`
+- 默认启用 `autoskill-openclaw-adapter`
+
+重要：
+- 安装完成后，需要重启一次 OpenClaw 运行进程，新的插件配置才会生效。
+
 该插件是技能服务（检索 + 离线进化）。
 
 - `base_url`：`http://127.0.0.1:9100/v1`
 - `api_key`：`AUTOSKILL_PROXY_API_KEY` 的值（若未开启鉴权可为空）
-- 主入口：`POST /v1/autoskill/openclaw/turn`
+- Hook 接口：`POST /v1/autoskill/openclaw/hooks/before_agent_start`
+- Hook 接口：`POST /v1/autoskill/openclaw/hooks/agent_end`
+- 兼容接口：`POST /v1/autoskill/openclaw/turn`
 
 服务调用示例：
 
