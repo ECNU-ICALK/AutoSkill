@@ -25,6 +25,7 @@ import traceback
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -284,7 +285,8 @@ def _proxy_chat_payload(user_id: str, *, stream: bool, model: str, messages: Lis
     return {
         "model": str(model),
         "stream": bool(stream),
-        "temperature": 0.2,
+        # Keep evaluation deterministic to reduce score noise across before/after.
+        "temperature": 0.0,
         "max_tokens": 2048,
         "user": str(user_id),
         "messages": list(messages),
@@ -931,28 +933,63 @@ def _judge_task_success(
     scenario: EvalScenario,
     query: str,
     answer: str,
+    requirement_contract: Optional[Dict[str, Any]],
     stage: str,
     success_threshold: float,
 ) -> Dict[str, Any]:
     system = (
         "You are a strict task-success judge for AutoSkill evaluation.\n"
-        "Score only the assistant answer quality against user objective and constraints.\n"
+        "Score only the assistant answer quality against user requirements and constraints.\n"
+        "Treat requirement_contract as the primary scoring basis.\n"
+        "Infer explicit user requirements from the conversation turns and query before scoring.\n"
+        "Use this priority order when resolving constraints:\n"
+        "1) requirement_contract\n"
+        "2) evaluation_query (direct ask)\n"
+        "3) recent_focus_turns (latest user constraints)\n"
+        "4) final_turns (full evolved context)\n"
+        "5) seed_turns (early context)\n"
+        "6) objective (high-level intent only, NOT a hard requirement list)\n"
+        "When constraints evolve, prioritize newer constraints from recent turns.\n"
+        "If old and new constraints conflict, follow newer constraints.\n"
+        "Do NOT penalize missing details that were never requested.\n"
+        "This is an independent test answer; do not assume hidden context beyond provided data.\n"
         "Output STRICT JSON only:\n"
-        "{\"score\": 0-100, \"success\": true|false, \"reason\": \"...\", \"strengths\": [\"...\"], \"gaps\": [\"...\"]}\n"
+        "{\"score\": 0-100, \"success\": true|false, \"reason\": \"...\", \"strengths\": [\"...\"], \"gaps\": [\"...\"], "
+        "\"constraint_coverage\": {\"critical_met\": 0, \"critical_total\": 0, \"overall_ratio\": 0.0}, "
+        "\"resolved_constraints\": {\"critical\": [\"...\"], \"important\": [\"...\"]}, "
+        "\"violations\": [\"...\"]}\n"
         "Scoring rubric:\n"
         "- 90-100: fully satisfies objective and key constraints, clear and actionable.\n"
         "- 70-89: mostly satisfies objective, minor gaps.\n"
         "- 50-69: partially satisfies objective, notable misses.\n"
         "- 0-49: fails key objective/constraints.\n"
+        "Critical constraints include explicit hard requirements such as format/platform/style/forbidden elements.\n"
+        "Set success=true only when score >= threshold and all critical constraints are met.\n"
         f"Set success=true when score >= {float(success_threshold):.1f}.\n"
     )
     payload = {
         "stage": str(stage or ""),
         "topic": str(scenario.topic or ""),
         "objective": str(scenario.objective or ""),
+        "objective_role": "high-level task intent only",
+        "requirement_contract": dict(requirement_contract or {}),
+        "requirement_contract_role": "primary scoring basis",
         "evaluation_query": str(query or ""),
+        "evaluation_query_role": "independent re-test input",
         "assistant_answer": str(answer or ""),
         "seed_turns": list(scenario.turns_seed or []),
+        "final_turns": list(scenario.turns_final or []),
+        "recent_focus_turns": list((scenario.turns_final or scenario.turns_seed or [])[-6:]),
+        "independent_test": True,
+        "answer_generated_from_single_turn_query": True,
+        "constraint_priority_order": [
+            "requirement_contract",
+            "evaluation_query",
+            "recent_focus_turns",
+            "final_turns",
+            "seed_turns",
+            "objective",
+        ],
     }
     user = f"DATA:\n{json.dumps(payload, ensure_ascii=False)}"
     out = judge_llm.chat_text(
@@ -968,19 +1005,192 @@ def _judge_task_success(
         score = 0.0
     score = max(0.0, min(100.0, float(score)))
     success_raw = parsed.get("success")
+    coverage_in = parsed.get("constraint_coverage")
+    coverage = dict(coverage_in) if isinstance(coverage_in, dict) else {}
+    critical_total = int(coverage.get("critical_total") or 0)
+    critical_met = int(coverage.get("critical_met") or 0)
+    all_critical_met = True if critical_total <= 0 else (critical_met >= critical_total)
     success = bool(success_raw) if isinstance(success_raw, bool) else (score >= float(success_threshold))
+    if not all_critical_met:
+        success = False
     reason = str(parsed.get("reason") or "").strip()
     strengths_in = parsed.get("strengths")
     gaps_in = parsed.get("gaps")
+    resolved_in = parsed.get("resolved_constraints")
+    violations_in = parsed.get("violations")
     strengths = [str(x).strip() for x in (strengths_in if isinstance(strengths_in, list) else []) if str(x).strip()]
     gaps = [str(x).strip() for x in (gaps_in if isinstance(gaps_in, list) else []) if str(x).strip()]
+    resolved = dict(resolved_in) if isinstance(resolved_in, dict) else {}
+    critical_constraints = [
+        str(x).strip()
+        for x in (resolved.get("critical") if isinstance(resolved.get("critical"), list) else [])
+        if str(x).strip()
+    ]
+    important_constraints = [
+        str(x).strip()
+        for x in (resolved.get("important") if isinstance(resolved.get("important"), list) else [])
+        if str(x).strip()
+    ]
+    violations = [str(x).strip() for x in (violations_in if isinstance(violations_in, list) else []) if str(x).strip()]
     return {
         "score": score,
         "success": bool(success),
         "reason": reason,
         "strengths": strengths,
         "gaps": gaps,
+        "resolved_constraints": {"critical": critical_constraints, "important": important_constraints},
+        "violations": violations,
+        "constraint_coverage": {
+            "critical_met": int(critical_met),
+            "critical_total": int(critical_total),
+            "overall_ratio": float(coverage.get("overall_ratio") or 0.0),
+        },
         "raw": str(out or ""),
+    }
+
+
+def _evaluate_stage_with_queries(
+    *,
+    client: HTTPClient,
+    model: str,
+    user_id: str,
+    scenario: EvalScenario,
+    queries: List[str],
+    stage: str,
+    chat_stream: bool,
+    turn_timeout_s: float,
+    judge_llm: OpenAICompatLLMClient,
+    requirement_contract: Optional[Dict[str, Any]],
+    success_threshold: float,
+) -> Dict[str, Any]:
+    used_queries = [str(q).strip() for q in list(queries or []) if str(q).strip()]
+    if not used_queries:
+        used_queries = [str(scenario.objective or "").strip() or "Provide your best final answer for this task."]
+
+    items: List[Dict[str, Any]] = []
+    success_n = 0
+    score_sum = 0.0
+    for q in used_queries:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Independent benchmark mode: answer only from this request. "
+                    "Do not rely on prior chat turns not included in this request."
+                ),
+            },
+            {"role": "user", "content": q},
+        ]
+        ans, autoskill_diag = _proxy_chat_once(
+            client=client,
+            model=model,
+            user_id=user_id,
+            messages=messages,
+            chat_stream=bool(chat_stream),
+            turn_timeout_s=float(turn_timeout_s),
+        )
+        j = _judge_task_success(
+            judge_llm=judge_llm,
+            scenario=scenario,
+            query=q,
+            answer=ans,
+            requirement_contract=dict(requirement_contract or {}),
+            stage=stage,
+            success_threshold=float(success_threshold),
+        )
+        score = float(j.get("score") or 0.0)
+        score_sum += score
+        if bool(j.get("success")):
+            success_n += 1
+        items.append(
+            {
+                "query": q,
+                "answer": ans,
+                "autoskill": autoskill_diag,
+                "judge": j,
+            }
+        )
+
+    n = max(1, len(items))
+    avg_score = float(score_sum / n)
+    success_rate = float(success_n / n)
+    # Majority success on multi-query evaluation to reduce single-query noise.
+    stage_success = bool(success_rate >= 0.5)
+    return {
+        "items": items,
+        "judge": {
+            "score": avg_score,
+            "success": stage_success,
+            "reason": f"Aggregated over {n} eval queries.",
+            "strengths": [],
+            "gaps": [],
+            "success_rate": success_rate,
+            "query_count": n,
+        },
+    }
+
+
+def _build_requirement_contract(
+    *,
+    judge_llm: OpenAICompatLLMClient,
+    scenario: EvalScenario,
+    eval_queries_seed: List[str],
+) -> Dict[str, Any]:
+    """
+    Build a compact requirement contract from user turns.
+    This becomes the primary scoring basis to reduce objective-driven bias.
+    """
+    system = (
+        "You are a requirement extractor for AutoSkill evaluation.\n"
+        "Summarize user requirements from the conversation, prioritizing recent turns.\n"
+        "Output STRICT JSON only:\n"
+        "{\"task\":\"...\", \"hard_constraints\":[\"...\"], \"soft_preferences\":[\"...\"], "
+        "\"acceptance_checks\":[\"...\"], \"eval_queries\":[\"...\"]}\n"
+        "Rules:\n"
+        "- Base primarily on recent user turns; keep older turns only if still valid.\n"
+        "- Treat objective as high-level background, not hard constraints.\n"
+        "- Keep constraints concise and testable.\n"
+        "- Generate 1-2 independent re-test queries that verify requirement adherence.\n"
+    )
+    payload = {
+        "topic": str(scenario.topic or ""),
+        "objective": str(scenario.objective or ""),
+        "seed_turns": list(scenario.turns_seed or []),
+        "final_turns": list(scenario.turns_final or []),
+        "recent_focus_turns": list((scenario.turns_final or scenario.turns_seed or [])[-6:]),
+        "reuse_queries_seed": [str(x).strip() for x in list(eval_queries_seed or []) if str(x).strip()],
+    }
+    user = f"DATA:\n{json.dumps(payload, ensure_ascii=False)}"
+    try:
+        out = judge_llm.chat_text(
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=0.0,
+            max_tokens=900,
+        )
+        parsed = _json_from_text(out) or {}
+    except Exception:
+        parsed = {}
+
+    task = str(parsed.get("task") or "").strip()
+    if not task:
+        task = str(scenario.topic or "").strip() or "Complete the user task faithfully."
+    hard = [str(x).strip() for x in list(parsed.get("hard_constraints") or []) if str(x).strip()]
+    soft = [str(x).strip() for x in list(parsed.get("soft_preferences") or []) if str(x).strip()]
+    checks = [str(x).strip() for x in list(parsed.get("acceptance_checks") or []) if str(x).strip()]
+    eval_queries = [str(x).strip() for x in list(parsed.get("eval_queries") or []) if str(x).strip()]
+    if not eval_queries:
+        eval_queries = [str(x).strip() for x in list(eval_queries_seed or []) if str(x).strip()]
+    if not eval_queries:
+        # Prefer the latest user ask for independent testing when no explicit query is available.
+        recent_turns = [str(x).strip() for x in list(scenario.turns_final or scenario.turns_seed or []) if str(x).strip()]
+        if recent_turns:
+            eval_queries = [recent_turns[-1]]
+    return {
+        "task": task,
+        "hard_constraints": hard,
+        "soft_preferences": soft,
+        "acceptance_checks": checks,
+        "eval_queries": eval_queries[:2],
     }
 
 
@@ -1003,9 +1213,27 @@ def _run_eval_case_evolution(
     case_start = time.time()
     base_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_base"
     evo_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_evo"
-    eval_query = str(scenario.reuse_query or "").strip() or str(scenario.objective or "").strip()
-    if not eval_query:
-        eval_query = "Provide your best final answer for this task."
+    eval_query = str(scenario.reuse_query or "").strip()
+    eval_queries_seed: List[str] = []
+    for q in list(scenario.reuse_queries or []):
+        s = str(q).strip()
+        if s and s not in eval_queries_seed:
+            eval_queries_seed.append(s)
+    if eval_query and eval_query not in eval_queries_seed:
+        eval_queries_seed.insert(0, eval_query)
+    requirement_contract = _build_requirement_contract(
+        judge_llm=judge_llm,
+        scenario=scenario,
+        eval_queries_seed=eval_queries_seed,
+    )
+    eval_queries = [str(x).strip() for x in list(requirement_contract.get("eval_queries") or []) if str(x).strip()]
+    if not eval_queries:
+        eval_queries = list(eval_queries_seed)
+    if not eval_queries:
+        eval_queries = [str(scenario.topic or "").strip() or "Provide your best final answer for this task."]
+    eval_query = str(eval_queries[0] or "").strip()
+    # Keep evaluation runtime stable while reducing single-query variance.
+    eval_queries = eval_queries[:2]
 
     print(
         f"[evo][case] start id={scenario.scenario_id} topic={scenario.topic} "
@@ -1013,23 +1241,23 @@ def _run_eval_case_evolution(
     )
 
     # A) Baseline (no prior user skills) -> judge score.
-    base_messages = [{"role": "user", "content": eval_query}]
-    baseline_answer, baseline_autoskill = _proxy_chat_once(
+    baseline_eval = _evaluate_stage_with_queries(
         client=client,
         model=model,
         user_id=base_user,
-        messages=base_messages,
+        scenario=scenario,
+        queries=eval_queries,
+        stage="before_evolution",
         chat_stream=bool(chat_stream),
         turn_timeout_s=float(turn_timeout_s),
-    )
-    baseline_judge = _judge_task_success(
         judge_llm=judge_llm,
-        scenario=scenario,
-        query=eval_query,
-        answer=baseline_answer,
-        stage="before_evolution",
+        requirement_contract=requirement_contract,
         success_threshold=float(judge_success_threshold),
     )
+    baseline_items = list(baseline_eval.get("items") or [])
+    baseline_judge = dict(baseline_eval.get("judge") or {})
+    baseline_answer = str((baseline_items[0].get("answer") if baseline_items else "") or "")
+    baseline_autoskill = dict((baseline_items[0].get("autoskill") if baseline_items else {}) or {})
 
     # B) Evolution: run full conversation to trigger extraction/maintenance.
     train_messages: List[Dict[str, str]] = []
@@ -1104,24 +1332,24 @@ def _run_eval_case_evolution(
                     if sid and sid not in evolved_skill_ids:
                         evolved_skill_ids.append(sid)
 
-    # C) Post-evolution evaluation on same scenario query -> judge score.
-    post_messages = [{"role": "user", "content": eval_query}]
-    post_answer, post_autoskill = _proxy_chat_once(
+    # C) Post-evolution evaluation on same scenario query set -> judge score.
+    post_eval = _evaluate_stage_with_queries(
         client=client,
         model=model,
         user_id=evo_user,
-        messages=post_messages,
+        scenario=scenario,
+        queries=eval_queries,
+        stage="after_evolution",
         chat_stream=bool(chat_stream),
         turn_timeout_s=float(turn_timeout_s),
-    )
-    post_judge = _judge_task_success(
         judge_llm=judge_llm,
-        scenario=scenario,
-        query=eval_query,
-        answer=post_answer,
-        stage="after_evolution",
+        requirement_contract=requirement_contract,
         success_threshold=float(judge_success_threshold),
     )
+    post_items = list(post_eval.get("items") or [])
+    post_judge = dict(post_eval.get("judge") or {})
+    post_answer = str((post_items[0].get("answer") if post_items else "") or "")
+    post_autoskill = dict((post_items[0].get("autoskill") if post_items else {}) or {})
 
     before_success = bool(baseline_judge.get("success"))
     after_success = bool(post_judge.get("success"))
@@ -1151,10 +1379,13 @@ def _run_eval_case_evolution(
             "reuse_queries": list(scenario.reuse_queries or []),
         },
         "users": {"baseline_user": base_user, "evolved_user": evo_user},
+        "requirement_contract": dict(requirement_contract),
         "evaluation_query": eval_query,
+        "evaluation_queries": list(eval_queries),
         "baseline": {
             "answer": baseline_answer,
             "autoskill": baseline_autoskill,
+            "items": baseline_items,
             "judge": baseline_judge,
         },
         "evolution": {
@@ -1167,6 +1398,7 @@ def _run_eval_case_evolution(
         "post_evolution": {
             "answer": post_answer,
             "autoskill": post_autoskill,
+            "items": post_items,
             "judge": post_judge,
         },
         "success": {
@@ -1206,6 +1438,23 @@ def run_eval_evolution(
         simulator=simulator,
         verbose=verbose,
     )
+    sampled_scenarios: List[Dict[str, Any]] = []
+    for sc in scenarios:
+        sampled_scenarios.append(
+            {
+                "id": sc.scenario_id,
+                "template_id": sc.template_id,
+                "topic": sc.topic,
+                "objective": sc.objective,
+                "source": sc.source,
+                "complexity": sc.complexity,
+                "expect_extract": bool(sc.expect_extract),
+                "turns_seed": list(sc.turns_seed or []),
+                "turns_final": list(sc.turns_final or []),
+                "reuse_query": str(sc.reuse_query or ""),
+                "reuse_queries": list(sc.reuse_queries or []),
+            }
+        )
     run_nonce = f"r{int(time.time())}_{random.randint(1000, 9999)}"
     cases: List[Dict[str, Any]] = []
     start_ts = time.time()
@@ -1329,7 +1578,122 @@ def run_eval_evolution(
         },
         "metric_guide": metric_guide,
     }
-    return {"summary": summary, "cases": cases}
+    return {"summary": summary, "sampled_scenarios": sampled_scenarios, "cases": cases}
+
+
+def _build_case_analysis_rows(eval_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    cases = eval_result.get("cases") if isinstance(eval_result, dict) else None
+    if not isinstance(cases, list):
+        return rows
+    for c in cases:
+        if not isinstance(c, dict):
+            continue
+        sc = c.get("scenario")
+        baseline = c.get("baseline")
+        post = c.get("post_evolution")
+        evolution = c.get("evolution")
+        success = c.get("success")
+        scores = c.get("scores")
+
+        sc_obj = dict(sc) if isinstance(sc, dict) else {}
+        baseline_obj = dict(baseline) if isinstance(baseline, dict) else {}
+        post_obj = dict(post) if isinstance(post, dict) else {}
+        evo_obj = dict(evolution) if isinstance(evolution, dict) else {}
+        success_obj = dict(success) if isinstance(success, dict) else {}
+        score_obj = dict(scores) if isinstance(scores, dict) else {}
+
+        bj = baseline_obj.get("judge")
+        pj = post_obj.get("judge")
+        bj_obj = dict(bj) if isinstance(bj, dict) else {}
+        pj_obj = dict(pj) if isinstance(pj, dict) else {}
+
+        rows.append(
+            {
+                "ok": bool(c.get("ok")),
+                "error": str(c.get("error") or ""),
+                "scenario_id": str(sc_obj.get("id") or ""),
+                "template_id": str(sc_obj.get("template_id") or ""),
+                "topic": str(sc_obj.get("topic") or ""),
+                "objective": str(sc_obj.get("objective") or ""),
+                "source": str(sc_obj.get("source") or ""),
+                "complexity": str(sc_obj.get("complexity") or ""),
+                "turns_seed": list(sc_obj.get("turns_seed") or []),
+                "turns_final": list(sc_obj.get("turns_final") or []),
+                "requirement_contract": dict(c.get("requirement_contract") or {}),
+                "evaluation_query": str(c.get("evaluation_query") or ""),
+                "evaluation_queries": list(c.get("evaluation_queries") or []),
+                "baseline": {
+                    "answer": str(baseline_obj.get("answer") or ""),
+                    "score": float(bj_obj.get("score") or 0.0),
+                    "success": bool(bj_obj.get("success")),
+                    "reason": str(bj_obj.get("reason") or ""),
+                    "strengths": list(bj_obj.get("strengths") or []),
+                    "gaps": list(bj_obj.get("gaps") or []),
+                    "resolved_constraints": dict(bj_obj.get("resolved_constraints") or {}),
+                    "violations": list(bj_obj.get("violations") or []),
+                    "constraint_coverage": dict(bj_obj.get("constraint_coverage") or {}),
+                    "success_rate": float(bj_obj.get("success_rate") or 0.0),
+                    "query_count": int(bj_obj.get("query_count") or 0),
+                },
+                "post_evolution": {
+                    "answer": str(post_obj.get("answer") or ""),
+                    "score": float(pj_obj.get("score") or 0.0),
+                    "success": bool(pj_obj.get("success")),
+                    "reason": str(pj_obj.get("reason") or ""),
+                    "strengths": list(pj_obj.get("strengths") or []),
+                    "gaps": list(pj_obj.get("gaps") or []),
+                    "resolved_constraints": dict(pj_obj.get("resolved_constraints") or {}),
+                    "violations": list(pj_obj.get("violations") or []),
+                    "constraint_coverage": dict(pj_obj.get("constraint_coverage") or {}),
+                    "success_rate": float(pj_obj.get("success_rate") or 0.0),
+                    "query_count": int(pj_obj.get("query_count") or 0),
+                },
+                "evolution": {
+                    "upserted_total": int(evo_obj.get("upserted_total") or 0),
+                    "skill_ids": list(evo_obj.get("skill_ids") or []),
+                    "job_ids": list(evo_obj.get("job_ids") or []),
+                },
+                "delta": {
+                    "success_delta": int(success_obj.get("delta") or 0),
+                    "score_delta": float(score_obj.get("delta") or 0.0),
+                },
+            }
+        )
+    return rows
+
+
+def _persist_eval_outputs(
+    *,
+    report: Dict[str, Any],
+    eval_result: Dict[str, Any],
+    report_json_arg: str,
+) -> Tuple[str, str]:
+    ts = int(time.time())
+    requested = str(report_json_arg or "").strip()
+    if requested:
+        report_path = Path(requested)
+        if not report_path.is_absolute():
+            report_path = Path.cwd() / report_path
+    else:
+        report_path = Path.cwd() / "examples" / "eval_reports" / f"auto_evalution_report_{ts}.json"
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    analysis_path = report_path.with_name(f"{report_path.stem}_analysis.jsonl")
+
+    report_out = dict(report)
+    eval_out = dict(eval_result) if isinstance(eval_result, dict) else {}
+    eval_out["case_analysis"] = _build_case_analysis_rows(eval_out)
+    report_out["evaluation"] = eval_out
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report_out, f, ensure_ascii=False, indent=2)
+
+    with open(analysis_path, "w", encoding="utf-8") as f:
+        for row in list(eval_out.get("case_analysis") or []):
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    return str(report_path), str(analysis_path)
 
 
 def _build_simulator_client(
@@ -1655,15 +2019,17 @@ def main() -> None:
                 f"avg_score_before={score_before}, avg_score_after={score_after})"
             )
 
-    report_path = str(args.report_json or "").strip()
-    if report_path:
-        try:
-            with open(report_path, "w", encoding="utf-8") as f:
-                json.dump(report, f, ensure_ascii=False, indent=2)
-            print(f"\nReport saved: {report_path}")
-        except Exception as e:
-            print(f"\nFailed to save report to {report_path}: {e}")
-            overall_ok = False
+    try:
+        report_path, analysis_path = _persist_eval_outputs(
+            report=report,
+            eval_result=eval_result if isinstance(eval_result, dict) else {},
+            report_json_arg=str(args.report_json or ""),
+        )
+        print(f"\nReport saved: {report_path}")
+        print(f"Case analysis saved: {analysis_path}")
+    except Exception as e:
+        print(f"\nFailed to save evaluation outputs: {e}")
+        overall_ok = False
 
     if not overall_ok:
         raise SystemExit(1)
