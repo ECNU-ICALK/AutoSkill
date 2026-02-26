@@ -174,7 +174,8 @@ def main() -> None:
     host, port = server.server_address[:2]
     print(f"AutoSkill OpenClaw Skill Service: http://{host}:{port}")
     print(
-        "Endpoints: /v1/models, /v1/autoskill/openclaw/turn, /v1/autoskill/retrieval/preview, "
+        "Endpoints: /v1/models, /v1/autoskill/openclaw/hooks/before_agent_start, "
+        "/v1/autoskill/openclaw/hooks/agent_end, /v1/autoskill/openclaw/turn, /v1/autoskill/retrieval/preview, "
         "/v1/autoskill/conversations/import, /v1/autoskill/extractions, /v1/autoskill/capabilities, /health"
     )
     server.serve_forever()

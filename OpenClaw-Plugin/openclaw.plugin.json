@@ -16,9 +16,15 @@
       "/models",
       "/autoskill/capabilities",
       "/autoskill/openclaw/turn",
+      "/autoskill/openclaw/hooks/before_agent_start",
+      "/autoskill/openclaw/hooks/agent_end",
       "/autoskill/retrieval/preview",
       "/autoskill/conversations/import",
       "/autoskill/extractions"
-    ]
+    ],
+    "hooks": {
+      "before_agent_start": "/autoskill/openclaw/hooks/before_agent_start",
+      "agent_end": "/autoskill/openclaw/hooks/agent_end"
+    }
   }
 }

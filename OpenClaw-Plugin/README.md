@@ -18,7 +18,13 @@
 
 ## 2. Features
 
-- Per-turn retrieval API for OpenClaw:
+- Hook-style retrieval API (MemOS-like):
+- `POST /v1/autoskill/openclaw/hooks/before_agent_start`
+
+- Hook-style post-run evolution API (MemOS-like):
+- `POST /v1/autoskill/openclaw/hooks/agent_end`
+
+- Backward-compatible per-turn API:
 - `POST /v1/autoskill/openclaw/turn`
 
 - Background extraction/evolution APIs:
@@ -41,16 +47,17 @@
 
 ## 3. Runtime Flow
 
-For each OpenClaw turn:
+Recommended hook lifecycle:
 
-1. OpenClaw sends recent messages to `/v1/autoskill/openclaw/turn`.
-2. Service rewrites query (optional) and retrieves related skills.
-3. Service returns retrieval result/context immediately.
-4. Service schedules extraction in background.
-5. Background worker updates `SkillBank`.
+1. OpenClaw calls `before_agent_start`.
+2. Service rewrites query (optional), retrieves skills, and returns `context_message`.
+3. OpenClaw injects `context_message` into model input and runs its normal agent/model loop.
+4. OpenClaw calls `agent_end` with final messages and optional success signal.
+5. Service schedules extraction in background and updates `SkillBank`.
 
 Note:
-- Extraction scheduling requires latest turn `user` and at least one prior `assistant` turn in the window.
+- `agent_end` supports success gating (`success`/`task_success`/`objective_met`).
+- Existing `/v1/autoskill/openclaw/turn` remains available for single-call integration.
 
 ## 4. Prerequisites
 
@@ -133,7 +140,9 @@ curl http://127.0.0.1:9100/v1/autoskill/capabilities
 
 - `base_url`: `http://127.0.0.1:9100/v1`
 - `api_key`: `AUTOSKILL_PROXY_API_KEY` value (or empty)
-- main endpoint: `POST /v1/autoskill/openclaw/turn`
+- hook endpoint (recommended): `POST /v1/autoskill/openclaw/hooks/before_agent_start`
+- hook endpoint (recommended): `POST /v1/autoskill/openclaw/hooks/agent_end`
+- compatibility endpoint: `POST /v1/autoskill/openclaw/turn`
 
 ### Workflow B: Install and Start in One Command
 
@@ -157,7 +166,42 @@ curl http://127.0.0.1:9100/health
 
 ## 7. OpenClaw Call Examples
 
-### 7.1 Turn Retrieval + Background Extraction Scheduling
+### 7.1 Hook: before_agent_start (retrieve + context injection payload)
+
+```bash
+curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/hooks/before_agent_start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role":"user","content":"Write a government report. No table. Avoid hallucinations."}
+    ]
+  }'
+```
+
+Response includes:
+
+- `hits` / `selected_for_context_ids`
+- `context`
+- `context_message` (directly append as system message in OpenClaw runtime)
+
+### 7.2 Hook: agent_end (async extraction/evolution)
+
+```bash
+curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/hooks/agent_end \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role":"user","content":"Write a government report. No table. Avoid hallucinations."},
+      {"role":"assistant","content":"Draft report ..."},
+      {"role":"user","content":"Make it sharper and more specific."},
+      {"role":"assistant","content":"Updated draft ..."}
+    ],
+    "success": true,
+    "user_feedback": "Good, keep this writing policy for next time."
+  }'
+```
+
+### 7.3 Compatibility: single-call turn API
 
 ```bash
 curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/turn \
@@ -171,7 +215,7 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/turn \
   }'
 ```
 
-### 7.2 Offline Conversation Import
+### 7.4 Offline Conversation Import
 
 ```bash
 curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
@@ -189,7 +233,7 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
   }'
 ```
 
-### 7.3 Extraction Event Stream
+### 7.5 Extraction Event Stream
 
 ```bash
 curl -N http://127.0.0.1:9100/v1/autoskill/extractions/<job_id>/events \
@@ -230,4 +274,3 @@ Logs:
 - `AUTOSKILL_INGEST_WINDOW`
 - `AUTOSKILL_EXTRACT_ENABLED`
 - `AUTOSKILL_PROXY_API_KEY` (optional)
-
