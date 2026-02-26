@@ -319,7 +319,7 @@ SkillBank/
 - `examples/web_ui.py`：本地 Web UI 服务。
 - `examples/interactive_chat.py`：终端交互式对话。
 - `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
-- `examples/proxy_health_check.py`：代理端点健康检查与大规模评测脚本。
+- `examples/auto_evalution.py`：全自动 LLM-vs-LLM 技能演化评测脚本。
 - `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
 - `examples/import_openai_conversations.py`：导入 OpenAI 标准对话并自动抽取技能。
 
@@ -522,20 +522,21 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events`（SSE）
 
-### 9.5 代理健康检查脚本
+### 9.5 自动评测脚本
+
+大规模自动化评测（LLM 用户模拟 + LLM 裁判）：
 
 ```bash
-python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
-```
-
-大规模自动化评测（代理作为助手 + 可选 Qwen 用户模拟）：
-
-```bash
-export DASHSCOPE_API_KEY="your_dashscope_key"
-python3 -m examples.proxy_health_check \
+python3 -m examples.auto_evalution \
   --mode eval \
+  --eval-strategy evolution \
   --base-url http://127.0.0.1:9000 \
-  --eval-runs 24 \
+  --sim-provider qwen \
+  --sim-api-key "$AUTOSKILL_PROXY_API_KEY" \
+  --sim-model qwen-plus \
+  --judge-provider qwen \
+  --judge-model qwen-plus \
+  --judge-api-key "$AUTOSKILL_PROXY_API_KEY" \
   --report-json ./proxy_eval_report.json
 ```
 

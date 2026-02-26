@@ -321,7 +321,7 @@ Notes:
 - `examples/web_ui.py`: local Web UI server.
 - `examples/interactive_chat.py`: CLI interactive chat.
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
-- `examples/proxy_health_check.py`: proxy endpoint health checks and large-scale eval runs.
+- `examples/auto_evalution.py`: fully automated LLM-vs-LLM evolution evaluation.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
 - `examples/import_openai_conversations.py`: import OpenAI-format dialogue data and auto-extract skills.
 
@@ -524,20 +524,21 @@ Retrieval and extraction:
 - `GET /v1/autoskill/extractions/{job_id}`
 - `GET /v1/autoskill/extractions/{job_id}/events` (SSE)
 
-### 9.5 Proxy Health Check Script
+### 9.5 Auto Evaluation Script
+
+Large-scale automated evaluation (LLM user simulator + LLM judge):
 
 ```bash
-python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
-```
-
-Large-scale automated evaluation (assistant via proxy + optional Qwen user simulator):
-
-```bash
-export DASHSCOPE_API_KEY="your_dashscope_key"
-python3 -m examples.proxy_health_check \
+python3 -m examples.auto_evalution \
   --mode eval \
+  --eval-strategy evolution \
   --base-url http://127.0.0.1:9000 \
-  --eval-runs 24 \
+  --sim-provider qwen \
+  --sim-api-key "$AUTOSKILL_PROXY_API_KEY" \
+  --sim-model qwen-plus \
+  --judge-provider qwen \
+  --judge-model qwen-plus \
+  --judge-api-key "$AUTOSKILL_PROXY_API_KEY" \
   --report-json ./proxy_eval_report.json
 ```
 

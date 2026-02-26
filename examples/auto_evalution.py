@@ -1,27 +1,17 @@
 """
-AutoSkill OpenAI-compatible proxy health check and large-scale evaluation.
+AutoSkill automatic evolution evaluation script (LLM-vs-LLM).
 
 Usage:
-  # Basic endpoint health checks (compatible with previous behavior)
-  python3 -m examples.proxy_health_check --mode health --base-url http://127.0.0.1:9000
-
-  # Large-scale extraction evaluation (assistant via proxy, optional Qwen user simulator)
-  python3 -m examples.proxy_health_check \
+  python3 -m examples.auto_evalution \
     --mode eval \
+    --eval-strategy evolution \
     --base-url http://127.0.0.1:9000 \
-    --eval-runs 24 \
-    --report-json ./proxy_eval_report.json
-
-  # Run both health checks and evaluation
-  python3 -m examples.proxy_health_check --mode all --base-url http://127.0.0.1:9000
-
-Optional auth:
-  export AUTOSKILL_PROXY_API_KEY="your_key"
-  python3 -m examples.proxy_health_check --api-key "$AUTOSKILL_PROXY_API_KEY"
-
-Optional simulator (OpenAI-compatible endpoint, DashScope by default):
-  export DASHSCOPE_API_KEY="your_dashscope_key"
-  python3 -m examples.proxy_health_check --mode eval --eval-runs 30
+    --sim-provider qwen \
+    --sim-api-key "$AUTOSKILL_PROXY_API_KEY" \
+    --sim-model qwen-plus \
+    --judge-provider qwen \
+    --judge-model qwen-plus \
+    --judge-api-key "$AUTOSKILL_PROXY_API_KEY"
 """
 
 from __future__ import annotations
@@ -36,13 +26,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-
-
-@dataclass
-class CheckResult:
-    name: str
-    ok: bool
-    detail: str
 
 
 @dataclass
@@ -283,14 +266,6 @@ def _json_from_text(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _run_check(name: str, fn) -> CheckResult:
-    try:
-        detail = str(fn() or "ok")
-        return CheckResult(name=name, ok=True, detail=detail)
-    except Exception as e:
-        return CheckResult(name=name, ok=False, detail=str(e))
-
-
 def _pick_chat_model(client: HTTPClient, *, preferred: str = "") -> str:
     if str(preferred or "").strip():
         return str(preferred).strip()
@@ -305,32 +280,6 @@ def _pick_chat_model(client: HTTPClient, *, preferred: str = "") -> str:
     return model
 
 
-def _check_health(client: HTTPClient) -> str:
-    obj = client.request_json(method="GET", path="/health")
-    if not bool(obj.get("ok")):
-        raise RuntimeError(f"unexpected health payload: {obj}")
-    return "GET /health ok=true"
-
-
-def _check_models(client: HTTPClient) -> str:
-    obj = client.request_json(method="GET", path="/v1/models")
-    if str(obj.get("object") or "") != "list":
-        raise RuntimeError(f"unexpected object: {obj.get('object')}")
-    data = obj.get("data")
-    if not isinstance(data, list) or not data:
-        raise RuntimeError("models list is empty")
-    first = data[0] if isinstance(data[0], dict) else {}
-    model = str(first.get("id") or "").strip() or "<empty>"
-    return f"GET /v1/models count={len(data)} first={model}"
-
-
-def _check_capabilities(client: HTTPClient) -> str:
-    obj = client.request_json(method="GET", path="/v1/autoskill/capabilities")
-    if str(obj.get("object") or "") != "autoskill.capabilities":
-        raise RuntimeError(f"unexpected object: {obj.get('object')}")
-    return "GET /v1/autoskill/capabilities ok"
-
-
 def _proxy_chat_payload(user_id: str, *, stream: bool, model: str, messages: List[Dict[str, str]]) -> Dict[str, Any]:
     return {
         "model": str(model),
@@ -340,66 +289,6 @@ def _proxy_chat_payload(user_id: str, *, stream: bool, model: str, messages: Lis
         "user": str(user_id),
         "messages": list(messages),
     }
-
-
-def _check_chat_non_stream(client: HTTPClient, *, user_id: str, model: str) -> str:
-    obj = client.request_json(
-        method="POST",
-        path="/v1/chat/completions",
-        payload=_proxy_chat_payload(
-            user_id,
-            stream=False,
-            model=model,
-            messages=[{"role": "user", "content": "Reply with one short sentence to confirm proxy health."}],
-        ),
-    )
-    content = _extract_chat_content(obj)
-    if not content:
-        raise RuntimeError("assistant content is empty")
-    autoskill = obj.get("autoskill")
-    if not isinstance(autoskill, dict):
-        raise RuntimeError("missing autoskill diagnostics")
-    return f"POST /v1/chat/completions non-stream ok model={model}"
-
-
-def _check_chat_stream(client: HTTPClient, *, user_id: str, model: str) -> str:
-    result = client.request_stream_chat(
-        path="/v1/chat/completions",
-        payload=_proxy_chat_payload(
-            user_id,
-            stream=True,
-            model=model,
-            messages=[{"role": "user", "content": "Reply with one short sentence to confirm proxy health."}],
-        ),
-    )
-    if not bool(result.get("saw_data_line")):
-        raise RuntimeError("empty stream body")
-    err = str(result.get("error") or "").strip()
-    if err:
-        raise RuntimeError(f"stream returned error chunk: {err}")
-    if not bool(result.get("done")):
-        raise RuntimeError("stream missing [DONE]")
-    chunk_count = int(result.get("chunk_count") or 0)
-    if chunk_count == 0:
-        raise RuntimeError("stream has no JSON chunks")
-    return f"POST /v1/chat/completions stream chunks={chunk_count} model={model}"
-
-
-def _check_retrieval_preview(client: HTTPClient, *, user_id: str) -> str:
-    obj = client.request_json(
-        method="POST",
-        path="/v1/autoskill/retrieval/preview",
-        payload={
-            "user": user_id,
-            "messages": [{"role": "user", "content": "Please help with report writing style."}],
-        },
-    )
-    if str(obj.get("object") or "") != "retrieval_preview":
-        raise RuntimeError(f"unexpected object: {obj.get('object')}")
-    hits = obj.get("hits")
-    if not isinstance(hits, list):
-        raise RuntimeError("retrieval hits should be a list")
-    return f"POST /v1/autoskill/retrieval/preview hits={len(hits)}"
 
 
 def _poll_extraction_event(
@@ -426,84 +315,6 @@ def _poll_extraction_event(
             return last
         time.sleep(float(poll_interval_s))
     return last
-
-
-def _check_extraction(client: HTTPClient, *, user_id: str, timeout_s: float) -> str:
-    obj = client.request_json(
-        method="POST",
-        path="/v1/autoskill/extractions",
-        payload={
-            "user": user_id,
-            "messages": [
-                {"role": "user", "content": "Before release: run regression, canary, monitor, full rollout."},
-                {"role": "assistant", "content": "Understood, I will follow this process."},
-            ],
-            "hint": "extract release-process skill",
-        },
-    )
-    data = obj.get("data")
-    if not isinstance(data, dict):
-        raise RuntimeError(f"unexpected extraction payload: {obj}")
-    job_id = str(data.get("job_id") or "").strip()
-    if not job_id:
-        raise RuntimeError("missing extraction job_id")
-    final_event = _poll_extraction_event(client, job_id=job_id, timeout_s=timeout_s)
-    status = str(final_event.get("status") or "unknown")
-    upserted = final_event.get("upserted")
-    count = len(upserted) if isinstance(upserted, list) else 0
-    return f"extraction status={status} upserted={count}"
-
-
-def _check_embeddings(client: HTTPClient) -> str:
-    obj = client.request_json(
-        method="POST",
-        path="/v1/embeddings",
-        payload={"input": "AutoSkill proxy embedding health check."},
-    )
-    data = obj.get("data")
-    if not isinstance(data, list) or not data:
-        raise RuntimeError("embedding data is empty")
-    emb = data[0].get("embedding") if isinstance(data[0], dict) else None
-    if not isinstance(emb, list) or not emb:
-        raise RuntimeError("embedding vector is empty")
-    return f"POST /v1/embeddings dims={len(emb)}"
-
-
-def run_health_checks(
-    *,
-    client: HTTPClient,
-    user_id: str,
-    model: str,
-    timeout_s: float,
-    skip_embeddings: bool,
-) -> Tuple[List[CheckResult], bool]:
-    model_cache: Dict[str, str] = {"id": str(model or "").strip()}
-
-    def _resolve_model() -> str:
-        mid = str(model_cache.get("id") or "").strip()
-        if mid:
-            return mid
-        mid = _pick_chat_model(client, preferred="")
-        model_cache["id"] = mid
-        return mid
-
-    checks = [
-        ("health", lambda: _check_health(client)),
-        ("models", lambda: _check_models(client)),
-        ("capabilities", lambda: _check_capabilities(client)),
-        ("chat_non_stream", lambda: _check_chat_non_stream(client, user_id=user_id, model=_resolve_model())),
-        ("chat_stream", lambda: _check_chat_stream(client, user_id=user_id, model=_resolve_model())),
-        ("retrieval_preview", lambda: _check_retrieval_preview(client, user_id=user_id)),
-        ("extraction", lambda: _check_extraction(client, user_id=user_id, timeout_s=timeout_s)),
-    ]
-    if not bool(skip_embeddings):
-        checks.append(("embeddings", lambda: _check_embeddings(client)))
-
-    results = [_run_check(name, fn) for name, fn in checks]
-    ok_count = sum(1 for r in results if r.ok)
-    total = len(results)
-    all_ok = (ok_count == total)
-    return results, all_ok
 
 
 def _build_eval_templates() -> List[EvalTemplate]:
@@ -1078,129 +889,200 @@ def _sample_scenarios(
     return out
 
 
-def _run_eval_case(
+def _proxy_chat_once(
+    *,
+    client: HTTPClient,
+    model: str,
+    user_id: str,
+    messages: List[Dict[str, str]],
+    chat_stream: bool,
+    turn_timeout_s: float,
+) -> Tuple[str, Dict[str, Any]]:
+    payload = _proxy_chat_payload(
+        user_id=user_id,
+        stream=bool(chat_stream),
+        model=model,
+        messages=list(messages),
+    )
+    prev_timeout = client.timeout_s
+    client.timeout_s = float(turn_timeout_s)
+    try:
+        if bool(chat_stream):
+            stream_obj = client.request_stream_chat(path="/v1/chat/completions", payload=payload)
+            err = str(stream_obj.get("error") or "").strip()
+            if err:
+                raise RuntimeError(f"stream error: {err}")
+            text = str(stream_obj.get("content") or "").strip() or "(empty response)"
+            raw = stream_obj.get("autoskill")
+            diag = dict(raw) if isinstance(raw, dict) else {}
+            return text, diag
+        obj = client.request_json(method="POST", path="/v1/chat/completions", payload=payload)
+        text = _extract_chat_content(obj) or "(empty response)"
+        raw = obj.get("autoskill")
+        diag = dict(raw) if isinstance(raw, dict) else {}
+        return str(text).strip(), diag
+    finally:
+        client.timeout_s = prev_timeout
+
+
+def _judge_task_success(
+    *,
+    judge_llm: OpenAICompatLLMClient,
+    scenario: EvalScenario,
+    query: str,
+    answer: str,
+    stage: str,
+    success_threshold: float,
+) -> Dict[str, Any]:
+    system = (
+        "You are a strict task-success judge for AutoSkill evaluation.\n"
+        "Score only the assistant answer quality against user objective and constraints.\n"
+        "Output STRICT JSON only:\n"
+        "{\"score\": 0-100, \"success\": true|false, \"reason\": \"...\", \"strengths\": [\"...\"], \"gaps\": [\"...\"]}\n"
+        "Scoring rubric:\n"
+        "- 90-100: fully satisfies objective and key constraints, clear and actionable.\n"
+        "- 70-89: mostly satisfies objective, minor gaps.\n"
+        "- 50-69: partially satisfies objective, notable misses.\n"
+        "- 0-49: fails key objective/constraints.\n"
+        f"Set success=true when score >= {float(success_threshold):.1f}.\n"
+    )
+    payload = {
+        "stage": str(stage or ""),
+        "topic": str(scenario.topic or ""),
+        "objective": str(scenario.objective or ""),
+        "evaluation_query": str(query or ""),
+        "assistant_answer": str(answer or ""),
+        "seed_turns": list(scenario.turns_seed or []),
+    }
+    user = f"DATA:\n{json.dumps(payload, ensure_ascii=False)}"
+    out = judge_llm.chat_text(
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=0.0,
+        max_tokens=1200,
+    )
+    parsed = _json_from_text(out) or {}
+    score_raw = parsed.get("score", 0)
+    try:
+        score = float(score_raw)
+    except Exception:
+        score = 0.0
+    score = max(0.0, min(100.0, float(score)))
+    success_raw = parsed.get("success")
+    success = bool(success_raw) if isinstance(success_raw, bool) else (score >= float(success_threshold))
+    reason = str(parsed.get("reason") or "").strip()
+    strengths_in = parsed.get("strengths")
+    gaps_in = parsed.get("gaps")
+    strengths = [str(x).strip() for x in (strengths_in if isinstance(strengths_in, list) else []) if str(x).strip()]
+    gaps = [str(x).strip() for x in (gaps_in if isinstance(gaps_in, list) else []) if str(x).strip()]
+    return {
+        "score": score,
+        "success": bool(success),
+        "reason": reason,
+        "strengths": strengths,
+        "gaps": gaps,
+        "raw": str(out or ""),
+    }
+
+
+def _run_eval_case_evolution(
     *,
     client: HTTPClient,
     model: str,
     scenario: EvalScenario,
     user_prefix: str,
+    run_nonce: str,
     chat_stream: bool,
     turn_timeout_s: float,
     extraction_timeout_s: float,
     poll_interval_s: float,
+    judge_llm: OpenAICompatLLMClient,
+    judge_success_threshold: float,
+    max_train_turns: int,
     verbose: bool,
 ) -> Dict[str, Any]:
-    user_id = f"{user_prefix}_{scenario.scenario_id}"
-    messages: List[Dict[str, str]] = []
-    turns: List[Dict[str, Any]] = []
-    job_ids: List[str] = []
     case_start = time.time()
+    base_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_base"
+    evo_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_evo"
+    eval_query = str(scenario.reuse_query or "").strip() or str(scenario.objective or "").strip()
+    if not eval_query:
+        eval_query = "Provide your best final answer for this task."
 
     print(
-        f"[eval][case] start id={scenario.scenario_id} topic={scenario.topic} "
-        f"expect_extract={int(bool(scenario.expect_extract))} source={scenario.source} "
-        f"complexity={scenario.complexity}"
+        f"[evo][case] start id={scenario.scenario_id} topic={scenario.topic} "
+        f"base_user={base_user} evo_user={evo_user}"
     )
 
-    # 1) Run scenario conversation against proxy assistant (InternLM backend).
-    for idx, user_turn in enumerate(scenario.turns_final, start=1):
-        turn_user = str(user_turn or "").strip()
-        if not turn_user:
-            continue
-        if verbose:
-            print(
-                f"[eval][turn] case={scenario.scenario_id} idx={idx} "
-                f"user={_short_text(turn_user, 180)}"
-            )
-        messages.append({"role": "user", "content": turn_user})
-        payload = _proxy_chat_payload(
-            user_id=user_id,
-            stream=bool(chat_stream),
+    # A) Baseline (no prior user skills) -> judge score.
+    base_messages = [{"role": "user", "content": eval_query}]
+    baseline_answer, baseline_autoskill = _proxy_chat_once(
+        client=client,
+        model=model,
+        user_id=base_user,
+        messages=base_messages,
+        chat_stream=bool(chat_stream),
+        turn_timeout_s=float(turn_timeout_s),
+    )
+    baseline_judge = _judge_task_success(
+        judge_llm=judge_llm,
+        scenario=scenario,
+        query=eval_query,
+        answer=baseline_answer,
+        stage="before_evolution",
+        success_threshold=float(judge_success_threshold),
+    )
+
+    # B) Evolution: run full conversation to trigger extraction/maintenance.
+    train_messages: List[Dict[str, str]] = []
+    train_turns_raw = list(scenario.turns_final or scenario.turns_seed or [])
+    train_turns = [str(x).strip() for x in train_turns_raw if str(x).strip()]
+    lim = max(1, int(max_train_turns or 1))
+    if len(train_turns) > lim:
+        train_turns = train_turns[:lim]
+    train_records: List[Dict[str, Any]] = []
+    job_ids: List[str] = []
+    for idx, user_turn in enumerate(train_turns, start=1):
+        train_messages.append({"role": "user", "content": user_turn})
+        assistant_text, autoskill = _proxy_chat_once(
+            client=client,
             model=model,
-            messages=messages,
+            user_id=evo_user,
+            messages=train_messages,
+            chat_stream=bool(chat_stream),
+            turn_timeout_s=float(turn_timeout_s),
         )
-
-        assistant_text = ""
-        autoskill: Dict[str, Any] = {}
-        if bool(chat_stream):
-            prev_timeout = client.timeout_s
-            client.timeout_s = float(turn_timeout_s)
-            try:
-                stream_obj = client.request_stream_chat(path="/v1/chat/completions", payload=payload)
-            except Exception as e:
-                raise RuntimeError(
-                    f"chat_stream_failed turn={idx} user={_short_text(turn_user, 120)} err={e}"
-                ) from e
-            finally:
-                client.timeout_s = prev_timeout
-            err = str(stream_obj.get("error") or "").strip()
-            if err:
-                raise RuntimeError(f"stream turn {idx} error: {err}")
-            assistant_text = str(stream_obj.get("content") or "").strip()
-            autoskill_raw = stream_obj.get("autoskill")
-            autoskill = dict(autoskill_raw) if isinstance(autoskill_raw, dict) else {}
-        else:
-            prev_timeout = client.timeout_s
-            client.timeout_s = float(turn_timeout_s)
-            try:
-                obj = client.request_json(method="POST", path="/v1/chat/completions", payload=payload)
-            except Exception as e:
-                raise RuntimeError(
-                    f"chat_non_stream_failed turn={idx} user={_short_text(turn_user, 120)} err={e}"
-                ) from e
-            finally:
-                client.timeout_s = prev_timeout
-            assistant_text = _extract_chat_content(obj)
-            autoskill_raw = obj.get("autoskill")
-            autoskill = dict(autoskill_raw) if isinstance(autoskill_raw, dict) else {}
-
-        if not assistant_text:
-            assistant_text = "(empty response)"
-        messages.append({"role": "assistant", "content": assistant_text})
+        train_messages.append({"role": "assistant", "content": assistant_text})
 
         extraction_diag = autoskill.get("extraction")
-        extraction_job_id = ""
-        extraction_status = "unknown"
+        job_id = ""
+        status = "unknown"
         if isinstance(extraction_diag, dict):
-            extraction_job_id = str(extraction_diag.get("job_id") or "").strip()
-            extraction_status = str(extraction_diag.get("status") or "unknown").strip().lower()
-        if extraction_job_id and extraction_job_id not in job_ids:
-            job_ids.append(extraction_job_id)
-
+            job_id = str(extraction_diag.get("job_id") or "").strip()
+            status = str(extraction_diag.get("status") or "unknown").strip().lower()
+        if job_id and job_id not in job_ids:
+            job_ids.append(job_id)
         retrieval_diag = autoskill.get("retrieval")
         retrieval_obj = dict(retrieval_diag) if isinstance(retrieval_diag, dict) else {}
-        if verbose:
-            hit_count = len(list(retrieval_obj.get("hits") or []))
-            selected_ids = list(retrieval_obj.get("selected_for_context_ids") or [])
-            print(
-                f"[eval][turn] case={scenario.scenario_id} idx={idx} "
-                f"assistant_len={len(assistant_text)} retrieval_hits={hit_count} "
-                f"selected={len(selected_ids)} extract_status={extraction_status} "
-                f"job_id={extraction_job_id or '-'}"
-            )
-
-        turns.append(
+        train_records.append(
             {
                 "turn_index": int(idx),
-                "user": turn_user,
+                "user": user_turn,
                 "assistant": assistant_text,
                 "autoskill": {
                     "retrieval": retrieval_obj,
-                    "extraction": {
-                        "job_id": extraction_job_id or None,
-                        "status": extraction_status,
-                    },
+                    "extraction": {"job_id": (job_id or None), "status": status},
                 },
             }
         )
+        if verbose:
+            print(
+                f"[evo][train] case={scenario.scenario_id} idx={idx} "
+                f"extract_status={status} job_id={job_id or '-'}"
+            )
 
-    # 2) Poll extraction jobs until terminal.
     events_by_job: Dict[str, Dict[str, Any]] = {}
-    if not job_ids:
-        print(f"[eval][extract] case={scenario.scenario_id} no_job_ids")
     for jid in job_ids:
         if verbose:
-            print(f"[eval][extract] case={scenario.scenario_id} poll job_id={jid}")
+            print(f"[evo][extract] case={scenario.scenario_id} poll job_id={jid}")
         ev = _poll_extraction_event(
             client,
             job_id=jid,
@@ -1208,111 +1090,51 @@ def _run_eval_case(
             poll_interval_s=float(poll_interval_s),
         )
         events_by_job[jid] = ev
-        st = str(ev.get("status") or "unknown").strip().lower()
-        ups = ev.get("upserted")
-        ups_n = len(ups) if isinstance(ups, list) else 0
-        err = _short_text(ev.get("error") or "", 160)
-        print(
-            f"[eval][extract] case={scenario.scenario_id} job_id={jid} "
-            f"status={st} upserted={ups_n}" + (f" error={err}" if err else "")
-        )
 
-    events = list(events_by_job.values())
-    completed = [e for e in events if str(e.get("status") or "").strip().lower() == "completed"]
-    failed = [e for e in events if str(e.get("status") or "").strip().lower() == "failed"]
+    completed = [e for e in events_by_job.values() if str(e.get("status") or "").strip().lower() == "completed"]
     upserted_total = 0
-    extracted_skill_ids: List[str] = []
-    extracted_skill_details: List[Dict[str, Any]] = []
+    evolved_skill_ids: List[str] = []
     for ev in completed:
         ups = ev.get("upserted")
         if isinstance(ups, list):
             upserted_total += len(ups)
-            for it in ups:
-                if isinstance(it, dict):
-                    sid = str(it.get("id") or "").strip()
-                    if sid and sid not in extracted_skill_ids:
-                        extracted_skill_ids.append(sid)
-        skills = ev.get("skills")
-        if isinstance(skills, list):
-            for s in skills:
-                if isinstance(s, dict):
-                    extracted_skill_details.append(dict(s))
+            for u in ups:
+                if isinstance(u, dict):
+                    sid = str(u.get("id") or "").strip()
+                    if sid and sid not in evolved_skill_ids:
+                        evolved_skill_ids.append(sid)
 
-    extracted = (upserted_total > 0)
+    # C) Post-evolution evaluation on same scenario query -> judge score.
+    post_messages = [{"role": "user", "content": eval_query}]
+    post_answer, post_autoskill = _proxy_chat_once(
+        client=client,
+        model=model,
+        user_id=evo_user,
+        messages=post_messages,
+        chat_stream=bool(chat_stream),
+        turn_timeout_s=float(turn_timeout_s),
+    )
+    post_judge = _judge_task_success(
+        judge_llm=judge_llm,
+        scenario=scenario,
+        query=eval_query,
+        answer=post_answer,
+        stage="after_evolution",
+        success_threshold=float(judge_success_threshold),
+    )
 
-    # 3) Retrieval reuse checks after extraction (single or multi-query).
-    reuse_queries: List[str] = []
-    for q in list(scenario.reuse_queries or []):
-        qs = str(q or "").strip()
-        if qs:
-            reuse_queries.append(qs)
-    q_primary = str(scenario.reuse_query or "").strip()
-    if q_primary and q_primary not in reuse_queries:
-        reuse_queries.append(q_primary)
-    if not reuse_queries:
-        reuse_queries.append(str(scenario.reuse_query or ""))
-
-    reuse_checks: List[Dict[str, Any]] = []
-    for q_idx, q in enumerate(reuse_queries, start=1):
-        try:
-            reuse = client.request_json(
-                method="POST",
-                path="/v1/autoskill/retrieval/preview",
-                payload={
-                    "user": user_id,
-                    "query": q,
-                },
-            )
-        except Exception as e:
-            raise RuntimeError(
-                f"reuse_retrieval_failed query_idx={q_idx} query={_short_text(q, 120)} err={e}"
-            ) from e
-
-        hits = reuse.get("hits")
-        if not isinstance(hits, list):
-            hits = []
-        selected_ids = reuse.get("selected_for_context_ids")
-        if not isinstance(selected_ids, list):
-            selected_ids = []
-        reuse_top = hits[0] if hits and isinstance(hits[0], dict) else {}
-        reuse_pass_i = bool(selected_ids)
-        top_name = str((reuse_top or {}).get("name") or "").strip()
-        top_score = (reuse_top or {}).get("score")
-        print(
-            f"[eval][reuse] case={scenario.scenario_id} q={q_idx}/{len(reuse_queries)} "
-            f"pass={int(bool(reuse_pass_i))} hits={len(hits)} selected={len(selected_ids)} "
-            f"top={_short_text(top_name, 80) or '-'} score={top_score}"
-        )
-        reuse_checks.append(
-            {
-                "query": q,
-                "selected_for_context_ids": list(selected_ids),
-                "hit_count": len(hits),
-                "top_hit": dict(reuse_top) if isinstance(reuse_top, dict) else {},
-                "pass": bool(reuse_pass_i),
-            }
-        )
-
-    retrieval_reuse_pass = any(bool(x.get("pass")) for x in reuse_checks)
-    reuse_primary = reuse_checks[0] if reuse_checks else {
-        "query": q_primary,
-        "selected_for_context_ids": [],
-        "hit_count": 0,
-        "top_hit": {},
-        "pass": False,
-    }
-
-    expect_extract = bool(scenario.expect_extract)
-    tp = int(expect_extract and extracted)
-    fn = int(expect_extract and (not extracted))
-    fp = int((not expect_extract) and extracted)
-    tn = int((not expect_extract) and (not extracted))
-    case_elapsed = time.time() - case_start
+    before_success = bool(baseline_judge.get("success"))
+    after_success = bool(post_judge.get("success"))
+    sr_delta = int(after_success) - int(before_success)
+    score_before = float(baseline_judge.get("score") or 0.0)
+    score_after = float(post_judge.get("score") or 0.0)
+    score_delta = score_after - score_before
+    elapsed_s = float(time.time() - case_start)
     print(
-        f"[eval][case] done id={scenario.scenario_id} elapsed_s={case_elapsed:.2f} "
-        f"extracted={int(bool(extracted))} upserted={upserted_total} "
-        f"expect_extract={int(expect_extract)} reuse_pass={int(bool(retrieval_reuse_pass))} "
-        f"reuse_pass_count={sum(1 for x in reuse_checks if bool(x.get('pass')))}"
+        f"[evo][case] done id={scenario.scenario_id} elapsed_s={elapsed_s:.2f} "
+        f"before_success={int(before_success)} after_success={int(after_success)} "
+        f"score_before={score_before:.1f} score_after={score_after:.1f} "
+        f"upserted={upserted_total}"
     )
 
     return {
@@ -1321,7 +1143,6 @@ def _run_eval_case(
             "template_id": scenario.template_id,
             "topic": scenario.topic,
             "objective": scenario.objective,
-            "expect_extract": expect_extract,
             "source": scenario.source,
             "complexity": scenario.complexity,
             "turns_seed": list(scenario.turns_seed),
@@ -1329,32 +1150,40 @@ def _run_eval_case(
             "reuse_query": scenario.reuse_query,
             "reuse_queries": list(scenario.reuse_queries or []),
         },
-        "user_id": user_id,
-        "turns": turns,
-        "extraction": {
+        "users": {"baseline_user": base_user, "evolved_user": evo_user},
+        "evaluation_query": eval_query,
+        "baseline": {
+            "answer": baseline_answer,
+            "autoskill": baseline_autoskill,
+            "judge": baseline_judge,
+        },
+        "evolution": {
+            "train_turns": train_records,
             "job_ids": list(job_ids),
             "events_by_job": events_by_job,
-            "completed_jobs": len(completed),
-            "failed_jobs": len(failed),
             "upserted_total": int(upserted_total),
-            "extracted": bool(extracted),
-            "skill_ids": extracted_skill_ids,
-            "skills": extracted_skill_details,
+            "skill_ids": list(evolved_skill_ids),
         },
-        "reuse_retrieval": {
-            "query": str(reuse_primary.get("query") or scenario.reuse_query),
-            "selected_for_context_ids": list(reuse_primary.get("selected_for_context_ids") or []),
-            "hit_count": int(reuse_primary.get("hit_count") or 0),
-            "top_hit": dict(reuse_primary.get("top_hit") or {}),
-            "pass": bool(retrieval_reuse_pass),
-            "checks": reuse_checks,
-            "pass_count": sum(1 for x in reuse_checks if bool(x.get("pass"))),
+        "post_evolution": {
+            "answer": post_answer,
+            "autoskill": post_autoskill,
+            "judge": post_judge,
         },
-        "confusion": {"tp": tp, "fn": fn, "fp": fp, "tn": tn},
+        "success": {
+            "before": bool(before_success),
+            "after": bool(after_success),
+            "delta": int(sr_delta),
+        },
+        "scores": {
+            "before": float(score_before),
+            "after": float(score_after),
+            "delta": float(score_delta),
+        },
+        "elapsed_s": elapsed_s,
     }
 
 
-def run_eval(
+def run_eval_evolution(
     *,
     client: HTTPClient,
     model: str,
@@ -1365,7 +1194,10 @@ def run_eval(
     turn_timeout_s: float,
     extraction_timeout_s: float,
     poll_interval_s: float,
-    simulator: Optional[OpenAICompatLLMClient],
+    simulator: OpenAICompatLLMClient,
+    judge_llm: OpenAICompatLLMClient,
+    judge_success_threshold: float,
+    max_train_turns: int,
     verbose: bool,
 ) -> Dict[str, Any]:
     scenarios = _sample_scenarios(
@@ -1374,363 +1206,325 @@ def run_eval(
         simulator=simulator,
         verbose=verbose,
     )
+    run_nonce = f"r{int(time.time())}_{random.randint(1000, 9999)}"
     cases: List[Dict[str, Any]] = []
     start_ts = time.time()
 
     for i, sc in enumerate(scenarios, start=1):
         print(
-            f"[eval] running {i}/{len(scenarios)} id={sc.scenario_id} "
+            f"[evo] running {i}/{len(scenarios)} id={sc.scenario_id} "
             f"template={sc.template_id} source={sc.source} complexity={sc.complexity}"
         )
         try:
-            case = _run_eval_case(
+            case = _run_eval_case_evolution(
                 client=client,
                 model=model,
                 scenario=sc,
                 user_prefix=user_prefix,
-                chat_stream=eval_stream,
-                turn_timeout_s=turn_timeout_s,
-                extraction_timeout_s=extraction_timeout_s,
-                poll_interval_s=poll_interval_s,
-                verbose=verbose,
+                run_nonce=run_nonce,
+                chat_stream=bool(eval_stream),
+                turn_timeout_s=float(turn_timeout_s),
+                extraction_timeout_s=float(extraction_timeout_s),
+                poll_interval_s=float(poll_interval_s),
+                judge_llm=judge_llm,
+                judge_success_threshold=float(judge_success_threshold),
+                max_train_turns=int(max_train_turns),
+                verbose=bool(verbose),
             )
             case["ok"] = True
             case["error"] = ""
-            ext = case.get("extraction") if isinstance(case, dict) else {}
-            rr = case.get("reuse_retrieval") if isinstance(case, dict) else {}
-            print(
-                f"[eval] pass id={sc.scenario_id} upserted={int((ext or {}).get('upserted_total') or 0)} "
-                f"extracted={int(bool((ext or {}).get('extracted')))} "
-                f"reuse_pass={int(bool((rr or {}).get('pass')))}"
-            )
         except Exception as e:
-            err_text = str(e)
-            tb = traceback.format_exc(limit=5)
-            print(f"[eval] FAIL id={sc.scenario_id}: {err_text}")
-            print(
-                f"[eval] context id={sc.scenario_id} "
-                f"topic={sc.topic} objective={_short_text(sc.objective, 180)}"
-            )
-            if sc.turns_final:
-                print(
-                    f"[eval] last_user_turn id={sc.scenario_id} "
-                    f"text={_short_text(sc.turns_final[-1], 220)}"
-                )
+            tb = traceback.format_exc(limit=6)
+            print(f"[evo] FAIL id={sc.scenario_id}: {e}")
             if verbose:
-                print(f"[eval] traceback id={sc.scenario_id}:\n{tb}")
+                print(f"[evo] traceback id={sc.scenario_id}:\n{tb}")
             case = {
                 "scenario": {
                     "id": sc.scenario_id,
                     "template_id": sc.template_id,
                     "topic": sc.topic,
                     "objective": sc.objective,
-                    "expect_extract": bool(sc.expect_extract),
                     "source": sc.source,
                     "complexity": sc.complexity,
-                    "turns_seed": list(sc.turns_seed),
-                    "turns_final": list(sc.turns_final),
-                    "reuse_query": sc.reuse_query,
-                    "reuse_queries": list(sc.reuse_queries or []),
                 },
                 "ok": False,
-                "error": err_text,
+                "error": str(e),
                 "traceback": tb,
             }
         cases.append(case)
 
     elapsed_s = float(time.time() - start_ts)
+    ok_cases = [c for c in cases if bool(c.get("ok"))]
+    ok_n = len(ok_cases)
 
-    tp = fn = fp = tn = 0
-    completed_jobs = failed_jobs = upserted_total = 0
-    reuse_pass = 0
-    reuse_hit = 0
-    reuse_selected = 0
-    extracted_count = 0
-    ok_cases = 0
-    for c in cases:
-        if bool(c.get("ok")):
-            ok_cases += 1
-            conf = c.get("confusion")
-            if isinstance(conf, dict):
-                tp += int(conf.get("tp") or 0)
-                fn += int(conf.get("fn") or 0)
-                fp += int(conf.get("fp") or 0)
-                tn += int(conf.get("tn") or 0)
-            ext = c.get("extraction")
-            if isinstance(ext, dict):
-                completed_jobs += int(ext.get("completed_jobs") or 0)
-                failed_jobs += int(ext.get("failed_jobs") or 0)
-                upserted_total += int(ext.get("upserted_total") or 0)
-                if bool(ext.get("extracted")):
-                    extracted_count += 1
-            rr = c.get("reuse_retrieval")
-            if isinstance(rr, dict):
-                if int(rr.get("hit_count") or 0) > 0:
-                    reuse_hit += 1
-                sel = rr.get("selected_for_context_ids")
-                if isinstance(sel, list) and len(sel) > 0:
-                    reuse_selected += 1
-                if bool(rr.get("pass")):
-                    reuse_pass += 1
+    success_before_n = 0
+    success_after_n = 0
+    extracted_case_n = 0
+    score_before_sum = 0.0
+    score_after_sum = 0.0
+    score_delta_sum = 0.0
+    for c in ok_cases:
+        suc = c.get("success") if isinstance(c, dict) else {}
+        if isinstance(suc, dict):
+            if bool(suc.get("before")):
+                success_before_n += 1
+            if bool(suc.get("after")):
+                success_after_n += 1
+        evo = c.get("evolution") if isinstance(c, dict) else {}
+        if isinstance(evo, dict):
+            if int(evo.get("upserted_total") or 0) > 0:
+                extracted_case_n += 1
+        scs = c.get("scores") if isinstance(c, dict) else {}
+        if isinstance(scs, dict):
+            score_before_sum += float(scs.get("before") or 0.0)
+            score_after_sum += float(scs.get("after") or 0.0)
+            score_delta_sum += float(scs.get("delta") or 0.0)
 
-    total_cases = len(cases)
-    template_counts: Dict[str, int] = {}
-    family_counts: Dict[str, int] = {}
-    complexity_counts: Dict[str, int] = {}
-    for c in cases:
-        sc = c.get("scenario") if isinstance(c, dict) else {}
-        if isinstance(sc, dict):
-            tid = str(sc.get("template_id") or "").strip()
-            if tid:
-                template_counts[tid] = int(template_counts.get(tid, 0)) + 1
-                fam = tid.split("__s", 1)[0]
-                family_counts[fam] = int(family_counts.get(fam, 0)) + 1
-            comp = str(sc.get("complexity") or "basic").strip() or "basic"
-            complexity_counts[comp] = int(complexity_counts.get(comp, 0)) + 1
-    expected_positive = tp + fn
-    expected_negative = fp + tn
-    predicted_positive = tp + fp
-    predicted_negative = fn + tn
-    total_labeled = expected_positive + expected_negative
-    extraction_recall = (float(tp) / expected_positive) if expected_positive > 0 else None
-    extraction_fp_rate = (float(fp) / expected_negative) if expected_negative > 0 else None
-    extraction_precision = (float(tp) / predicted_positive) if predicted_positive > 0 else None
-    extraction_accuracy = (float(tp + tn) / total_labeled) if total_labeled > 0 else None
-    extraction_f1 = None
-    if isinstance(extraction_precision, (int, float)) and isinstance(extraction_recall, (int, float)):
-        denom = float(extraction_precision) + float(extraction_recall)
-        if denom > 0:
-            extraction_f1 = (2.0 * float(extraction_precision) * float(extraction_recall)) / denom
-    reuse_pass_rate = (float(reuse_pass) / max(1, ok_cases))
-    reuse_hit_rate = (float(reuse_hit) / max(1, ok_cases))
-    reuse_selected_rate = (float(reuse_selected) / max(1, ok_cases))
-    avg_judge_score = None
-    avg_upserted_per_ok_case = (float(upserted_total) / max(1, ok_cases))
-    case_level_extracted_rate = (float(extracted_count) / max(1, ok_cases))
-
-    confusion_total = tp + fn + fp + tn
-    coverage_template_total = sum(int(v) for v in template_counts.values())
-    coverage_family_total = sum(int(v) for v in family_counts.values())
-    coverage_complexity_total = sum(int(v) for v in complexity_counts.values())
-    positive_ratio = (float(expected_positive) / total_labeled) if total_labeled > 0 else None
-    negative_ratio = (float(expected_negative) / total_labeled) if total_labeled > 0 else None
-    warnings: List[str] = []
-    if total_cases < 30:
-        warnings.append("Small sample size (<30). Metrics may be unstable.")
-    if ok_cases < total_cases:
-        warnings.append("Some cases failed. Aggregate metrics are computed only from ok_cases.")
-    if expected_positive < 5:
-        warnings.append("Very few expected-positive cases. Recall may be unstable.")
-    if expected_negative < 5:
-        warnings.append("Very few expected-negative cases. FP-rate may be unstable.")
-    if isinstance(positive_ratio, (int, float)) and (positive_ratio < 0.2 or positive_ratio > 0.8):
-        warnings.append("Class distribution is highly imbalanced. Interpret accuracy with caution.")
-    if confusion_total != ok_cases:
-        warnings.append("Confusion matrix does not match ok_cases. Check evaluation pipeline consistency.")
-    if coverage_template_total != total_cases:
-        warnings.append("Template coverage count does not match total_cases. Check scenario accounting.")
+    sr_before = (float(success_before_n) / max(1, ok_n))
+    sr_after = (float(success_after_n) / max(1, ok_n))
+    sr_uplift_abs = sr_after - sr_before
+    sr_uplift_rel = (sr_uplift_abs / sr_before) if sr_before > 0 else None
+    avg_score_before = (score_before_sum / max(1, ok_n))
+    avg_score_after = (score_after_sum / max(1, ok_n))
+    avg_score_delta = (score_delta_sum / max(1, ok_n))
+    extraction_case_rate = (float(extracted_case_n) / max(1, ok_n))
 
     metric_guide = {
-        "confusion": {
-            "tp": {
-                "meaning": "Expected extraction and extraction happened.",
-                "formula": "count(expect_extract=true AND extracted=true)",
-            },
-            "fn": {
-                "meaning": "Expected extraction but extraction did not happen.",
-                "formula": "count(expect_extract=true AND extracted=false)",
-            },
-            "fp": {
-                "meaning": "Did not expect extraction but extraction happened.",
-                "formula": "count(expect_extract=false AND extracted=true)",
-            },
-            "tn": {
-                "meaning": "Did not expect extraction and extraction did not happen.",
-                "formula": "count(expect_extract=false AND extracted=false)",
-            },
-        },
-        "metrics": {
-            "extraction_recall_on_expected": {
-                "meaning": "How many expected-positive cases were extracted.",
-                "formula": "tp / (tp + fn)",
-                "range": "[0,1] or null",
-                "direction": "higher_better",
-            },
-            "false_positive_rate_on_unexpected": {
-                "meaning": "How often extraction was incorrectly triggered on expected-negative cases.",
-                "formula": "fp / (fp + tn)",
-                "range": "[0,1] or null",
-                "direction": "lower_better",
-            },
-            "extraction_precision_on_predicted": {
-                "meaning": "Among extracted cases, how many were truly expected-positive.",
-                "formula": "tp / (tp + fp)",
-                "range": "[0,1] or null",
-                "direction": "higher_better",
-            },
-            "extraction_f1_on_expected": {
-                "meaning": "Balance between extraction recall and precision.",
-                "formula": "2 * P * R / (P + R)",
-                "range": "[0,1] or null",
-                "direction": "higher_better",
-            },
-            "extraction_accuracy": {
-                "meaning": "Overall correctness of extraction-vs-no-extraction decisions.",
-                "formula": "(tp + tn) / (tp + fn + fp + tn)",
-                "range": "[0,1] or null",
-                "direction": "higher_better",
-            },
-            "case_level_extracted_rate": {
-                "meaning": "How often extraction happened among successful cases.",
-                "formula": "extracted_ok_cases / ok_cases",
-                "range": "[0,1]",
-                "direction": "context_dependent",
-            },
-            "retrieval_reuse_pass_rate": {
-                "meaning": "Fraction of successful cases where retrieval selected at least one skill for context.",
-                "formula": "reuse_pass_cases / ok_cases",
-                "range": "[0,1]",
-                "direction": "higher_better",
-            },
-            "retrieval_hit_rate": {
-                "meaning": "Fraction of successful cases where retrieval returned at least one hit.",
-                "formula": "reuse_hit_cases / ok_cases",
-                "range": "[0,1]",
-                "direction": "higher_better",
-            },
-            "retrieval_selected_rate": {
-                "meaning": "Fraction of successful cases where at least one hit was selected into context.",
-                "formula": "reuse_selected_cases / ok_cases",
-                "range": "[0,1]",
-                "direction": "higher_better",
-            },
-            "avg_upserted_per_ok_case": {
-                "meaning": "Average number of upserted skills per successful case.",
-                "formula": "upserted_total / ok_cases",
-                "range": "[0,+inf)",
-                "direction": "context_dependent",
-            },
-            "avg_judge_score": {
-                "meaning": "LLM-judge average score (disabled in current script).",
-                "formula": "mean(judge_score)",
-                "range": "null when judge disabled",
-                "direction": "higher_better",
-            },
-        },
-    }
-
-    rationality = {
-        "consistency_checks": {
-            "confusion_sum_equals_ok_cases": bool(confusion_total == ok_cases),
-            "template_coverage_sum_equals_total_cases": bool(coverage_template_total == total_cases),
-            "family_coverage_sum_equals_total_cases": bool(coverage_family_total == total_cases),
-            "complexity_coverage_sum_equals_total_cases": bool(coverage_complexity_total == total_cases),
-        },
-        "sample_quality": {
-            "ok_case_ratio": (float(ok_cases) / max(1, total_cases)),
-            "positive_ratio": positive_ratio,
-            "negative_ratio": negative_ratio,
-            "expected_positive": expected_positive,
-            "expected_negative": expected_negative,
-        },
-        "warnings": warnings,
+        "sr_before": "Task Success Rate before skill evolution. Formula: success_before / ok_cases.",
+        "sr_after": "Task Success Rate after skill evolution. Formula: success_after / ok_cases.",
+        "sr_uplift_abs": "Absolute SR uplift. Formula: sr_after - sr_before.",
+        "sr_uplift_rel": "Relative SR uplift. Formula: (sr_after - sr_before) / sr_before.",
+        "avg_score_before": "Average LLM-judge score before evolution (0-100).",
+        "avg_score_after": "Average LLM-judge score after evolution (0-100).",
+        "avg_score_delta": "Average score improvement after evolution.",
+        "extraction_case_rate": "Fraction of ok cases where at least one skill was upserted.",
     }
 
     summary = {
-        "total_cases": total_cases,
-        "ok_cases": ok_cases,
-        "failed_cases": total_cases - ok_cases,
+        "strategy": "evolution",
+        "total_cases": len(cases),
+        "ok_cases": ok_n,
+        "failed_cases": len(cases) - ok_n,
         "elapsed_s": elapsed_s,
-        "jobs": {
-            "completed": completed_jobs,
-            "failed": failed_jobs,
-            "upserted_total": upserted_total,
-        },
-        "confusion": {"tp": tp, "fn": fn, "fp": fp, "tn": tn},
-        "counts": {
-            "expected_positive": expected_positive,
-            "expected_negative": expected_negative,
-            "predicted_positive": predicted_positive,
-            "predicted_negative": predicted_negative,
-        },
+        "judge_success_threshold": float(judge_success_threshold),
         "metrics": {
-            "extraction_recall_on_expected": extraction_recall,
-            "false_positive_rate_on_unexpected": extraction_fp_rate,
-            "extraction_precision_on_predicted": extraction_precision,
-            "extraction_f1_on_expected": extraction_f1,
-            "extraction_accuracy": extraction_accuracy,
-            "case_level_extracted_rate": case_level_extracted_rate,
-            "retrieval_reuse_pass_rate": reuse_pass_rate,
-            "retrieval_hit_rate": reuse_hit_rate,
-            "retrieval_selected_rate": reuse_selected_rate,
-            "avg_upserted_per_ok_case": avg_upserted_per_ok_case,
-            "avg_judge_score": avg_judge_score,
+            "sr_before": sr_before,
+            "sr_after": sr_after,
+            "sr_uplift_abs": sr_uplift_abs,
+            "sr_uplift_rel": sr_uplift_rel,
+            "avg_score_before": avg_score_before,
+            "avg_score_after": avg_score_after,
+            "avg_score_delta": avg_score_delta,
+            "extraction_case_rate": extraction_case_rate,
         },
-        "coverage": {
-            "scenario_families": family_counts,
-            "templates": template_counts,
-            "complexity": complexity_counts,
+        "counts": {
+            "success_before": int(success_before_n),
+            "success_after": int(success_after_n),
+            "extracted_cases": int(extracted_case_n),
+        },
+        "automation": {
+            "user_role": "LLM simulator generates and executes multi-turn user interactions.",
+            "assistant_role": "Proxy target model responds and triggers skill evolution.",
+            "judge_role": "LLM judge scores pre/post task outputs with strict JSON rubric.",
         },
         "metric_guide": metric_guide,
-        "rationality": rationality,
     }
     return {"summary": summary, "cases": cases}
 
 
 def _build_simulator_client(
     *,
-    sim_enabled: bool,
-    sim_base_url: str,
+    sim_provider: str,
     sim_api_key: str,
     sim_model: str,
+    default_base_url: str,
+    default_api_key: str,
+    default_model: str,
     timeout_s: float,
 ) -> Optional[OpenAICompatLLMClient]:
-    if not bool(sim_enabled):
+    base, api_key, _ = _resolve_llm_endpoint(
+        provider=str(sim_provider or ""),
+        explicit_base_url="",
+        explicit_api_key=str(sim_api_key or ""),
+        default_base_url=str(default_base_url or ""),
+        default_api_key=str(default_api_key or ""),
+    )
+    model = str(sim_model or "").strip() or str(default_model or "").strip()
+    if not model:
         return None
-    if not str(sim_api_key or "").strip():
+    if not base:
         return None
     try:
         return OpenAICompatLLMClient(
-            base_url=str(sim_base_url),
-            api_key=str(sim_api_key),
-            model=str(sim_model),
+            base_url=base,
+            api_key=api_key,
+            model=model,
             timeout_s=float(timeout_s),
         )
     except Exception:
         return None
 
 
+def _build_judge_client(
+    *,
+    judge_provider: str,
+    judge_api_key: str,
+    judge_model: str,
+    default_base_url: str,
+    default_api_key: str,
+    default_model: str,
+    timeout_s: float,
+) -> Optional[OpenAICompatLLMClient]:
+    base, api_key, _ = _resolve_llm_endpoint(
+        provider=str(judge_provider or ""),
+        explicit_base_url="",
+        explicit_api_key=str(judge_api_key or ""),
+        default_base_url=str(default_base_url or ""),
+        default_api_key=str(default_api_key or ""),
+    )
+    model = str(judge_model or "").strip() or str(default_model or "").strip()
+    if not model:
+        return None
+    if not base:
+        return None
+    try:
+        return OpenAICompatLLMClient(
+            base_url=base,
+            api_key=api_key,
+            model=model,
+            timeout_s=float(timeout_s),
+        )
+    except Exception:
+        return None
+
+
+def _normalize_provider(provider: str) -> str:
+    p = str(provider or "").strip().lower()
+    aliases = {
+        "qwen": "dashscope",
+        "intern": "internlm",
+        "intern-s1": "internlm",
+        "intern-s1-pro": "internlm",
+        "bigmodel": "glm",
+        "zhipu": "glm",
+        "openai-compatible": "generic",
+        "openai_compatible": "generic",
+        "custom": "generic",
+        "universal": "generic",
+    }
+    return aliases.get(p, p)
+
+
+def _strip_last_v1(base_url: str) -> str:
+    s = str(base_url or "").strip().rstrip("/")
+    if s.endswith("/v1"):
+        return s[: -len("/v1")]
+    return s
+
+
+def _resolve_llm_endpoint(
+    *,
+    provider: str,
+    explicit_base_url: str,
+    explicit_api_key: str,
+    default_base_url: str,
+    default_api_key: str,
+) -> Tuple[str, str, str]:
+    p = _normalize_provider(provider)
+    base = str(explicit_base_url or "").strip()
+    key = str(explicit_api_key or "").strip()
+    resolved = p or "proxy"
+
+    if p in {"", "proxy"}:
+        base = base or str(default_base_url or "").strip()
+        key = key or str(default_api_key or "").strip()
+        resolved = "proxy"
+    elif p == "dashscope":
+        base = base or str(os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode"))
+        key = key or str(os.getenv("DASHSCOPE_API_KEY", "")).strip()
+    elif p == "internlm":
+        base = base or str(os.getenv("INTERNLM_BASE_URL", "https://chat.intern-ai.org.cn/api/v1"))
+        key = key or str(
+            os.getenv("INTERNLM_API_KEY")
+            or os.getenv("INTERN_API_KEY")
+            or os.getenv("INTERNLM_TOKEN")
+            or ""
+        ).strip()
+    elif p == "glm":
+        base = base or str(os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"))
+        key = key or str(
+            os.getenv("GLM_API_KEY")
+            or os.getenv("BIGMODEL_API_KEY")
+            or os.getenv("ZHIPU_API_KEY")
+            or ""
+        ).strip()
+    elif p == "openai":
+        base = base or str(os.getenv("OPENAI_BASE_URL", "https://api.openai.com"))
+        key = key or str(os.getenv("OPENAI_API_KEY", "")).strip()
+    elif p == "generic":
+        base = base or str(os.getenv("AUTOSKILL_GENERIC_LLM_URL", "http://35.220.164.252:3888/v1"))
+        key = key or str(os.getenv("AUTOSKILL_GENERIC_API_KEY", "")).strip()
+    else:
+        # Unknown provider: keep explicit overrides if present, otherwise fallback to proxy.
+        base = base or str(default_base_url or "").strip()
+        key = key or str(default_api_key or "").strip()
+        resolved = f"unknown:{p}"
+
+    base = _strip_last_v1(base)
+    return base, key, resolved
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Health-check and evaluate AutoSkill proxy")
-    parser.add_argument("--mode", default="health", choices=["health", "eval", "all"])
+    parser = argparse.ArgumentParser(description="AutoSkill automatic evolution evaluation")
+    parser.add_argument("--mode", default="eval", choices=["eval"])
+    parser.add_argument("--eval-strategy", default="evolution", choices=["evolution"])
     parser.add_argument("--base-url", default="http://127.0.0.1:9000")
     parser.add_argument("--api-key", default="")
-    parser.add_argument("--user-id", default="proxy_test_user")
     parser.add_argument("--model", default="")
     parser.add_argument("--timeout-s", type=float, default=25.0)
-    parser.add_argument("--skip-embeddings", action="store_true")
 
     parser.add_argument("--eval-runs", type=int, default=32)
     parser.add_argument("--eval-seed", type=int, default=42)
     parser.add_argument("--eval-user-prefix", default="proxy_eval")
+    parser.add_argument("--eval-max-train-turns", type=int, default=10)
     parser.add_argument("--eval-stream", action="store_true")
     parser.add_argument("--eval-turn-timeout-s", type=float, default=120.0)
     parser.add_argument("--eval-extraction-timeout-s", type=float, default=180.0)
     parser.add_argument("--eval-poll-interval-s", type=float, default=0.8)
     parser.add_argument("--strict-eval", action="store_true")
-    parser.add_argument("--min-recall", type=float, default=0.5)
-    parser.add_argument("--max-fp-rate", type=float, default=0.5)
 
-    parser.add_argument("--sim-disable", action="store_true")
     parser.add_argument(
-        "--sim-base-url",
-        default=os.getenv("EVAL_SIM_BASE_URL", os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode")),
+        "--sim-provider",
+        default=os.getenv("EVAL_SIM_PROVIDER", ""),
+        help="Simulator LLM provider (e.g., proxy|qwen|internlm|glm|openai|generic). Default: proxy.",
     )
     parser.add_argument(
         "--sim-api-key",
-        default=os.getenv("EVAL_SIM_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
+        default=os.getenv("EVAL_SIM_API_KEY", ""),
+        help="Optional simulator API key override. If empty, use provider env defaults.",
     )
-    parser.add_argument("--sim-model", default=os.getenv("EVAL_SIM_MODEL", "qwen-plus"))
+    parser.add_argument(
+        "--sim-model",
+        default=os.getenv("EVAL_SIM_MODEL", ""),
+        help="Optional simulator model override. Default: reuse proxy chat model.",
+    )
+
+    parser.add_argument(
+        "--judge-provider",
+        default=os.getenv("EVAL_JUDGE_PROVIDER", ""),
+        help="Judge LLM provider (e.g., proxy|qwen|internlm|glm|openai|generic). Default: proxy.",
+    )
+    parser.add_argument(
+        "--judge-api-key",
+        default=os.getenv("EVAL_JUDGE_API_KEY", ""),
+        help="Optional judge API key override. If empty, use provider env defaults.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=os.getenv("EVAL_JUDGE_MODEL", ""),
+        help="Optional judge model override. Default: reuse proxy chat model.",
+    )
+    parser.add_argument("--judge-success-threshold", type=float, default=70.0)
     parser.add_argument("--report-json", default="")
     parser.add_argument(
         "--verbose",
@@ -1746,125 +1540,120 @@ def main() -> None:
     )
 
     model = str(args.model or "").strip()
+    if not model:
+        try:
+            model = _pick_chat_model(client, preferred="")
+        except Exception as e:
+            print("[eval] cannot discover model from proxy. Please ensure proxy is running and reachable.")
+            print(f"[eval] discovery error: {e}")
+            raise SystemExit(1)
+
+    simulator = _build_simulator_client(
+        sim_provider=str(args.sim_provider),
+        sim_api_key=str(args.sim_api_key),
+        sim_model=str(args.sim_model),
+        default_base_url=str(args.base_url),
+        default_api_key=str(args.api_key),
+        default_model=str(model),
+        timeout_s=float(args.timeout_s),
+    )
+    if simulator is None:
+        print("[eval] simulator is required for automated LLM-vs-LLM evaluation.")
+        raise SystemExit(1)
+    sim_model_show = str(getattr(simulator, "model", "") or str(model))
+    sim_provider_show = _normalize_provider(str(args.sim_provider or "")) or "proxy"
+    print(f"[eval] simulator: enabled provider={sim_provider_show} model={sim_model_show}")
+
+    judge_llm = _build_judge_client(
+        judge_provider=str(args.judge_provider),
+        judge_api_key=str(args.judge_api_key),
+        judge_model=str(args.judge_model),
+        default_base_url=str(args.base_url),
+        default_api_key=str(args.api_key),
+        default_model=str(model),
+        timeout_s=float(args.timeout_s),
+    )
+    if judge_llm is None:
+        print("[eval] judge model is required for automated LLM-vs-LLM evaluation.")
+        raise SystemExit(1)
+    judge_model_show = str(getattr(judge_llm, "model", "") or str(model))
+    judge_provider_show = _normalize_provider(str(args.judge_provider or "")) or "proxy"
+    print(
+        f"[eval] judge: enabled provider={judge_provider_show} model={judge_model_show} "
+        f"threshold={float(args.judge_success_threshold):.1f}"
+    )
+
+    eval_result = run_eval_evolution(
+        client=client,
+        model=model,
+        eval_runs=int(args.eval_runs),
+        eval_seed=int(args.eval_seed),
+        user_prefix=str(args.eval_user_prefix),
+        eval_stream=bool(args.eval_stream),
+        turn_timeout_s=float(args.eval_turn_timeout_s),
+        extraction_timeout_s=float(args.eval_extraction_timeout_s),
+        poll_interval_s=float(args.eval_poll_interval_s),
+        simulator=simulator,
+        judge_llm=judge_llm,
+        judge_success_threshold=float(args.judge_success_threshold),
+        max_train_turns=int(args.eval_max_train_turns),
+        verbose=bool(args.verbose),
+    )
+
     report: Dict[str, Any] = {
         "meta": {
             "base_url": str(args.base_url),
-            "mode": str(args.mode),
+            "mode": "eval",
+            "eval_strategy": "evolution",
             "model": str(model),
             "time_unix": int(time.time()),
-        }
+        },
+        "evaluation": eval_result,
     }
 
+    summary = eval_result.get("summary") if isinstance(eval_result, dict) else {}
+    metrics = summary.get("metrics") if isinstance(summary, dict) else {}
+    total_cases = int(summary.get("total_cases") or 0)
+    ok_cases = int(summary.get("ok_cases") or 0)
+    print("\n[eval] summary:")
+    print(
+        json.dumps(
+            {
+                "total_cases": total_cases,
+                "ok_cases": ok_cases,
+                "metrics": metrics,
+                "coverage": summary.get("coverage"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
     overall_ok = True
-
-    if args.mode in {"health", "all"}:
-        results, all_ok = run_health_checks(
-            client=client,
-            user_id=str(args.user_id),
-            model=str(model),
-            timeout_s=float(args.timeout_s),
-            skip_embeddings=bool(args.skip_embeddings),
-        )
-        report["health"] = {
-            "ok": bool(all_ok),
-            "results": [{"name": r.name, "ok": r.ok, "detail": r.detail} for r in results],
-        }
-        for r in results:
-            tag = "PASS" if r.ok else "FAIL"
-            print(f"[{tag}] {r.name}: {r.detail}")
-        if all_ok:
-            print(f"\nHealth checks passed ({sum(1 for r in results if r.ok)}/{len(results)}).")
-        else:
-            print(f"\nHealth checks failed ({sum(1 for r in results if r.ok)}/{len(results)} passed).")
+    if bool(args.strict_eval):
+        strict_ok = True
+        sr_before = metrics.get("sr_before")
+        sr_after = metrics.get("sr_after")
+        score_before = metrics.get("avg_score_before")
+        score_after = metrics.get("avg_score_after")
+        if isinstance(sr_after, (int, float)) and isinstance(sr_before, (int, float)):
+            if float(sr_after) < float(sr_before):
+                strict_ok = False
+                print(f"[eval][strict] SR regressed: after={float(sr_after):.3f} < before={float(sr_before):.3f}")
+        if isinstance(score_after, (int, float)) and isinstance(score_before, (int, float)):
+            if float(score_after) < float(score_before):
+                strict_ok = False
+                print(
+                    f"[eval][strict] score regressed: after={float(score_after):.2f} < before={float(score_before):.2f}"
+                )
+        if not strict_ok:
             overall_ok = False
-
-    if args.mode in {"eval", "all"}:
-        if not model:
-            try:
-                model = _pick_chat_model(client, preferred="")
-            except Exception as e:
-                print(
-                    "[eval] cannot discover model from proxy. "
-                    "Please ensure proxy is running and reachable."
-                )
-                print(f"[eval] discovery error: {e}")
-                overall_ok = False
-                if args.mode == "eval":
-                    raise SystemExit(1)
-
-        sim_enabled = not bool(args.sim_disable)
-        simulator = _build_simulator_client(
-            sim_enabled=sim_enabled,
-            sim_base_url=str(args.sim_base_url),
-            sim_api_key=str(args.sim_api_key),
-            sim_model=str(args.sim_model),
-            timeout_s=float(args.timeout_s),
-        )
-
-        if simulator is None:
-            print("[eval] simulator: disabled (using template turns)")
         else:
-            print(f"[eval] simulator: enabled model={args.sim_model}")
-
-        eval_result = run_eval(
-            client=client,
-            model=model,
-            eval_runs=int(args.eval_runs),
-            eval_seed=int(args.eval_seed),
-            user_prefix=str(args.eval_user_prefix),
-            eval_stream=bool(args.eval_stream),
-            turn_timeout_s=float(args.eval_turn_timeout_s),
-            extraction_timeout_s=float(args.eval_extraction_timeout_s),
-            poll_interval_s=float(args.eval_poll_interval_s),
-            simulator=simulator,
-            verbose=bool(args.verbose),
-        )
-
-        report["evaluation"] = eval_result
-
-        summary = eval_result.get("summary") if isinstance(eval_result, dict) else {}
-        metrics = summary.get("metrics") if isinstance(summary, dict) else {}
-        conf = summary.get("confusion") if isinstance(summary, dict) else {}
-        coverage = summary.get("coverage") if isinstance(summary, dict) else {}
-        total_cases = int(summary.get("total_cases") or 0)
-        ok_cases = int(summary.get("ok_cases") or 0)
-        recall = metrics.get("extraction_recall_on_expected")
-        fp_rate = metrics.get("false_positive_rate_on_unexpected")
-        reuse_pass_rate = metrics.get("retrieval_reuse_pass_rate")
-
-        print("\n[eval] summary:")
-        print(
-            json.dumps(
-                {
-                    "total_cases": total_cases,
-                    "ok_cases": ok_cases,
-                    "confusion": conf,
-                    "metrics": metrics,
-                    "coverage": coverage,
-                },
-                ensure_ascii=False,
-                indent=2,
+            print(
+                "[eval][strict] passed "
+                f"(sr_before={sr_before}, sr_after={sr_after}, "
+                f"avg_score_before={score_before}, avg_score_after={score_after})"
             )
-        )
-
-        if bool(args.strict_eval):
-            strict_ok = True
-            if isinstance(recall, (int, float)) and float(recall) < float(args.min_recall):
-                strict_ok = False
-                print(
-                    f"[eval][strict] recall too low: {float(recall):.3f} < {float(args.min_recall):.3f}"
-                )
-            if isinstance(fp_rate, (int, float)) and float(fp_rate) > float(args.max_fp_rate):
-                strict_ok = False
-                print(
-                    f"[eval][strict] fp_rate too high: {float(fp_rate):.3f} > {float(args.max_fp_rate):.3f}"
-                )
-            if not strict_ok:
-                overall_ok = False
-            else:
-                print(
-                    f"[eval][strict] passed (recall={recall}, fp_rate={fp_rate}, reuse_pass_rate={reuse_pass_rate})"
-                )
 
     report_path = str(args.report_json or "").strip()
     if report_path:
