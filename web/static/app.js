@@ -890,6 +890,17 @@ function formatHit(hit) {
   `;
 }
 
+function renderHitList(targetId, hits) {
+  const node = el(targetId);
+  if (!node) return;
+  const arr = Array.isArray(hits) ? hits : [];
+  if (!arr.length) {
+    node.innerHTML = `<div class="hit hit--empty">(no hits)</div>`;
+    return;
+  }
+  node.innerHTML = arr.map(formatHit).join("");
+}
+
 function renderRetrieval(retrieval) {
   const originalFull = String(retrieval?.original_query || "");
   const originalShort = truncateTextForDisplay(originalFull, 50);
@@ -900,13 +911,38 @@ function renderRetrieval(retrieval) {
   const t = retrieval?.event_time ? _fmtTime(_toMs(retrieval.event_time)) : "";
   el("retrievalAt").textContent = t;
 
+  const scope = String(retrieval?.scope || "").trim().toLowerCase();
   const hits = Array.isArray(retrieval?.hits) ? retrieval.hits : [];
+  let hitsUser = Array.isArray(retrieval?.hits_user) ? retrieval.hits_user : [];
+  let hitsLibrary = Array.isArray(retrieval?.hits_library) ? retrieval.hits_library : [];
+  if ((!hitsUser.length && !hitsLibrary.length) && hits.length) {
+    hitsUser = hits.filter((h) => {
+      const src = String(h?.source || "").toLowerCase();
+      return src.startsWith("user:");
+    });
+    hitsLibrary = hits.filter((h) => {
+      const src = String(h?.source || "").toLowerCase();
+      return src.startsWith("library:");
+    });
+  }
+  if (scope === "user") {
+    hitsLibrary = [];
+  } else if (scope === "library" || scope === "common") {
+    hitsUser = [];
+  }
+  const visibleHits =
+    scope === "user"
+      ? hitsUser
+      : (scope === "library" || scope === "common")
+      ? hitsLibrary
+      : hits;
+
   const selectedIds = Array.isArray(retrieval?.selected_for_context_ids)
     ? retrieval.selected_for_context_ids
     : [];
   const selectedNames = [];
   for (const id of selectedIds) {
-    const h = hits.find((x) => x.id === id);
+    const h = visibleHits.find((x) => x.id === id);
     selectedNames.push(h ? `${h.name} (${id})` : id);
   }
   el("selectedSkills").textContent = selectedNames.join(", ");
@@ -915,7 +951,8 @@ function renderRetrieval(retrieval) {
   const err = retrieval?.error ? String(retrieval.error) : "";
   el("retrievalError").textContent = err;
 
-  el("hits").innerHTML = hits.map(formatHit).join("");
+  renderHitList("hitsUser", hitsUser);
+  renderHitList("hitsLibrary", hitsLibrary);
 }
 
 function pulseRetrievalCard() {

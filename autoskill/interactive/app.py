@@ -20,6 +20,7 @@ from ..render import render_skills_context, select_skills_for_context
 from .commands import Command, parse_command
 from .config import InteractiveConfig
 from .io import ConsoleIO, IO
+from .retrieval import retrieve_hits_by_scope
 from .rewriting import LLMQueryRewriter
 from .selection import LLMSkillSelector
 
@@ -287,12 +288,16 @@ class InteractiveChatApp:
             if not arg:
                 self.io.print("Usage: /search <query>")
                 return False
-            hits = self.sdk.search(
-                arg,
+            retrieved = retrieve_hits_by_scope(
+                sdk=self.sdk,
+                query=str(arg),
                 user_id=self.config.user_id,
-                limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
+                scope=self.config.skill_scope,
+                top_k=self.config.top_k,
+                min_score=float(getattr(self.config, "min_score", 0.0) or 0.0),
+                allow_partial_vectors=False,
             )
+            hits = list(retrieved.get("hits") or [])
             if not hits:
                 self.io.print("(no hits)")
                 return False
@@ -459,19 +464,19 @@ class InteractiveChatApp:
                     self.io.print(f"\n[retrieve] rewritten query: {rewritten}")
                 if rewrite_mode in {"auto", "always"}:
                     search_query = rewritten.strip()
-        try:
-            hits = self.sdk.search(
-                search_query,
-                user_id=self.config.user_id,
-                limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
-            )
-        except Exception as e:
-            self.io.print("\n[retrieve] failed:", str(e))
-            hits = []
-        min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
-        if hits and min_score > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        retrieved = retrieve_hits_by_scope(
+            sdk=self.sdk,
+            query=search_query,
+            user_id=self.config.user_id,
+            scope=self.config.skill_scope,
+            top_k=self.config.top_k,
+            min_score=float(getattr(self.config, "min_score", 0.0) or 0.0),
+            allow_partial_vectors=False,
+        )
+        hits = list(retrieved.get("hits") or [])
+        retrieval_error = str(retrieved.get("error") or "").strip()
+        if retrieval_error:
+            self.io.print("\n[retrieve] failed:", retrieval_error)
         if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
             total_turns_abs = sum(
                 1

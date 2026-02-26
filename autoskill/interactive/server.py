@@ -28,6 +28,7 @@ from ..client import AutoSkill
 from ..embeddings.base import EmbeddingModel
 from ..embeddings.factory import build_embeddings
 from .config import InteractiveConfig
+from .retrieval import retrieve_hits_by_scope
 from .rewriting import LLMQueryRewriter
 from .selection import LLMSkillSelector
 from .session import InteractiveSession
@@ -1467,22 +1468,29 @@ class AutoSkillProxyRuntime:
 
         lim = max(1, int(limit or self.config.top_k))
         min_score_v = float(self.config.min_score if min_score is None else min_score)
-        try:
-            hits = self.sdk.search(
-                search_query,
-                user_id=user_id,
-                limit=lim,
-                filters={"scope": scope, "allow_partial_vectors": False},
-            )
-        except Exception as e:
-            hits = []
-            retrieval_error = str(e)
-        if hits and min_score_v > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score_v]
+        retrieved = retrieve_hits_by_scope(
+            sdk=self.sdk,
+            query=search_query,
+            user_id=user_id,
+            scope=scope,
+            top_k=lim,
+            min_score=min_score_v,
+            allow_partial_vectors=False,
+        )
+        hits = list(retrieved.get("hits") or [])
+        hits_user = list(retrieved.get("hits_user") or [])
+        hits_library = list(retrieved.get("hits_library") or [])
+        retrieval_error = str(retrieved.get("error") or "").strip() or None
 
         retrieval_hits: List[Dict[str, Any]] = []
         for idx, h in enumerate(hits, start=1):
             retrieval_hits.append(_format_retrieval_hit(h, rank=idx))
+        retrieval_hits_user: List[Dict[str, Any]] = []
+        for idx, h in enumerate(hits_user, start=1):
+            retrieval_hits_user.append(_format_retrieval_hit(h, rank=idx))
+        retrieval_hits_library: List[Dict[str, Any]] = []
+        for idx, h in enumerate(hits_library, start=1):
+            retrieval_hits_library.append(_format_retrieval_hit(h, rank=idx))
 
         skills_for_use = [h.skill for h in hits]
         if self.skill_selector is not None and skills_for_use:
@@ -1518,10 +1526,12 @@ class AutoSkillProxyRuntime:
             "search_query": search_query,
             "rewritten_query": rewritten_query,
             "event_time": int(time.time() * 1000),
-            "scope": scope,
+            "scope": str(retrieved.get("scope") or scope),
             "top_k": int(lim),
             "min_score": float(min_score_v),
             "hits": retrieval_hits,
+            "hits_user": retrieval_hits_user,
+            "hits_library": retrieval_hits_library,
             "selected_for_use_ids": [str(getattr(s, "id", "") or "") for s in skills_for_use],
             "selected_for_context_ids": [str(getattr(s, "id", "") or "") for s in selected],
             "context_injected": bool(use_skills),
@@ -1553,6 +1563,8 @@ class AutoSkillProxyRuntime:
                 retrieval["min_score"] if retrieval.get("min_score") is not None else self.config.min_score
             ),
             "hits": list(retrieval.get("hits") or []),
+            "hits_user": list(retrieval.get("hits_user") or []),
+            "hits_library": list(retrieval.get("hits_library") or []),
             "selected_for_use_ids": [str(x) for x in (retrieval.get("selected_for_use_ids") or [])],
             "selected_for_context_ids": [str(x) for x in (retrieval.get("selected_for_context_ids") or [])],
             "context_injected": bool(retrieval.get("context_injected")),
@@ -1594,24 +1606,37 @@ class AutoSkillProxyRuntime:
         limit = max(1, min(200, int(limit)))
         min_score = _safe_float(body.get("min_score"), self.config.min_score)
 
-        hits = self.sdk.search(
-            query,
+        retrieved = retrieve_hits_by_scope(
+            sdk=self.sdk,
+            query=query,
             user_id=user_id,
-            limit=limit,
-            filters={"scope": scope, "allow_partial_vectors": False},
+            scope=scope,
+            top_k=limit,
+            min_score=min_score,
+            allow_partial_vectors=False,
         )
-        if hits and min_score > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        hits = list(retrieved.get("hits") or [])
+        hits_user = list(retrieved.get("hits_user") or [])
+        hits_library = list(retrieved.get("hits_library") or [])
 
         data: List[Dict[str, Any]] = []
         for i, h in enumerate(hits, start=1):
             data.append(_format_retrieval_hit(h, rank=i))
+        data_user: List[Dict[str, Any]] = []
+        for i, h in enumerate(hits_user, start=1):
+            data_user.append(_format_retrieval_hit(h, rank=i))
+        data_library: List[Dict[str, Any]] = []
+        for i, h in enumerate(hits_library, start=1):
+            data_library.append(_format_retrieval_hit(h, rank=i))
         return {
             "object": "list",
             "query": query,
             "user": user_id,
             "scope": scope,
             "data": data,
+            "data_user": data_user,
+            "data_library": data_library,
+            "error": (str(retrieved.get("error") or "") or None),
         }
 
     def retrieval_preview_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:

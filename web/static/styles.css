@@ -1029,7 +1029,33 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 8px;
+}
+
+.retrieval-split-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
   margin-top: 10px;
+}
+
+.retrieval-split {
+  min-width: 0;
+}
+
+.retrieval-split__title {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: rgba(148, 163, 184, 0.92);
+  margin-bottom: 2px;
+}
+
+.hit--empty {
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 12px;
+  border-style: dashed;
+  text-align: center;
 }
 
 .hit {
@@ -1141,4 +1167,5 @@ body {
   .chatuser-wrap {
     max-width: 92%;
   }
+
 }

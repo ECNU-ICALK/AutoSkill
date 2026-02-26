@@ -23,6 +23,7 @@ from ..models import Skill, SkillHit
 from ..render import render_skills_context, select_skills_for_context
 from .commands import Command, parse_command
 from .config import InteractiveConfig
+from .retrieval import retrieve_hits_by_scope
 from .rewriting import LLMQueryRewriter
 from .selection import LLMSkillSelector
 
@@ -409,23 +410,29 @@ class InteractiveSession:
                     "chat_append": [{"role": "system", "content": "Usage: /search <query>"}],
                     "config": asdict(self.config),
                 }
-            hits = self.sdk.search(
-                q,
+            retrieved = retrieve_hits_by_scope(
+                sdk=self.sdk,
+                query=q,
                 user_id=self.config.user_id,
-                limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
+                scope=self.config.skill_scope,
+                top_k=self.config.top_k,
+                min_score=float(getattr(self.config, "min_score", 0.0) or 0.0),
+                allow_partial_vectors=False,
             )
-            min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
-            if hits and min_score > 0:
-                hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+            hits = list(retrieved.get("hits") or [])
+            hits_user = list(retrieved.get("hits_user") or [])
+            hits_library = list(retrieved.get("hits_library") or [])
             retrieval = self._build_retrieval_info(
                 original_query=q,
                 rewritten_query=None,
                 search_query=q,
                 hits=hits,
+                hits_user=hits_user,
+                hits_library=hits_library,
                 selected_for_use=[h.skill for h in hits],
                 selected_for_context=[h.skill for h in hits],
                 context_injected=False,
+                error=(str(retrieved.get("error") or "") or None),
             )
             return {
                 "kind": "command",
@@ -554,22 +561,19 @@ class InteractiveSession:
                 if rewrite_mode in {"auto", "always"}:
                     search_query = rewritten_query
 
-        try:
-            hits = self.sdk.search(
-                search_query,
-                user_id=self.config.user_id,
-                limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
-            )
-        except Exception as e:
-            hits = []
-            retrieval_error = str(e)
-        else:
-            retrieval_error = ""
-
-        min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
-        if hits and min_score > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        retrieved = retrieve_hits_by_scope(
+            sdk=self.sdk,
+            query=search_query,
+            user_id=self.config.user_id,
+            scope=self.config.skill_scope,
+            top_k=self.config.top_k,
+            min_score=float(getattr(self.config, "min_score", 0.0) or 0.0),
+            allow_partial_vectors=False,
+        )
+        hits = list(retrieved.get("hits") or [])
+        hits_user = list(retrieved.get("hits_user") or [])
+        hits_library = list(retrieved.get("hits_library") or [])
+        retrieval_error = str(retrieved.get("error") or "")
 
         if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
             total_turns_abs = sum(
@@ -635,6 +639,8 @@ class InteractiveSession:
             rewritten_query=rewritten_query,
             search_query=search_query,
             hits=hits,
+            hits_user=hits_user,
+            hits_library=hits_library,
             selected_for_use=selected_for_use,
             selected_for_context=selected_for_context,
             context_injected=use_skills,
@@ -700,22 +706,19 @@ class InteractiveSession:
                 if rewrite_mode in {"auto", "always"}:
                     search_query = rewritten_query
 
-        try:
-            hits = self.sdk.search(
-                search_query,
-                user_id=self.config.user_id,
-                limit=self.config.top_k,
-                filters={"scope": self.config.skill_scope, "allow_partial_vectors": False},
-            )
-        except Exception as e:
-            hits = []
-            retrieval_error = str(e)
-        else:
-            retrieval_error = ""
-
-        min_score = float(getattr(self.config, "min_score", 0.0) or 0.0)
-        if hits and min_score > 0:
-            hits = [h for h in hits if float(getattr(h, "score", 0.0) or 0.0) >= min_score]
+        retrieved = retrieve_hits_by_scope(
+            sdk=self.sdk,
+            query=search_query,
+            user_id=self.config.user_id,
+            scope=self.config.skill_scope,
+            top_k=self.config.top_k,
+            min_score=float(getattr(self.config, "min_score", 0.0) or 0.0),
+            allow_partial_vectors=False,
+        )
+        hits = list(retrieved.get("hits") or [])
+        hits_user = list(retrieved.get("hits_user") or [])
+        hits_library = list(retrieved.get("hits_library") or [])
+        retrieval_error = str(retrieved.get("error") or "")
 
         if self._should_trigger_auto_extraction() and has_assistant_in_window and early_window:
             total_turns_abs = sum(
@@ -769,6 +772,8 @@ class InteractiveSession:
             rewritten_query=rewritten_query,
             search_query=search_query,
             hits=hits,
+            hits_user=hits_user,
+            hits_library=hits_library,
             selected_for_use=selected_for_use,
             selected_for_context=selected_for_context,
             context_injected=use_skills,
@@ -842,11 +847,15 @@ class InteractiveSession:
         selected_for_use: List[Skill],
         selected_for_context: List[Skill],
         context_injected: bool,
+        hits_user: Optional[List[SkillHit]] = None,
+        hits_library: Optional[List[SkillHit]] = None,
         error: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Builds a retrieval diagnostics payload consumed by CLI/Web views."""
 
         hits_out = [_format_hit(h, rank=i) for i, h in enumerate(hits or [], start=1)]
+        hits_user_out = [_format_hit(h, rank=i) for i, h in enumerate(hits_user or [], start=1)]
+        hits_library_out = [_format_hit(h, rank=i) for i, h in enumerate(hits_library or [], start=1)]
         return {
             "original_query": str(original_query or ""),
             "rewritten_query": (str(rewritten_query) if rewritten_query else None),
@@ -856,6 +865,8 @@ class InteractiveSession:
             "top_k": int(self.config.top_k),
             "min_score": float(self.config.min_score),
             "hits": hits_out,
+            "hits_user": hits_user_out,
+            "hits_library": hits_library_out,
             "selected_for_use_ids": [str(s.id) for s in (selected_for_use or [])],
             "selected_for_context_ids": [str(s.id) for s in (selected_for_context or [])],
             "context_injected": bool(context_injected),
