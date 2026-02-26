@@ -413,10 +413,10 @@ python3 -m examples.interactive_chat --llm-provider internlm --llm-model intern-
 ### 8.5 Generic URL-based Backends (LLM + Embeddings)
 
 ```bash
-export AUTOSKILL_GENERIC_LLM_URL="http://35.220.164.252:3888/v1"
+export AUTOSKILL_GENERIC_LLM_URL="http://XXX/v1"
 export AUTOSKILL_GENERIC_LLM_MODEL="gpt-5.2"
-export AUTOSKILL_GENERIC_EMBED_URL="http://s-20260204155338-p8gv8.ailab-evalservice.pjh-service.org.cn/v1"
-export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3vl8b"
+export AUTOSKILL_GENERIC_EMBED_URL="http://XX/v1"
+export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3"
 # Optional (can be empty):
 export AUTOSKILL_GENERIC_API_KEY=""
 
@@ -608,7 +608,7 @@ If you use AutoSkill in academic work, technical reports, or demos, please cite:
 
 ```bibtex
 @software{autoskill_2026,
-  author = {Yutao Yang, Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai, Xin Li, Bo Zhang, Qin Chen, Jie Zhou, Kai Chen, Liang He},
+  author = {Yutao Yang, Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai, Lin Du, Xin Li, Bo Zhang, Qin Chen, Jie Zhou, Kai Chen, Liang He},
   title = {AutoSkill: Experience-Driven Lifelong Learning via Skill Self-Evolution},
   year = {2026},
   url = {https://github.com/ECNU-ICALK/AutoSkill},
@@ -622,7 +622,7 @@ Institutions: Shanghai AI Laboratory, School of Computer Science at East China N
 
 Core Authors: Yutao Yang
 
-Contribution: Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai
+Contribution: Junsong Li, Qianjun Pan, Bihao Zhan, Yuxuan Cai, Lin Du
 
 Lead Authors: Jie Zhou, Kai Chen, Liang He
 
