@@ -27,10 +27,10 @@
 
 ## 2. Features
 
-- Hook-style retrieval API (MemOS-like):
+- Hook-style retrieval API:
 - `POST /v1/autoskill/openclaw/hooks/before_agent_start`
 
-- Hook-style post-run evolution API (MemOS-like):
+- Hook-style post-run evolution API:
 - `POST /v1/autoskill/openclaw/hooks/agent_end`
 
 - Backward-compatible per-turn API:

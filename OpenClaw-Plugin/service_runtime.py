@@ -134,7 +134,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
 
     def openclaw_agent_end_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
         """
-        MemOS-style post-run hook:
+        Hook-style post-run callback:
         - optional success gate
         - schedule background extraction/evolution
         """
