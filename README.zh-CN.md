@@ -9,8 +9,8 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 ## News
 
-- **2025-03-25**: **AutoSkill-Agent 1.0**即将到来（面向智能体的Skill抽取）。
-- **2025-02-04**：发布 **AutoSkill 1.0**（面向对话的Skill抽取）。
+- **2025-03-26**: 发布 **AutoSkill-OpenClaw-Plugin 1.0**。
+- **2025-02-04**：发布 **AutoSkill 1.0**。
 
 ## 1. 快速开始：Web UI
 
@@ -284,6 +284,7 @@ SkillBank/
 - `autoskill/`：SDK 核心实现。
 - `examples/`：可直接运行的示例入口。
 - `autoskill/interactive/server.py`：OpenAI 兼容反向代理运行时。
+- `OpenClaw-Plugin/`：可本地部署的 OpenClaw 侧车插件（基于 autoskill 接口接入）。
 - `web/`：本地 Web UI 静态资源。
 - `SkillBank/`：默认本地技能存储根目录。
 - `imgs/`：README 示例图片。
@@ -540,47 +541,69 @@ python3 -m examples.auto_evalution \
   --report-json ./proxy_eval_report.json
 ```
 
-向量管理端点：
+### 9.6 OpenClaw 插件
 
-- `GET /v1/autoskill/vectors/status`
-- `POST /v1/autoskill/vectors/rebuild`
-
-对话补全示例：
+本地部署侧车插件：
 
 ```bash
-curl http://127.0.0.1:9000/v1/chat/completions \
+python3 OpenClaw-Plugin/install.py \
+  --workspace-dir ~/.openclaw \
+  --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --llm-provider internlm \
+  --llm-model intern-s1-pro \
+  --embeddings-provider qwen \
+  --embeddings-model text-embedding-v4 \
+  --start
+```
+
+完整插件说明（安装、接入、运行逻辑、验证）：
+- `OpenClaw-Plugin/README.md`
+
+该插件是技能服务（检索 + 离线进化）。
+
+- `base_url`：`http://127.0.0.1:9100/v1`
+- `api_key`：`AUTOSKILL_PROXY_API_KEY` 的值（若未开启鉴权可为空）
+- 主入口：`POST /v1/autoskill/openclaw/turn`
+
+服务调用示例：
+
+```bash
+curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/turn \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "YOUR_MODEL_NAME",
-    "user": "u1",
     "messages": [
-      {"role": "user", "content": "写一个简洁的发布检查清单。"}
-    ]
+      {"role":"assistant","content":"你希望什么风格？"},
+      {"role":"user","content":"写政府报告，不要表格，避免幻觉。"}
+    ],
+    "schedule_extraction": true
   }'
 ```
 
-检索预览示例：
-
 ```bash
-curl http://127.0.0.1:9000/v1/autoskill/retrieval/preview \
+curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
   -H "Content-Type: application/json" \
   -d '{
-    "user": "u1",
-    "query": "写一份简洁、无幻觉的政府报告。"
+    "conversations": [
+      {"messages":[
+        {"role":"user","content":"写一份政策备忘录。"},
+        {"role":"assistant","content":"初稿如下..."},
+        {"role":"user","content":"更具体，避免幻觉。"}
+      ]}
+    ]
   }'
 ```
 
 抽取事件流示例：
 
 ```bash
-curl -N http://127.0.0.1:9000/v1/autoskill/extractions/<job_id>/events \
+curl -N http://127.0.0.1:9100/v1/autoskill/extractions/<job_id>/events \
   -H "Accept: text/event-stream"
 ```
 
 向量重建示例：
 
 ```bash
-curl http://127.0.0.1:9000/v1/autoskill/vectors/rebuild \
+curl http://127.0.0.1:9100/v1/autoskill/vectors/rebuild \
   -H "Content-Type: application/json" \
   -d '{
     "user": "u1",

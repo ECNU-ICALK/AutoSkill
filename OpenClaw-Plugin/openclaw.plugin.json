@@ -1,0 +1,24 @@
+{
+  "id": "autoskill-openclaw-plugin",
+  "name": "AutoSkill OpenClaw Plugin",
+  "version": "0.1.0",
+  "type": "external-sidecar",
+  "description": "Local sidecar wrapper for autoskill retrieval/evolution service.",
+  "runtime": {
+    "start": "~/.openclaw/plugins/autoskill-openclaw-plugin/start.sh",
+    "stop": "~/.openclaw/plugins/autoskill-openclaw-plugin/stop.sh",
+    "status": "~/.openclaw/plugins/autoskill-openclaw-plugin/status.sh"
+  },
+  "interface": {
+    "base_url": "http://127.0.0.1:9100/v1",
+    "protocol": "autoskill-service",
+    "endpoints": [
+      "/models",
+      "/autoskill/capabilities",
+      "/autoskill/openclaw/turn",
+      "/autoskill/retrieval/preview",
+      "/autoskill/conversations/import",
+      "/autoskill/extractions"
+    ]
+  }
+}

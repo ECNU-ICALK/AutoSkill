@@ -10,8 +10,8 @@ and continuously evolves existing Skills through merge + version updates.
 
 ## News
 
-- **2025-03-25**: **AutoSkill-Agent 1.0** coming soon (Extracting Skills for Agent).
-- **2025-02-04**: **AutoSkill 1.0** released (Extracting Skills for Diglogue).
+- **2025-03-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
+- **2025-02-04**: **AutoSkill 1.0** released.
 
 
 ## 1. Start Here: Web UI
@@ -286,6 +286,7 @@ Notes:
 - `autoskill/`: SDK core.
 - `examples/`: runnable demos and entry scripts.
 - `autoskill/interactive/server.py`: OpenAI-compatible reverse proxy runtime.
+- `OpenClaw-Plugin/`: local-deployable OpenClaw sidecar plugin for autoskill interface integration.
 - `web/`: static frontend assets for local Web UI.
 - `SkillBank/`: default local storage root.
 - `imgs/`: README demo images.
@@ -542,47 +543,69 @@ python3 -m examples.auto_evalution \
   --report-json ./proxy_eval_report.json
 ```
 
-Vector admin:
+### 9.6 OpenClaw Plugin (autoskill)
 
-- `GET /v1/autoskill/vectors/status`
-- `POST /v1/autoskill/vectors/rebuild`
-
-Chat completion example:
+Deploy the sidecar plugin locally:
 
 ```bash
-curl http://127.0.0.1:9000/v1/chat/completions \
+python3 OpenClaw-Plugin/install.py \
+  --workspace-dir ~/.openclaw \
+  --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --llm-provider internlm \
+  --llm-model intern-s1-pro \
+  --embeddings-provider qwen \
+  --embeddings-model text-embedding-v4 \
+  --start
+```
+
+Full plugin guide (install, wiring, runtime flow, verification):
+- `OpenClaw-Plugin/README.md`
+
+This plugin is a skill service (retrieval + offline evolution), not a chat proxy.
+
+- `base_url`: `http://127.0.0.1:9100/v1`
+- `api_key`: value of `AUTOSKILL_PROXY_API_KEY` (or empty if disabled)
+- main endpoint: `POST /v1/autoskill/openclaw/turn`
+
+Service examples:
+
+```bash
+curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/turn \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "YOUR_MODEL_NAME",
-    "user": "u1",
     "messages": [
-      {"role": "user", "content": "Write a concise release checklist."}
-    ]
+      {"role":"assistant","content":"What style do you want?"},
+      {"role":"user","content":"Write a government report, no tables, avoid hallucinations."}
+    ],
+    "schedule_extraction": true
   }'
 ```
 
-Retrieval preview example:
-
 ```bash
-curl http://127.0.0.1:9000/v1/autoskill/retrieval/preview \
+curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
   -H "Content-Type: application/json" \
   -d '{
-    "user": "u1",
-    "query": "Write a concise government report with no hallucinations."
+    "conversations": [
+      {"messages":[
+        {"role":"user","content":"Write a policy memo."},
+        {"role":"assistant","content":"Draft ..."},
+        {"role":"user","content":"More specific, avoid hallucinations."}
+      ]}
+    ]
   }'
 ```
 
 Extraction event stream example:
 
 ```bash
-curl -N http://127.0.0.1:9000/v1/autoskill/extractions/<job_id>/events \
+curl -N http://127.0.0.1:9100/v1/autoskill/extractions/<job_id>/events \
   -H "Accept: text/event-stream"
 ```
 
 Vector rebuild example:
 
 ```bash
-curl http://127.0.0.1:9000/v1/autoskill/vectors/rebuild \
+curl http://127.0.0.1:9100/v1/autoskill/vectors/rebuild \
   -H "Content-Type: application/json" \
   -d '{
     "user": "u1",
