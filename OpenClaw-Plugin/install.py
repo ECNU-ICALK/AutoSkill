@@ -113,7 +113,7 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         "AUTOSKILL_PROXY_HOST=127.0.0.1\n"
         f"AUTOSKILL_PROXY_PORT={args.proxy_port}\n"
         f"AUTOSKILL_STORE_DIR={store_dir}\n"
-        "AUTOSKILL_USER_ID=openclaw_user\n"
+        "AUTOSKILL_USER_ID=\n"
         "AUTOSKILL_SKILL_SCOPE=all\n"
         "AUTOSKILL_REWRITE_MODE=always\n"
         "AUTOSKILL_MIN_SCORE=0.4\n"

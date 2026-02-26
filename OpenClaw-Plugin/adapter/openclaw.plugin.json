@@ -75,9 +75,15 @@
       "logPayload": {
         "type": "boolean",
         "default": false
+      },
+      "maxInjectedChars": {
+        "type": "integer",
+        "minimum": 2000,
+        "maximum": 80000,
+        "default": 12000,
+        "description": "Max injected context size after adapter-side prompt assembly and truncation."
       }
     },
     "additionalProperties": false
   }
 }
-

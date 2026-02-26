@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embeddings-model", default=None)
 
     parser.add_argument("--store-dir", default=_env("AUTOSKILL_STORE_DIR", "SkillBank"))
-    parser.add_argument("--user-id", default=_env("AUTOSKILL_USER_ID", "openclaw_user"))
+    parser.add_argument("--user-id", default=_env("AUTOSKILL_USER_ID", ""))
     parser.add_argument("--skill-scope", default=_env("AUTOSKILL_SKILL_SCOPE", "all"), help="user|common|all")
     parser.add_argument("--rewrite-mode", default=_env("AUTOSKILL_REWRITE_MODE", "always"), help="never|auto|always")
     parser.add_argument("--min-score", type=float, default=float(_env("AUTOSKILL_MIN_SCORE", "0.4")))

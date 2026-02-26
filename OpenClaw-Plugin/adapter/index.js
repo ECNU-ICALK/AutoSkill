@@ -93,19 +93,101 @@ function normalizeScope(scope) {
   return "all";
 }
 
+function normalizeUserToken(v, maxLen = 96) {
+  const raw = asString(v).trim();
+  if (!raw) return "";
+  const normalized = raw
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_.:@-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!normalized) return "";
+  return normalized.slice(0, Math.max(16, Number(maxLen) || 96));
+}
+
+function stableHash32(text) {
+  const src = asString(text);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < src.length; i += 1) {
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+function firstUserAnchor(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (const m of list) {
+    const role = asString(m?.role).trim().toLowerCase();
+    if (role !== "user") continue;
+    const content = asText(m?.content).trim();
+    if (content) return content.slice(0, 200);
+  }
+  for (const m of list) {
+    const content = asText(m?.content).trim();
+    if (content) return content.slice(0, 200);
+  }
+  return "";
+}
+
+function inferSessionToken(event, ctx, messages) {
+  const candidates = [
+    event?.sessionId,
+    event?.session_id,
+    event?.conversationId,
+    event?.conversation_id,
+    event?.threadId,
+    event?.thread_id,
+    event?.chatId,
+    event?.chat_id,
+    event?.runId,
+    event?.run_id,
+    event?.run?.id,
+    event?.requestId,
+    event?.request_id,
+    ctx?.sessionId,
+    ctx?.session_id,
+    ctx?.conversationId,
+    ctx?.conversation_id,
+    ctx?.threadId,
+    ctx?.thread_id,
+    ctx?.chatId,
+    ctx?.chat_id,
+    ctx?.runId,
+    ctx?.run_id,
+    ctx?.run?.id,
+    ctx?.requestId,
+    ctx?.request_id,
+  ];
+  for (const c of candidates) {
+    const token = normalizeUserToken(c, 80);
+    if (token) return `sid_${token}`;
+  }
+  const anchor = firstUserAnchor(messages);
+  if (anchor) return `msg_${stableHash32(anchor)}`;
+  return "";
+}
+
 function resolveUserId(cfg, event, ctx) {
-  if (cfg.userId) return cfg.userId;
+  if (cfg.userId) return normalizeUserToken(cfg.userId, 96);
   const fromEvent =
+    normalizeUserToken(event?.user?.id, 96) ||
+    normalizeUserToken(event?.user?.userId, 96) ||
     asString(event?.userId).trim() ||
     asString(event?.user).trim() ||
     asString(event?.senderId).trim();
-  if (fromEvent) return fromEvent;
+  if (fromEvent) return normalizeUserToken(fromEvent, 96);
   const fromCtx =
+    normalizeUserToken(ctx?.user?.id, 96) ||
+    normalizeUserToken(ctx?.user?.userId, 96) ||
     asString(ctx?.userId).trim() ||
     asString(ctx?.senderId).trim() ||
     asString(ctx?.accountId).trim();
-  if (fromCtx) return fromCtx;
-  return "openclaw_user";
+  if (fromCtx) return normalizeUserToken(fromCtx, 96);
+  const messages = pickMessages(event, ctx);
+  const sessionToken = inferSessionToken(event, ctx, messages);
+  if (sessionToken) return `openclaw_${sessionToken}`;
+  return "openclaw_fallback";
 }
 
 function withTimeout(ms) {
@@ -206,7 +288,7 @@ function loadDotEnvFiles() {
   }
   if (home) {
     defaults.push(path.join(home, ".openclaw", ".env"));
-    defaults.push(path.join(home, ".openclaw", "plugins", "autoskill", ".env"));
+    defaults.push(path.join(home, ".openclaw", "plugins", "autoskill-openclaw-plugin", ".env"));
   }
   const files = [];
   const seen = new Set();

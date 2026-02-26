@@ -10,6 +10,9 @@
 - GitHub source:
 - [https://github.com/ECNU-ICALK/AutoSkill/tree/main/OpenClaw-Plugin](https://github.com/ECNU-ICALK/AutoSkill/tree/main/OpenClaw-Plugin)
 
+- Sidecar metadata manifest in repo:
+- `OpenClaw-Plugin/sidecar.manifest.json`
+
 - Runtime install path (created by installer):
 - `~/.openclaw/plugins/autoskill-openclaw-plugin`
 
@@ -56,8 +59,8 @@
 Recommended hook lifecycle:
 
 1. OpenClaw calls `before_agent_start`.
-2. Service rewrites query (optional), retrieves skills, and returns `context_message`.
-3. OpenClaw injects `context_message` into model input and runs its normal agent/model loop.
+2. Service rewrites query (optional), retrieves skills, and returns retrieval payload (`selected_skills`, `context`, `context_message`, metadata).
+3. Adapter builds a normalized prompt block from retrieval payload, prepends it to model input, and tells the model to ignore unrelated skills.
 4. OpenClaw calls `agent_end` with final messages and optional success signal.
 5. Service schedules extraction in background and updates `SkillBank`.
 
@@ -214,7 +217,7 @@ Response includes:
 
 - `hits` / `selected_for_context_ids`
 - `context`
-- `context_message` (directly append as system message in OpenClaw runtime)
+- `context_message` (adapter-compatible field; adapter assembles final injected prompt via `buildPromptFromData`)
 
 ### 7.2 Hook: agent_end (async extraction/evolution)
 
@@ -306,3 +309,5 @@ Logs:
 - `AUTOSKILL_INGEST_WINDOW`
 - `AUTOSKILL_EXTRACT_ENABLED`
 - `AUTOSKILL_PROXY_API_KEY` (optional)
+- `AUTOSKILL_DOTENV` (optional; semicolon/comma-separated dotenv paths for adapter preloading)
+- `AUTOSKILL_MAX_INJECTED_CHARS` (optional; adapter-side max injected prompt chars)
