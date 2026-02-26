@@ -1852,8 +1852,8 @@ def main() -> None:
     parser.add_argument("--eval-user-prefix", default="proxy_eval")
     parser.add_argument("--eval-max-train-turns", type=int, default=10)
     parser.add_argument("--eval-stream", action="store_true")
-    parser.add_argument("--eval-turn-timeout-s", type=float, default=120.0)
-    parser.add_argument("--eval-extraction-timeout-s", type=float, default=180.0)
+    parser.add_argument("--eval-turn-timeout-s", type=float, default=240.0)
+    parser.add_argument("--eval-extraction-timeout-s", type=float, default=360.0)
     parser.add_argument("--eval-poll-interval-s", type=float, default=0.8)
     parser.add_argument("--strict-eval", action="store_true")
 

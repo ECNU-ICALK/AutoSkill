@@ -569,6 +569,12 @@ python3 OpenClaw-Plugin/install.py \
 重要：
 - 安装完成后，需要重启一次 OpenClaw 运行进程，新的插件配置才会生效。
 
+```bash
+openclaw gateway restart
+```
+
+如果当前环境没有 `openclaw` CLI，请使用你现有的服务管理方式重启 OpenClaw gateway/runtime 进程。
+
 该插件是技能服务（检索 + 离线进化）。
 
 - `base_url`：`http://127.0.0.1:9100/v1`

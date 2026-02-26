@@ -571,6 +571,12 @@ The installer automatically:
 Important:
 - After installation, restart OpenClaw runtime once so new plugin config is loaded.
 
+```bash
+openclaw gateway restart
+```
+
+If your environment does not provide the `openclaw` CLI, restart the OpenClaw gateway/runtime process with your existing service manager.
+
 This plugin is a skill service (retrieval + offline evolution), not a chat proxy.
 
 - `base_url`: `http://127.0.0.1:9100/v1`

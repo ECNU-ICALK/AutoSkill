@@ -156,6 +156,12 @@ curl http://127.0.0.1:9100/v1/autoskill/capabilities
 
 4. Restart OpenClaw runtime so it reloads plugin config from `~/.openclaw/openclaw.json`.
 
+```bash
+openclaw gateway restart
+```
+
+If your environment does not provide the `openclaw` CLI, restart the OpenClaw gateway/runtime process using your service manager.
+
 5. (Optional) confirm adapter entry:
 
 ```bash
@@ -192,6 +198,10 @@ curl http://127.0.0.1:9100/health
 
 Important:
 - Restart OpenClaw runtime once after installation/start, otherwise the adapter hook config may not be loaded yet.
+
+```bash
+openclaw gateway restart
+```
 
 If you do not want auto config patch:
 
