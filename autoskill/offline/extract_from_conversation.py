@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
 from .file_loader import data_to_text_unit, load_file_units
@@ -26,6 +26,7 @@ def extract_from_conversation(
     hint: Optional[str] = None,
     continue_on_error: bool = True,
     max_messages_per_conversation: int = 0,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """
     Runs offline extraction from archived conversations.
@@ -79,6 +80,8 @@ def extract_from_conversation(
             md = dict(base_md)
             md["import_index"] = int(idx)
             unit_source_file = str(unit.get("source_file") or "").strip()
+            unit_title = str(unit.get("title") or "").strip() or f"conversation_{idx + 1}"
+            file_name = os.path.basename(unit_source_file) if unit_source_file else unit_title
             if unit_source_file:
                 md["source_file"] = unit_source_file
             try:
@@ -94,9 +97,32 @@ def extract_from_conversation(
                     sid = str(getattr(s, "id", "") or "")
                     if sid:
                         upserted_by_id[sid] = s
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "index": int(idx),
+                            "total": int(len(units)),
+                            "file_name": file_name,
+                            "file_path": unit_source_file or None,
+                            "status": "ok",
+                            "skills": _skills_compact_list(updated),
+                        }
+                    )
             except Exception as e:
                 failed += 1
                 errors.append({"index": idx, "error": str(e)})
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "index": int(idx),
+                            "total": int(len(units)),
+                            "file_name": file_name,
+                            "file_path": unit_source_file or None,
+                            "status": "error",
+                            "error": str(e),
+                            "skills": [],
+                        }
+                    )
                 if not continue_on_error:
                     raise
 
@@ -143,6 +169,20 @@ def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
         }
     except Exception:
         return {"id": "", "name": "", "description": "", "version": ""}
+
+
+def _skills_compact_list(skills: Any) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for s in list(skills or []):
+        sid = str(getattr(s, "id", "") or "").strip()
+        name = str(getattr(s, "name", "") or "").strip()
+        key = (sid, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"id": sid, "name": name})
+    return out
 
 
 def _env(name: str, default: str = "") -> str:
@@ -206,6 +246,25 @@ def main() -> None:
     args = build_parser().parse_args()
     sdk = _build_sdk_from_args(args)
 
+    def _on_progress(evt: Dict[str, Any]) -> None:
+        idx = int(evt.get("index", 0)) + 1
+        total = int(evt.get("total", 0))
+        fname = str(evt.get("file_name") or "")
+        status = str(evt.get("status") or "ok")
+        if status == "error":
+            err = str(evt.get("error") or "unknown error")
+            print(f"[{idx}/{total}] {fname} -> ERROR: {err}", flush=True)
+            return
+        skills = list(evt.get("skills") or [])
+        if not skills:
+            print(f"[{idx}/{total}] {fname} -> no skills", flush=True)
+            return
+        names = [str(x.get("name") or "").strip() for x in skills if str(x.get("name") or "").strip()]
+        if not names:
+            print(f"[{idx}/{total}] {fname} -> skills: {len(skills)}", flush=True)
+            return
+        print(f"[{idx}/{total}] {fname} -> skills: {', '.join(names)}", flush=True)
+
     result = extract_from_conversation(
         sdk=sdk,
         user_id=str(args.user_id).strip() or "u1",
@@ -214,6 +273,7 @@ def main() -> None:
         continue_on_error=True,
         max_messages_per_conversation=int(args.max_messages_per_conversation or 0),
         metadata={"channel": "offline_extract_from_conversation"},
+        progress_callback=_on_progress,
     )
 
     print("Offline conversation extraction completed.")
