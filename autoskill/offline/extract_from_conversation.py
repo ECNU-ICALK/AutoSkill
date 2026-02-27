@@ -1,8 +1,5 @@
 """
-Offline conversation extraction.
-
-This module runs batch extraction from heterogeneous offline files or in-memory
-payloads and feeds them into the offline extraction + skill management flow.
+Offline conversation extraction from OpenAI-format datasets.
 """
 
 from __future__ import annotations
@@ -12,7 +9,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
-from .file_loader import data_to_text_unit, load_file_units
+from autoskill.client import _extract_openai_conversations, _load_openai_data_from_file
 from .prompt_runtime import activate_offline_prompt_runtime
 
 
@@ -29,15 +26,15 @@ def extract_from_conversation(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """
-    Runs offline extraction from archived conversations.
+    Runs offline extraction from archived OpenAI-format conversations.
     """
 
+    units: List[Dict[str, Any]] = []
     abs_input = ""
-    units: List[Dict[str, str]] = []
     if data is not None:
-        units = [data_to_text_unit(data, title="inline_conversation")]
+        units = _units_from_openai_data(data, source_file="")
     elif str(file_path or "").strip():
-        units, abs_input = load_file_units(str(file_path))
+        units, abs_input = _units_from_openai_path(str(file_path))
     else:
         raise ValueError("extract_from_conversation requires data or file_path")
     if not units:
@@ -66,9 +63,18 @@ def extract_from_conversation(
 
     with activate_offline_prompt_runtime(sdk=sdk, channel="offline_extract_from_conversation"):
         for idx, unit in enumerate(units):
+            unit_messages = list(unit.get("messages") or [])
+            if not unit_messages:
+                failed += 1
+                errors.append({"index": idx, "error": "empty openai messages"})
+                continue
+            window = list(unit_messages[-limit_msgs:]) if limit_msgs > 0 else list(unit_messages)
+            user_questions = _collect_user_questions(window)
+            full_context = _format_full_conversation(window)
             msg = _build_conversation_message(
                 title=str(unit.get("title") or "").strip() or f"conversation_{idx + 1}",
-                content=str(unit.get("text") or "").strip(),
+                user_questions=user_questions,
+                full_conversation=full_context,
             )
             window = [{"role": "user", "content": msg}]
             if limit_msgs > 0:
@@ -80,6 +86,7 @@ def extract_from_conversation(
             md = dict(base_md)
             md["import_index"] = int(idx)
             unit_source_file = str(unit.get("source_file") or "").strip()
+            md["conversation_index"] = int(unit.get("conversation_index", 0))
             unit_title = str(unit.get("title") or "").strip() or f"conversation_{idx + 1}"
             file_name = os.path.basename(unit_source_file) if unit_source_file else unit_title
             if unit_source_file:
@@ -137,14 +144,98 @@ def extract_from_conversation(
     }
 
 
-def _build_conversation_message(*, title: str, content: str) -> str:
+def _build_conversation_message(
+    *,
+    title: str,
+    user_questions: str,
+    full_conversation: str,
+) -> str:
     return (
-        "Offline conversation source.\n"
+        "Offline OpenAI-format conversation source.\n"
         f"Title: {title}\n"
-        "Treat this content as one complete interaction context and extract reusable skills.\n"
-        "Conversation content:\n"
-        f"{content}"
+        "Use the user questions below as the PRIMARY extraction evidence.\n"
+        "Use the full conversation below as SECONDARY context reference.\n"
+        "In the full conversation section, assistant/model replies are reference-only and not skill evidence.\n\n"
+        "Primary User Questions (main evidence):\n"
+        f"{user_questions}\n\n"
+        "Full Conversation (context reference):\n"
+        f"{full_conversation}"
     )
+
+
+def _units_from_openai_data(data: Any, *, source_file: str) -> List[Dict[str, Any]]:
+    conversations = _extract_openai_conversations(data)
+    out: List[Dict[str, Any]] = []
+    base = os.path.basename(source_file) if source_file else "inline"
+    for i, conv in enumerate(conversations):
+        out.append(
+            {
+                "title": f"{base}#conv_{i + 1}",
+                "source_file": source_file,
+                "conversation_index": i,
+                "messages": list(conv),
+            }
+        )
+    return out
+
+
+def _units_from_openai_path(path: str) -> tuple[List[Dict[str, Any]], str]:
+    abs_path = os.path.abspath(os.path.expanduser(str(path or "").strip()))
+    if not abs_path:
+        return [], ""
+    if os.path.isfile(abs_path):
+        data = _load_openai_data_from_file(abs_path)
+        return _units_from_openai_data(data, source_file=abs_path), abs_path
+    if not os.path.isdir(abs_path):
+        raise ValueError(f"path not found: {abs_path}")
+
+    out: List[Dict[str, Any]] = []
+    for p in _iter_openai_dataset_files(abs_path):
+        try:
+            data = _load_openai_data_from_file(p)
+        except Exception:
+            continue
+        out.extend(_units_from_openai_data(data, source_file=p))
+    return out, abs_path
+
+
+def _iter_openai_dataset_files(root: str) -> List[str]:
+    files: List[str] = []
+    for dirpath, _, names in os.walk(root):
+        for name in names:
+            low = str(name).lower()
+            if low.endswith(".json") or low.endswith(".jsonl"):
+                p = os.path.join(dirpath, name)
+                if os.path.isfile(p):
+                    files.append(p)
+    files.sort()
+    return files
+
+
+def _collect_user_questions(messages: List[Dict[str, str]]) -> str:
+    parts: List[str] = []
+    for m in list(messages or []):
+        role = str(m.get("role") or "").strip().lower()
+        if role != "user":
+            continue
+        txt = str(m.get("content") or "").strip()
+        if not txt:
+            continue
+        parts.append(txt)
+    if not parts:
+        return "(none)"
+    return "\n\n".join(parts)
+
+
+def _format_full_conversation(messages: List[Dict[str, str]]) -> str:
+    out: List[str] = []
+    for m in list(messages or []):
+        role = str(m.get("role") or "").strip().lower() or "user"
+        txt = str(m.get("content") or "").strip()
+        if not txt:
+            continue
+        out.append(f"[{role}] {txt}")
+    return "\n\n".join(out).strip() or "(empty)"
 
 
 def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
@@ -219,9 +310,9 @@ def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract skills from offline files/directories as whole conversation contexts."
+        description="Extract skills from OpenAI-format conversation JSON/JSONL files (or a directory of them)."
     )
-    parser.add_argument("--file", required=True, help="Path to a file or directory.")
+    parser.add_argument("--file", required=True, help="Path to an OpenAI-format .json/.jsonl file or directory.")
     parser.add_argument("--user-id", default="u1", help="Target user id.")
     parser.add_argument("--hint", default="", help="Optional extraction hint.")
     parser.add_argument("--max-messages-per-conversation", type=int, default=0, help="0 means no clipping.")

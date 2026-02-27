@@ -159,6 +159,10 @@ class LLMSkillExtractor:
             "user_id": user_id,
             "messages": messages or [],
             "events": events or [],
+            "primary_user_questions": _collect_primary_user_questions(messages or []),
+            "full_conversation": _format_full_conversation_context(
+                messages=messages or [], events=events or []
+            ),
             "max_candidates": max_candidates,
             "hint": (str(hint).strip() if hint and str(hint).strip() else None),
             "retrieved_reference": (
@@ -174,8 +178,12 @@ class LLMSkillExtractor:
             "Task: Extract reusable, executable Skills from messages/events.\n"
             "If DATA.hint exists, treat it as an explicit extraction request.\n"
             "Quality-first: extract when reusable signal is reasonably clear, and skip only clearly weak or one-off candidates.\n"
+            "Input contract: DATA.primary_user_questions is the main extraction evidence and must focus on USER inputs; "
+            "DATA.full_conversation is context reference only.\n"
             "\n"
             "### 1) EVIDENCE AND PROVENANCE (CRITICAL)\n"
+            "- Prioritize DATA.primary_user_questions as primary evidence from USER inputs; use DATA.full_conversation for context/disambiguation only.\n"
+            "- In DATA.full_conversation, ASSISTANT/model replies are reference-only and must not be treated as extraction evidence.\n"
             "- USER turns are the source of truth; ASSISTANT turns are supporting context only.\n"
             "- Do not extract requirements that appear only in assistant output unless user requested/confirmed/corrected/reinforced them.\n"
             "- If user and assistant conflict, follow user intent.\n"
@@ -380,6 +388,7 @@ class LLMSkillExtractor:
             f"Return at most {max_candidates} skills; if extraction fails output {{\"skills\": []}}.\n"
             "Apply the same constraints:\n"
             "- [A] Role and evidence scope\n"
+            "- If DATA includes primary_user_questions and full_conversation, prioritize primary_user_questions (USER inputs) as evidence; use full_conversation only as context reference, and do not treat assistant/model replies as evidence.\n"
             "- Skills are SKILL.md onboarding guides: keep only reusable, non-obvious procedure/preferences.\n"
             "- DATA.retrieved_reference is auxiliary identity context (update-vs-new), not extraction evidence.\n"
             "- DATA.retrieved_reference.triggers (if present) are intent hints for identity matching only; not new evidence.\n"
@@ -710,6 +719,37 @@ def _flatten_sources(
     for e in events or []:
         chunks.append(json.dumps(e, ensure_ascii=False))
     return "\n".join(chunks)
+
+
+def _collect_primary_user_questions(messages: List[Dict[str, Any]]) -> str:
+    parts: List[str] = []
+    for m in list(messages or []):
+        role = str(m.get("role") or "").strip().lower()
+        if role != "user":
+            continue
+        txt = str(m.get("content") or "").strip()
+        if not txt:
+            continue
+        parts.append(txt)
+    return "\n\n".join(parts).strip() or "(none)"
+
+
+def _format_full_conversation_context(
+    *, messages: List[Dict[str, Any]], events: List[Dict[str, Any]]
+) -> str:
+    out: List[str] = []
+    for m in list(messages or []):
+        role = str(m.get("role") or "").strip().lower() or "user"
+        txt = str(m.get("content") or "").strip()
+        if not txt:
+            continue
+        out.append(f"[{role}] {txt}")
+    for e in list(events or []):
+        try:
+            out.append(f"[event] {json.dumps(e, ensure_ascii=False)}")
+        except Exception:
+            out.append(f"[event] {str(e)}")
+    return "\n\n".join(out).strip() or "(empty)"
 
 
 def _heuristic_instructions(text: str) -> str:

@@ -74,9 +74,10 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "Output ONLY strict JSON parseable by `json.loads`.\n\n"
 
             "### Evidence & Intent Evolution Rules:\n"
-            "1. User-Centric Synthesis: USER turns (especially corrections, formatting requests, and explicit constraints) are the absolute ground truth. ASSISTANT turns are only evidence if explicitly validated or implicitly accepted by the user.\n"
+            "0. Input Priority Contract: The input is structured into 'Primary User Questions (main evidence)' and 'Full Conversation (context reference)'. Always prioritize the primary section for extraction, focus on USER inputs there, and use the full section only for disambiguation/context.\n"
+            "1. User-Only Evidence Rule (Strict): Extract skill constraints and workflow signals ONLY from USER turns. USER text is the only valid source for skill content.\n"
             "2. Ignore Model Artifacts: Do NOT treat assistant-side technical constraints as user preferences (e.g., max token/output-length limits, model refusals, API/tool failures, context-window limits, transient runtime errors). These are platform artifacts, not skills.\n"
-            "3. Assistant Content Use Rule: Assistant text can be used only when it reflects user-confirmed requirements or stable workflow/policy accepted by the user.\n"
+            "3. Assistant Exclusion Rule: Do NOT copy or infer constraints from ASSISTANT/model replies; use ASSISTANT turns only for conversation structure (turn order/topic boundary), never as skill evidence.\n"
             "4. State the Final Alignment: Track the intent evolution. The extracted skill MUST reflect the *final, settled* objective and constraints, completely discarding any early misunderstandings or revoked instructions from the active stage.\n"
             "5. Extract the 'Implicit to Explicit': Look for implicit stylistic preferences (e.g., 'keep it concise', 'use bullet points', 'don't use jargon'). Generalize these one-off edits into durable communication policies.\n"
             "6. Major-Event Prioritization: When multiple events or sub-threads exist, identify the dominant conversation event chain (the one that determines the final task outcome) and extract only constraints/workflow tied to that chain.\n"
@@ -168,13 +169,20 @@ def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
         label = "trajectory"
     else:
         return ""
+    priority_note = ""
+    if ch == OFFLINE_CHANNEL_CONV:
+        priority_note = (
+            "If input provides 'Primary User Questions' and 'Full Conversation', prioritize the primary section, focus on USER inputs there, and use full conversation only as context reference; assistant/model replies are not skill evidence.\n"
+        )
     return (
         f"You are a JSON output fixer for offline {label} skill extraction.\n"
         "Given DATA and DRAFT, output ONLY strict JSON: {\"skills\": [...]}.\n"
         f"Return at most {max_candidates} skills; if uncertain return {{\"skills\": []}}.\n"
         "No Markdown, no commentary.\n"
+        f"{priority_note}"
         "Preserve only reusable, de-identified capability/policy/workflow signals.\n"
         "When multiple events exist, keep only content tied to the dominant event chain and drop unrelated details; if uncertain, prefer dropping.\n"
+        "For offline conversation extraction, use USER turns only as skill evidence; ASSISTANT turns are not evidence.\n"
         "If content is primarily knowledge Q&A without durable reusable behavior/policy/workflow, return {\"skills\": []}.\n"
         "Do not preserve assistant/platform artifacts as skill constraints (token limits, output-length caps, model/runtime/tool/API failures, context-window limits) unless the user explicitly asks to enforce them as policy.\n"
         "Drop one-off entities and non-portable payload.\n"
