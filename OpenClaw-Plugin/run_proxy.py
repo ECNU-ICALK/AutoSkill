@@ -23,6 +23,10 @@ if str(_REPO_ROOT) not in sys.path:
 from autoskill import AutoSkill, AutoSkillConfig
 from autoskill.interactive import AutoSkillProxyConfig
 
+from agentic_prompt_profile import (
+    OpenClawTrajectorySkillExtractor,
+    install_openclaw_agentic_prompt_profile,
+)
 from examples.interactive_chat import (
     _env,
     _pick_default_provider,
@@ -119,13 +123,17 @@ def main() -> None:
     if library_dirs:
         store_cfg["libraries"] = library_dirs
 
+    autoskill_cfg = AutoSkillConfig(
+        llm=llm_cfg,
+        embeddings=emb_cfg,
+        store=store_cfg,
+        maintenance_strategy=("llm" if llm_provider != "mock" else "heuristic"),
+    )
+    # OpenClaw plugin uses its own prompt profile for agentic trajectory extraction/maintenance.
+    install_openclaw_agentic_prompt_profile()
     sdk = AutoSkill(
-        AutoSkillConfig(
-            llm=llm_cfg,
-            embeddings=emb_cfg,
-            store=store_cfg,
-            maintenance_strategy=("llm" if llm_provider != "mock" else "heuristic"),
-        )
+        autoskill_cfg,
+        extractor=OpenClawTrajectorySkillExtractor(autoskill_cfg),
     )
 
     extract_enabled = str(args.extract_enabled or "1").strip().lower() not in {"0", "false", "no"}

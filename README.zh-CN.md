@@ -9,7 +9,7 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 
 ## News
 
-- **2025-03-26**: 发布 **AutoSkill-OpenClaw-Plugin 1.0**。
+- **2025-02-26**: 发布 **AutoSkill-OpenClaw-Plugin 1.0**。
 - **2025-02-04**：发布 **AutoSkill 1.0**。
 
 ## 1. 快速开始：Web UI

@@ -10,7 +10,7 @@ and continuously evolves existing Skills through merge + version updates.
 
 ## News
 
-- **2025-03-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
+- **2025-02-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
 - **2025-02-04**: **AutoSkill 1.0** released.
 
 
