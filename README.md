@@ -324,7 +324,7 @@ Notes:
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 - `examples/auto_evalution.py`: fully automated LLM-vs-LLM evolution evaluation.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
-- `examples/import_openai_conversations.py`: import OpenAI-format dialogue data and auto-extract skills.
+- `autoskill/offline/extract_from_conversation.py`: import OpenAI-format dialogue data and auto-extract skills.
 
 ## 7. Quick SDK Usage
 

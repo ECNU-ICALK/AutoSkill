@@ -1,7 +1,7 @@
 {
   "version": 1,
   "user_id": "u45",
-  "saved_at_ms": 1772078193658,
+  "saved_at_ms": 1772163395626,
   "sessions": [
     {
       "id": "0b1fe62d-2ffd-458f-ac8a-270cc7621860",
@@ -1015,7 +1015,7 @@
         "id": "bacacf69-b36a-4d19-88ea-cfebdf201553",
         "title": "帮我写一个大模型持续学习的政府报告",
         "created_at_ms": 1772077636663,
-        "updated_at_ms": 1772077771783
+        "updated_at_ms": 1772163395620
       },
       "state": {
         "config": {
@@ -1030,7 +1030,7 @@
           "top_k": 1,
           "history_turns": 100,
           "ingest_window": 6,
-          "extract_turn_limit": 1,
+          "extract_turn_limit": 5,
           "extract_mode": "auto",
           "assistant_temperature": 0.2
         },
@@ -1048,7 +1048,7 @@
       },
       "trace": {
         "version": 1,
-        "next_turn_seq": 3,
+        "next_turn_seq": 4,
         "turns": [
           {
             "id": "turn_1",
@@ -1146,6 +1146,23 @@
               {
                 "role": "system",
                 "content": "Skill scope: user"
+              }
+            ],
+            "retrieval": null,
+            "extraction": null,
+            "error": ""
+          },
+          {
+            "id": "turn_3",
+            "input": "/extract_every 5",
+            "started_at_ms": 1772163395599,
+            "finished_at_ms": 1772163395620,
+            "kind": "command",
+            "command": "/extract_every",
+            "chat_append": [
+              {
+                "role": "system",
+                "content": "Extraction interval (turns): 5"
               }
             ],
             "retrieval": null,
@@ -1320,11 +1337,11 @@
         ],
         "last_result": {
           "kind": "command",
-          "command": "/scope",
+          "command": "/extract_every",
           "chat_append": [
             {
               "role": "system",
-              "content": "Skill scope: user"
+              "content": "Extraction interval (turns): 5"
             }
           ],
           "config": {
@@ -1339,7 +1356,7 @@
             "top_k": 1,
             "history_turns": 100,
             "ingest_window": 6,
-            "extract_turn_limit": 1,
+            "extract_turn_limit": 5,
             "extract_mode": "auto",
             "assistant_temperature": 0.2
           },
