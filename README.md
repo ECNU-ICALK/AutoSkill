@@ -324,9 +324,9 @@ Notes:
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 - `examples/auto_evalution.py`: fully automated LLM-vs-LLM evolution evaluation.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
-- `autoskill/offline/conversation/`: conversation-source offline extraction (implementation folder).
-- `autoskill/offline/document/`: document-source offline extraction (implementation folder).
-- `autoskill/offline/trajectory/`: trajectory-source offline extraction (implementation folder).
+- `autoskill/offline/extract_from_conversation.py`: offline extraction from OpenAI-format conversations.
+- `autoskill/offline/extract_from_doc.py`: offline extraction from document sources.
+- `autoskill/offline/extract_from_agentic_trajectory.py`: offline extraction from agentic trajectory data.
 
 ## 7. Quick SDK Usage
 
@@ -379,6 +379,27 @@ print("processed:", result["processed"], "upserted:", result["upserted_count"])
 for s in result.get("skills", [])[:5]:
     print("-", s.get("name"), s.get("version"))
 ```
+
+Notes:
+- Input format should be OpenAI-style conversations (`.json` / `.jsonl` with `messages`).
+- During extraction, payload is structured into two parts:
+  - `Primary User Questions (main evidence)` for skill evidence
+  - `Full Conversation (context reference)` for disambiguation only
+- In offline conversation extraction, user turns are primary evidence; assistant-side artifacts are excluded.
+
+### 7.2 Offline Conversation Extraction via CLI
+
+```bash
+python3 -m autoskill.offline.extract_from_conversation \
+  --file ./data/random_50 \
+  --user-id u1 \
+  --llm-provider qwen \
+  --llm-model qwen-plus
+```
+
+Behavior:
+- `--file` accepts one OpenAI-format `.json`/`.jsonl` file or a directory containing multiple files.
+- The runner prints per-file progress in real time, including file name and extracted skill names.
 
 ## 8. Provider Setup
 

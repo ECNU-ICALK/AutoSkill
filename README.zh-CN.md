@@ -322,9 +322,9 @@ SkillBank/
 - `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
 - `examples/auto_evalution.py`：全自动 LLM-vs-LLM 技能演化评测脚本。
 - `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
-- `autoskill/offline/conversation/`：对话来源离线抽取（实现目录）。
-- `autoskill/offline/document/`：文档来源离线抽取（实现目录）。
-- `autoskill/offline/trajectory/`：轨迹来源离线抽取（实现目录）。
+- `autoskill/offline/extract_from_conversation.py`：从 OpenAI 标准对话离线抽取技能。
+- `autoskill/offline/extract_from_doc.py`：从文档来源离线抽取技能。
+- `autoskill/offline/extract_from_agentic_trajectory.py`：从智能体轨迹离线抽取技能。
 
 ## 7. SDK 最小使用示例
 
@@ -377,6 +377,27 @@ print("processed:", result["processed"], "upserted:", result["upserted_count"])
 for s in result.get("skills", [])[:5]:
     print("-", s.get("name"), s.get("version"))
 ```
+
+说明：
+- 输入建议为 OpenAI 标准对话数据（`.json` / `.jsonl`，包含 `messages`）。
+- 抽取时会构造成两部分输入：
+  - `Primary User Questions (main evidence)`：用户提问主证据
+  - `Full Conversation (context reference)`：完整对话参考上下文
+- 离线对话抽取中，用户回合作为主证据；assistant 侧平台限制/产物不作为技能证据。
+
+### 7.2 通过 CLI 执行离线对话抽取
+
+```bash
+python3 -m autoskill.offline.extract_from_conversation \
+  --file ./data/random_50 \
+  --user-id u1 \
+  --llm-provider qwen \
+  --llm-model qwen-plus
+```
+
+行为说明：
+- `--file` 支持单个 OpenAI 标准 `.json`/`.jsonl` 文件，或包含多个文件的目录。
+- 运行过程中会实时输出每个文件的处理进度、文件名和抽取到的技能名，便于定位。
 
 ## 8. Provider 配置建议
 
