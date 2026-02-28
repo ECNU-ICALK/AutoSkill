@@ -224,15 +224,36 @@ def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
     return cfg
 
 
+def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
+    provider = str(args.embeddings_provider or "hashing").strip() or "hashing"
+    cfg: Dict[str, Any] = {"provider": provider}
+    if str(args.embeddings_model or "").strip():
+        cfg["model"] = str(args.embeddings_model).strip()
+    if str(args.embeddings_base_url or "").strip():
+        cfg["base_url"] = str(args.embeddings_base_url).strip()
+    if str(args.embeddings_api_key or "").strip():
+        cfg["api_key"] = str(args.embeddings_api_key).strip()
+    if str(args.embeddings_auth_mode or "").strip():
+        cfg["auth_mode"] = str(args.embeddings_auth_mode).strip()
+    dims = int(args.embeddings_dims or 0)
+    if provider.lower() == "hashing":
+        cfg["dims"] = int(dims) if dims > 0 else 256
+    elif dims > 0:
+        cfg["dimensions"] = int(dims)
+        cfg["extra_body"] = {"dimensions": int(dims)}
+    return cfg
+
+
 def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
     llm_cfg = _build_llm_config(args)
+    emb_cfg = _build_embeddings_config(args)
     store_cfg: Dict[str, Any] = {"provider": "local"}
     if str(args.store_path or "").strip():
         store_cfg["path"] = str(args.store_path).strip()
     return AutoSkill(
         AutoSkillConfig(
             llm=llm_cfg,
-            embeddings={"provider": "hashing", "dims": 256},
+            embeddings=emb_cfg,
             store=store_cfg,
         )
     )
@@ -255,6 +276,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm-base-url", default=_env("AUTOSKILL_LLM_BASE_URL", ""))
     parser.add_argument("--llm-api-key", default=_env("AUTOSKILL_LLM_API_KEY", ""))
     parser.add_argument("--auth-mode", default=_env("AUTOSKILL_LLM_AUTH_MODE", ""))
+    parser.add_argument(
+        "--embeddings-provider",
+        default=_env("AUTOSKILL_EMBEDDINGS_PROVIDER", _env("AUTOSKILL_EMBEDDING_PROVIDER", "hashing")),
+        help="hashing|none|openai|generic|dashscope|glm",
+    )
+    parser.add_argument("--embeddings-model", default=_env("AUTOSKILL_EMBEDDINGS_MODEL", ""))
+    parser.add_argument("--embeddings-base-url", default=_env("AUTOSKILL_EMBEDDINGS_BASE_URL", ""))
+    parser.add_argument("--embeddings-api-key", default=_env("AUTOSKILL_EMBEDDINGS_API_KEY", ""))
+    parser.add_argument("--embeddings-auth-mode", default=_env("AUTOSKILL_EMBEDDINGS_AUTH_MODE", ""))
+    parser.add_argument(
+        "--embeddings-dims",
+        type=int,
+        default=int(_env("AUTOSKILL_EMBEDDINGS_DIMS", "0") or 0),
+        help="Embedding dimension override (hashing uses dims; API providers use dimensions).",
+    )
     parser.add_argument("--store-path", default=_env("AUTOSKILL_STORE_PATH", ""))
     return parser
 
