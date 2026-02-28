@@ -327,7 +327,6 @@ Notes:
 - `autoskill/offline/conversation/`: conversation-source offline extraction (implementation folder).
 - `autoskill/offline/document/`: document-source offline extraction (implementation folder).
 - `autoskill/offline/trajectory/`: trajectory-source offline extraction (implementation folder).
-- `autoskill/offline/extract_from_conversation.py`: backward-compatible wrapper entrypoint.
 
 ## 7. Quick SDK Usage
 

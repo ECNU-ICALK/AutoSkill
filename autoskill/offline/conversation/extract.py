@@ -9,8 +9,8 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
-from autoskill.client import _extract_openai_conversations, _load_openai_data_from_file
-from ..prompt_runtime import activate_offline_prompt_runtime
+from .file_loader import load_openai_units
+from .prompt_runtime import activate_offline_prompt_runtime
 
 
 def extract_from_conversation(
@@ -29,14 +29,7 @@ def extract_from_conversation(
     Runs offline extraction from archived OpenAI-format conversations.
     """
 
-    units: List[Dict[str, Any]] = []
-    abs_input = ""
-    if data is not None:
-        units = _units_from_openai_data(data, source_file="")
-    elif str(file_path or "").strip():
-        units, abs_input = _units_from_openai_path(str(file_path))
-    else:
-        raise ValueError("extract_from_conversation requires data or file_path")
+    units, abs_input = load_openai_units(data=data, file_path=file_path)
     if not units:
         return {
             "total_conversations": 0,
@@ -161,55 +154,6 @@ def _build_conversation_message(
         "Full Conversation (context reference):\n"
         f"{full_conversation}"
     )
-
-
-def _units_from_openai_data(data: Any, *, source_file: str) -> List[Dict[str, Any]]:
-    conversations = _extract_openai_conversations(data)
-    out: List[Dict[str, Any]] = []
-    base = os.path.basename(source_file) if source_file else "inline"
-    for i, conv in enumerate(conversations):
-        out.append(
-            {
-                "title": f"{base}#conv_{i + 1}",
-                "source_file": source_file,
-                "conversation_index": i,
-                "messages": list(conv),
-            }
-        )
-    return out
-
-
-def _units_from_openai_path(path: str) -> tuple[List[Dict[str, Any]], str]:
-    abs_path = os.path.abspath(os.path.expanduser(str(path or "").strip()))
-    if not abs_path:
-        return [], ""
-    if os.path.isfile(abs_path):
-        data = _load_openai_data_from_file(abs_path)
-        return _units_from_openai_data(data, source_file=abs_path), abs_path
-    if not os.path.isdir(abs_path):
-        raise ValueError(f"path not found: {abs_path}")
-
-    out: List[Dict[str, Any]] = []
-    for p in _iter_openai_dataset_files(abs_path):
-        try:
-            data = _load_openai_data_from_file(p)
-        except Exception:
-            continue
-        out.extend(_units_from_openai_data(data, source_file=p))
-    return out, abs_path
-
-
-def _iter_openai_dataset_files(root: str) -> List[str]:
-    files: List[str] = []
-    for dirpath, _, names in os.walk(root):
-        for name in names:
-            low = str(name).lower()
-            if low.endswith(".json") or low.endswith(".jsonl"):
-                p = os.path.join(dirpath, name)
-                if os.path.isfile(p):
-                    files.append(p)
-    files.sort()
-    return files
 
 
 def _collect_user_questions(messages: List[Dict[str, str]]) -> str:

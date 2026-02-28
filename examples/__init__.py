@@ -7,8 +7,9 @@ Run:
 - `python3 -m examples.web_ui`
 - `python3 -m examples.openai_proxy`
 - `python3 -m examples.auto_evalution`
-- `python3 -m autoskill.offline.extract_from_conversation` (compat wrapper)
 - `python3 -m autoskill.offline.conversation.extract` (new implementation module)
+- `python3 -m autoskill.offline.document.extract`
+- `python3 -m autoskill.offline.trajectory.extract`
 
 Note:
 - startup runtimes (`interactive_chat`, `web_ui`, `openai_proxy`) now run offline

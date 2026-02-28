@@ -325,7 +325,6 @@ SkillBank/
 - `autoskill/offline/conversation/`：对话来源离线抽取（实现目录）。
 - `autoskill/offline/document/`：文档来源离线抽取（实现目录）。
 - `autoskill/offline/trajectory/`：轨迹来源离线抽取（实现目录）。
-- `autoskill/offline/extract_from_conversation.py`：向后兼容的包装入口。
 
 ## 7. SDK 最小使用示例
 

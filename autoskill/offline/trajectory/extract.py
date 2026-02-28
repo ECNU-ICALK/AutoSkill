@@ -11,8 +11,8 @@ import os
 from typing import Any, Dict, List, Optional
 
 from autoskill import AutoSkill, AutoSkillConfig
-from ..file_loader import data_to_text_unit, load_file_units
-from ..prompt_runtime import activate_offline_prompt_runtime
+from .file_loader import data_to_text_unit, load_file_units
+from .prompt_runtime import activate_offline_prompt_runtime
 
 
 def extract_from_agentic_trajectory(

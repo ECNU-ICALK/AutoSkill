@@ -69,50 +69,95 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
         )
     if ch == OFFLINE_CHANNEL_CONV:
         return (
-            "You are the Expert Offline Conversation Skill Extractor for the AutoSkill framework.\n"
-            "Your task is to analyze archived multi-turn conversations and synthesize scattered user preferences, iterative corrections, and confirmed workflows into a single, cohesive, reusable AI skill.\n"
-            "Output ONLY strict JSON parseable by `json.loads`.\n\n"
+            "You are the Specific-Requirement Skill Extractor for the AutoSkill framework.\\n"
+            "Your task is to analyze archived conversations and extract reusable, executable skills from user instructions.\\n"
+            "The key criterion is not turn count, but whether the USER provides specific, reusable requirements such as rules, constraints, schemas, workflows, or output contracts that transfer to similar future tasks.\\n"
+            "Output ONLY strict JSON parseable by `json.loads`.\\n\\n"
 
-            "### Evidence & Intent Evolution Rules:\n"
-            "0. Input Priority Contract: The input is structured into 'Primary User Questions (main evidence)' and 'Full Conversation (context reference)'. Always prioritize the primary section for extraction, focus on USER inputs there, and use the full section only for disambiguation/context.\n"
-            "1. User-Only Evidence Rule (Strict): Extract skill constraints and workflow signals ONLY from USER turns. USER text is the only valid source for skill content.\n"
-            "2. Ignore Model Artifacts: Do NOT treat assistant-side technical constraints as user preferences (e.g., max token/output-length limits, model refusals, API/tool failures, context-window limits, transient runtime errors). These are platform artifacts, not skills.\n"
-            "3. Assistant Exclusion Rule: Do NOT copy or infer constraints from ASSISTANT/model replies; use ASSISTANT turns only for conversation structure (turn order/topic boundary), never as skill evidence.\n"
-            "4. State the Final Alignment: Track the intent evolution. The extracted skill MUST reflect the *final, settled* objective and constraints, completely discarding any early misunderstandings or revoked instructions from the active stage.\n"
-            "5. Extract the 'Implicit to Explicit': Look for implicit stylistic preferences (e.g., 'keep it concise', 'use bullet points', 'don't use jargon'). Generalize these one-off edits into durable communication policies.\n"
-            "6. Major-Event Prioritization: When multiple events or sub-threads exist, identify the dominant conversation event chain (the one that determines the final task outcome) and extract only constraints/workflow tied to that chain.\n"
-            "7. Strict Relevance Filter: Any event detail not causally relevant to the dominant chain should be dropped; when uncertain, prefer dropping it.\n"
-            "8. Generalization Gate: Extract only if the conversation contains durable, reusable capability signals (stable workflow, persistent constraints, reusable output contract, or enduring style policy).\n"
-            "9. Knowledge-QA Exclusion: If the conversation is mainly factual Q&A, one-time explanation, or topic tutoring without durable behavior/policy/workflow, output {\"skills\": []}.\n"
-            "10. Boundary & Null Condition: Do not extract transient chatting or one-off fact retrievals. If the conversation lacks a durable, reusable method, policy, or distinct user preference, output {\"skills\": []}.\n\n"
+            "### Core Principle\\n"
+            "Extract a skill only when the USER gives concrete, reusable execution requirements. A single turn is sufficient if it contains a clear reusable instruction set.\\n"
+            "Do not require multiple turns, repeated corrections, or phrases like 'from now on'.\\n"
+            "Do not extract when the USER only wants a one-off result without reusable requirements.\\n\\n"
 
-            f"### Output Schema: {{\"skills\": [...]}} with at most {max_candidates} item(s).\n"
-            "Fields per skill:\n"
-            "- name: concise, searchable intent+action+domain phrase in the SAME language as the conversation.\n"
-            "- description: 1-2 sentences detailing WHAT this skill is and WHEN the agent should adopt this persona/workflow.\n"
-            "- prompt: This is the core executable instruction. It MUST be written in strict Markdown. To convert conversational chaos into a highly reliable system prompt, it MUST include these sections:\n"
-            "    - # Role & Objective (localized heading): Define the optimized persona requested by the user.\n"
-            "    - # Communication & Style Preferences (localized heading): Explicit tone, formatting habits, and verbosity limits synthesized from user feedback.\n"
-            "    - # Operational Rules & Constraints (localized heading): The mandatory 'Must-Dos'.\n"
-            "    - # Anti-Patterns (localized heading): The 'Must-Not-Dos' based on what the user corrected or rejected during the conversation.\n"
-            "    - # Interaction Workflow (localized heading, optional): Step-by-step process if the user requested a phased approach.\n"
-            "- triggers: 3-5 deduplicated intent phrases that should activate this specific behavioral skill.\n"
-            "- tags: 1-6 canonical keywords in the SAME language as the conversation.\n"
-            "- examples: 0-3 short, de-identified examples showing the trigger and the expected styled response.\n"
-            "- confidence: Float between 0.0-1.0 based on how explicitly the user confirmed the final output.\n\n"
+            "### 1) Evidence, Provenance, and Scope\\n"
+            "1. Input Priority Contract: The input is structured into 'Primary User Questions (main evidence)' and 'Full Conversation (context reference)'. Always prioritize the primary section, focus on USER inputs there, and use the full section only for context or disambiguation.\\n"
+            "2. USER turns are the only valid evidence for skill content.\\n"
+            "3. ASSISTANT replies may be used only to identify turn boundaries or whether the user accepted or rejected something; assistant text is never direct skill evidence.\\n"
+            "4. Do not extract any rule, structure, terminology, workflow, or constraint that appears only in assistant output.\\n"
+            "5. If user and assistant conflict, follow the user.\\n"
+            "6. Weak acknowledgements like 'ok', '继续', '知道了', or 'sounds good' do not validate assistant-invented details.\\n"
+            "7. Every major extracted rule must be traceable to USER evidence; if provenance is unclear, drop it.\\n\\n"
 
-            "### Strict Language Consistency (Mandatory):\n"
-            "- Determine ONE dominant language from USER conversation text and use it consistently.\n"
-            "- ALL textual fields must be in that same language: name, description, prompt (including headings/body), triggers, tags, examples.input/examples.output/examples.notes.\n"
-            "- Do NOT mix languages across fields.\n"
-            "- If conversation is mixed-language, use the majority language of USER turns.\n"
-            "- If dominant language is unclear, return {\"skills\": []}.\n\n"
+            "### 2) What Counts as Strong Extraction Evidence\\n"
+            "Extract when the USER provides one or more reusable requirements such as:\\n"
+            "A. A clear role or persona tied to a repeatable task.\\n"
+            "B. A fixed output format, schema, JSON structure, field list, template, or table contract.\\n"
+            "C. Deterministic parsing, mapping, classification, validation, default, fallback, or calculation logic.\\n"
+            "D. Explicit must-do or must-not-do constraints for similar tasks.\\n"
+            "E. A reusable workflow or SOP.\\n"
+            "F. A stable writing, coding, analysis, or extraction policy specific enough to execute repeatedly.\\n"
+            "A single strong item can be sufficient if it is reusable.\\n\\n"
 
-            "### JSON Validity Rules:\n"
-            "- Escape all newlines within string values as \\n.\n"
-            "- Escape double quotes within string values properly.\n"
-            "- Do NOT wrap the output in Markdown code blocks (e.g., no ```json). Return the raw JSON string ONLY.\n"
-            "- Language: All output fields must follow the dominant input language of the conversation.\n"
+            "### 3) What Does NOT Count as a Skill\\n"
+            "Do not extract for the following unless the USER also provides reusable requirements:\\n"
+            "A. One-off factual Q&A.\\n"
+            "B. Generic requests like 'optimize this', 'rewrite this', 'expand this', 'summarize this', or 'make it better' without concrete reusable rules.\\n"
+            "C. Local editing of current content only, where the user wants a better result but defines no reusable execution policy.\\n"
+            "D. Topic facts, business facts, named entities, event details, or content payload specific to this instance.\\n"
+            "E. Assistant-authored structure or logic not explicitly required by the user.\\n\\n"
+
+            "### 4) Task Boundary, Reusability, and Generalization\\n"
+            "1. Do not use turn count, repetition count, or number of corrections as the extraction threshold. Single-turn conversations can produce a skill; multi-turn conversations should still return {\\\"skills\\\": []} if they only contain iterative content work without reusable requirements.\\n"
+            "2. Use the most recent USER turns to identify the active task. If a later USER turn introduces a materially new objective, deliverable, audience, or operation class, treat it as a new task boundary. Extract only from the final active task and do not mix requirements from different tasks.\\n"
+            "3. Use recency and topic continuity only to determine task boundary, not as proof that a skill exists.\\n"
+            "4. Extract only requirements that still make sense on similar future inputs after removing current instance facts. If the proposed skill stops making sense once you remove company names, product names, people, dates, venues, campaign facts, or document payload, output {\\\"skills\\\": []}.\\n"
+            "5. Domain-specific skills are allowed, but entity-specific or event-specific skills are not, unless the user explicitly requested a reusable specialized assistant for that exact domain specialization.\\n"
+            "6. Treat names of companies, products, projects, technologies, dates, venues, cities, campaigns, article sections, partner names, and business facts as runtime payload by default. Do not upgrade them into reusable rules, triggers, tags, or prompt instructions unless the user explicitly presents them as template-level requirements. Keep only the reusable task logic, not the case facts.\\n\\n"
+
+            "### 5) No Invention Rule\\n"
+            "Extract only what is directly supported by USER evidence.\\n"
+            "Do not invent workflow, section ordering, terminology policy, scoring criteria, thresholds, regulations, or technical explanations.\\n"
+            "If the user gives constraints but no workflow, do not invent a workflow.\\n"
+            "If the user gives format but no additional style policy, do not fabricate one.\\n\\n"
+
+            "### 6) Output Construction Rules\\n"
+            f"Return JSON as {{\\\"skills\\\": [...]}} with at most {max_candidates} item(s).\\n"
+            "Fields per skill:\\n"
+            "- name: concise, searchable intent+task phrase in the SAME language as the conversation. It should describe reusable capability, not one-off topic facts.\\n"
+            "- description: 1-2 sentences describing WHAT the reusable skill does and WHEN it should be used. Avoid case-specific facts.\\n"
+            "- prompt: strict Markdown system prompt containing only reusable user-evidenced requirements. It MUST include:\\n"
+            "    - # Role & Objective\\n"
+            "    - # Communication & Style Preferences\\n"
+            "    - # Operational Rules & Constraints\\n"
+            "    - # Anti-Patterns\\n"
+            "    - # Interaction Workflow (optional, only if explicitly evidenced by USER)\\n"
+            "- triggers: 3-5 deduplicated intent phrases that would activate this skill. They must reflect reusable task requests, not one-off entities.\\n"
+            "- tags: 1-6 canonical keywords in the SAME language as the conversation. Prefer task or domain words over entity names.\\n"
+            "- examples: 0-2 short, de-identified examples showing the task shape. Do not introduce new facts.\\n"
+            "- confidence: float between 0.0 and 1.0, based on how specific and reusable the USER requirements are.\\n\\n"
+
+            "### 7) Confidence Guidance\\n"
+            "Use high confidence when the user provides explicit schema, field definitions, mapping rules, calculation logic, strict output constraints, or a detailed SOP.\\n"
+            "Use medium confidence when the user provides a clear but lighter reusable policy.\\n"
+            "Use low confidence only when the signal is weak but still specific enough to extract.\\n"
+            "If requirements are not specific enough to execute repeatedly, output {\\\"skills\\\": []}.\\n\\n"
+
+            "### 8) Final Emission Check\\n"
+            "Before emitting a skill, verify all of the following:\\n"
+            "1. Does the USER provide concrete execution requirements rather than only asking for an end result?\\n"
+            "2. Would the extracted behavior still be useful on similar future inputs?\\n"
+            "3. Are the major rules traceable to USER turns only?\\n"
+            "4. Did you avoid copying case-specific facts into reusable rules?\\n"
+            "If any answer is NO, output {\\\"skills\\\": []}.\\n\\n"
+
+            "### 9) Language Consistency\\n"
+            "Determine one dominant language from USER text and use it consistently for all textual fields.\\n"
+            "If dominant language is unclear, return {\\\"skills\\\": []}.\\n\\n"
+
+            "### JSON Validity Rules\\n"
+            "- Escape all newlines within string values as \\\\n.\\n"
+            "- Escape double quotes within string values properly.\\n"
+            "- Do not wrap the output in Markdown code blocks. Return raw JSON string ONLY.\\n"
         )
     if ch == OFFLINE_CHANNEL_TRAJ:
         return (
@@ -198,7 +243,7 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
     ch = str(channel or "").strip().lower()
     
     # 针对不同渠道定制化的决策准则与焦点
-    if ch == "doc": # 假设 OFFLINE_CHANNEL_DOC = "doc"
+    if ch in {"doc", OFFLINE_CHANNEL_DOC}:
         focus_and_rules = (
             "### Focus: Document-Derived Candidates\n"
             "Compare procedural abstraction, theoretical frameworks, and domain-specific rules (e.g., academic methodologies or specific therapy guidelines).\n"
@@ -207,7 +252,7 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
             "- DISCARD: If the candidate merely restates existing knowledge with different vocabulary, or lacks executable operational value.\n"
             "- ADD: ONLY if the candidate introduces a fundamentally distinct theoretical framework or operational domain.\n"
         )
-    elif ch == "conv": # 假设 OFFLINE_CHANNEL_CONV = "conv"
+    elif ch in {"conv", OFFLINE_CHANNEL_CONV}:
         focus_and_rules = (
             "### Focus: Conversation-Derived Candidates\n"
             "Compare user intent evolution, style preferences, anti-patterns, and persona alignment.\n"
@@ -216,7 +261,7 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
             "- DISCARD: If the candidate represents a transient, session-specific chatting pattern that does not generalize, or if the existing skill already strictly enforces this behavior.\n"
             "- ADD: ONLY if the user establishes a completely new workflow or distinct persona request not covered by existing profiles.\n"
         )
-    elif ch == "traj": # 假设 OFFLINE_CHANNEL_TRAJ = "traj"
+    elif ch in {"traj", OFFLINE_CHANNEL_TRAJ}:
         focus_and_rules = (
             "### Focus: Trajectory-Derived Candidates\n"
             "Compare tool orchestration graphs, error recovery paths, and boundary conditions.\n"
@@ -242,6 +287,13 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
         "- \"discard\": Reject the candidate entirely. Do not store it.\n\n"
         
         "### Global Quality Constraints:\n"
+        "- Semantic-overlap hard gate: if candidate_skill is the same core capability as any existing skill (after de-identification/abstraction), action MUST NOT be \"add\".\n"
+        "- Under same-capability overlap, choose only \"merge\" or \"discard\".\n"
+        "- If same-capability overlap is with an existing user skill, prefer \"merge\" to that skill.\n"
+        "- If overlap is only with shared/library skill and no durable user-specific improvement exists, choose \"discard\".\n"
+        "- Name-collision hard gate: if candidate_skill.name matches any existing skill name after normalization (trim + lowercase; ignore minor whitespace/punctuation variance), action MUST NOT be \"add\".\n"
+        "- Under same-name collision, choose only \"merge\" or \"discard\".\n"
+        "- If choosing merge under same-name collision, prefer target_skill_id that has the matching name.\n"
         "- Prevent fragmentation: Do not ADD if the core intent overlaps >80% with an existing skill, even if the phrasing differs.\n"
         "- Textual similarity is only a hint; logical capability identity is the absolute criterion.\n\n"
         
@@ -257,21 +309,21 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
 def build_offline_merge_gate_prompt(channel: str) -> str:
     ch = str(channel or "").strip().lower()
     
-    if ch == "doc": # 假设 OFFLINE_CHANNEL_DOC = "doc"
+    if ch in {"doc", OFFLINE_CHANNEL_DOC}:
         focus_and_rules = (
             "### Primary Comparison Axis: Procedure & Theoretical Identity\n"
             "- Core Question: Do both skills solve the SAME underlying problem using the SAME theoretical framework or methodology?\n"
             "- RETURN TRUE: If the candidate merely offers a deeper explanation, new safety boundaries, alternative edge-case handling, or slight procedural variations of the existing framework (e.g., both are 'CBT cognitive reframing techniques', even if they use different question templates).\n"
             "- RETURN FALSE: If they address fundamentally different academic domains, use conflicting methodologies, or target distinct final deliverables."
         )
-    elif ch == "conv": # 假设 OFFLINE_CHANNEL_CONV = "conv"
+    elif ch in {"conv", OFFLINE_CHANNEL_CONV}:
         focus_and_rules = (
             "### Primary Comparison Axis: User Intent & Persona/Policy Identity\n"
             "- Core Question: Do both skills govern the SAME type of user interaction, formatting task, or persona profile?\n"
             "- RETURN TRUE: If the candidate simply updates constraints, tone preferences, or anti-patterns for an existing objective (e.g., evolving a 'code review' skill with new 'must-not-do' rules derived from recent chats). This is how agent persona evolves.\n"
             "- RETURN FALSE: If the candidate introduces a completely novel task objective that the existing skill was never designed to handle."
         )
-    elif ch == "traj": # 假设 OFFLINE_CHANNEL_TRAJ = "traj"
+    elif ch in {"traj", OFFLINE_CHANNEL_TRAJ}:
         focus_and_rules = (
             "### Primary Comparison Axis: Workflow & Tool Orchestration Identity\n"
             "- Core Question: Do both skills attempt to achieve the SAME final state using the SAME core logic and toolset?\n"
@@ -306,21 +358,21 @@ def build_offline_merge_prompt(channel: str) -> str:
     ch = str(channel or "").strip().lower()
     
     # 定义不同场景的融合策略 (Fusion Strategy)
-    if ch == "doc":
+    if ch in {"doc", OFFLINE_CHANNEL_DOC}:
         fusion_strategy = (
             "### Fusion Strategy: Document-Derived Knowledge\n"
             "- Objective: Synthesize methodological steps, theoretical principles, and safety guardrails into a unified, comprehensive protocol.\n"
             "- Conflict Resolution: If rules overlap, merge them into a higher-level abstraction. Keep all unique safety constraints and domain-specific checklists from both sides.\n"
             "- Semantic Union: Seamlessly integrate the candidate's new procedural nuances (e.g., a specific evaluation metric or therapy technique) into the existing skill's `# Core Workflow` and `# Rules & Constraints`."
         )
-    elif ch == "conv":
+    elif ch in {"conv", OFFLINE_CHANNEL_CONV}:
         fusion_strategy = (
             "### Fusion Strategy: Conversation-Derived Continual Alignment\n"
             "- Objective: Evolve the agent's persona and interaction policy based on iterative user feedback.\n"
             "- RECENCY BIAS (Crucial): The `candidate_skill` represents the *newer* user preference. If the candidate explicitly contradicts the `existing_skill` regarding output format, verbosity, or tone, the CANDIDATE'S rules MUST overwrite the existing ones.\n"
             "- Anti-Pattern Accumulation: Carefully aggregate all 'must-not-do' rules and `# Anti-Patterns` from both sides. Do not lose past negative constraints unless explicitly revoked by the candidate."
         )
-    elif ch == "traj":
+    elif ch in {"traj", OFFLINE_CHANNEL_TRAJ}:
         fusion_strategy = (
             "### Fusion Strategy: Trajectory-Derived Robustness\n"
             "- Objective: Enhance the tool orchestration graph and resilience of the workflow.\n"
