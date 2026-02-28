@@ -325,9 +325,42 @@ SkillBank/
 
 ### 6.6 Offline 导入
 
-- `autoskill/offline/extract_from_conversation.py`：导入 OpenAI 标准对话 `.json/.jsonl`（单文件或目录），并完成技能抽取与维护。
-- `autoskill/offline/extract_from_doc.py`：导入离线文档并抽取可复用技能。
-- `autoskill/offline/extract_from_agentic_trajectory.py`：导入离线智能体轨迹并抽取流程型技能。
+- `autoskill/offline/conversation/extract.py`：导入 OpenAI 标准对话 `.json/.jsonl`（单文件或目录），并完成技能抽取与维护。
+- `autoskill/offline/document/extract.py`：导入离线文档并抽取可复用技能。
+- `autoskill/offline/trajectory/extract.py`：导入离线智能体轨迹并抽取流程型技能。
+
+Offline 调用示例（与 examples 一致，API key 通过 `export` 传入）：
+
+```bash
+# 1) Provider 设置（以 DashScope 为例）
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+export DASHSCOPE_MODEL="qwen-plus"
+export DASHSCOPE_EMBED_MODEL="text-embedding-v4"
+
+# 2) 对话数据 -> 技能抽取
+python3 -m autoskill.offline.conversation.extract \
+  --file ./data/random_50 \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope
+
+# 3) 文档数据 -> 技能抽取
+python3 -m autoskill.offline.document.extract \
+  --file ./data/docs \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --max-chars-per-chunk 6000
+
+# 4) 智能体轨迹 -> 技能抽取
+python3 -m autoskill.offline.trajectory.extract \
+  --file ./data/traces \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --success-only 1 \
+  --include-tool-events 1
+```
 
 ## 7. SDK 最小使用示例
 
@@ -391,11 +424,11 @@ for s in result.get("skills", [])[:5]:
 ### 7.2 通过 CLI 执行离线对话抽取
 
 ```bash
-python3 -m autoskill.offline.extract_from_conversation \
+python3 -m autoskill.offline.conversation.extract \
   --file ./data/random_50 \
   --user-id u1 \
-  --llm-provider qwen \
-  --llm-model qwen-plus
+  --llm-provider dashscope \
+  --embeddings-provider dashscope
 ```
 
 行为说明：

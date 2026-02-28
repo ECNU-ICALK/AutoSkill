@@ -13,6 +13,11 @@ from typing import Any, Dict, List, Optional
 from autoskill import AutoSkill, AutoSkillConfig
 from .file_loader import data_to_text_unit, load_file_units
 from .prompt_runtime import activate_offline_prompt_runtime
+from ..provider_config import (
+    build_embeddings_config as _build_provider_embeddings_config,
+    build_llm_config as _build_provider_llm_config,
+    pick_default_provider as _pick_default_provider,
+)
 
 
 def extract_from_agentic_trajectory(
@@ -357,9 +362,9 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
-    cfg: Dict[str, Any] = {"provider": str(args.llm_provider or "mock").strip()}
-    if str(args.llm_model or "").strip():
-        cfg["model"] = str(args.llm_model).strip()
+    provider = str(args.llm_provider or "mock").strip() or "mock"
+    model = str(args.llm_model or "").strip() or None
+    cfg = _build_provider_llm_config(provider, model=model)
     if str(args.llm_base_url or "").strip():
         cfg["base_url"] = str(args.llm_base_url).strip()
     if str(args.llm_api_key or "").strip():
@@ -370,10 +375,10 @@ def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
-    provider = str(args.embeddings_provider or "hashing").strip() or "hashing"
-    cfg: Dict[str, Any] = {"provider": provider}
-    if str(args.embeddings_model or "").strip():
-        cfg["model"] = str(args.embeddings_model).strip()
+    llm_provider = str(args.llm_provider or "mock").strip().lower() or "mock"
+    provider = str(args.embeddings_provider or "").strip()
+    model = str(args.embeddings_model or "").strip() or None
+    cfg = _build_provider_embeddings_config(provider, model=model, llm_provider=llm_provider)
     if str(args.embeddings_base_url or "").strip():
         cfg["base_url"] = str(args.embeddings_base_url).strip()
     if str(args.embeddings_api_key or "").strip():
@@ -381,9 +386,10 @@ def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
     if str(args.embeddings_auth_mode or "").strip():
         cfg["auth_mode"] = str(args.embeddings_auth_mode).strip()
     dims = int(args.embeddings_dims or 0)
-    if provider.lower() == "hashing":
+    provider_norm = str(cfg.get("provider") or "").strip().lower()
+    if provider_norm == "hashing":
         cfg["dims"] = int(dims) if dims > 0 else 256
-    elif dims > 0:
+    elif dims > 0 and provider_norm != "none":
         cfg["dimensions"] = int(dims)
         cfg["extra_body"] = {"dimensions": int(dims)}
     return cfg
@@ -426,7 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-events-per-record", type=int, default=0, help="0 means no clipping.")
     parser.add_argument(
         "--llm-provider",
-        default=_env("AUTOSKILL_LLM_PROVIDER", "mock"),
+        default=_env("AUTOSKILL_LLM_PROVIDER", _pick_default_provider()),
         help="mock|generic|glm|internlm|dashscope|openai|anthropic",
     )
     parser.add_argument("--llm-model", default=_env("AUTOSKILL_LLM_MODEL", ""))
@@ -435,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auth-mode", default=_env("AUTOSKILL_LLM_AUTH_MODE", ""))
     parser.add_argument(
         "--embeddings-provider",
-        default=_env("AUTOSKILL_EMBEDDINGS_PROVIDER", _env("AUTOSKILL_EMBEDDING_PROVIDER", "hashing")),
+        default=_env("AUTOSKILL_EMBEDDINGS_PROVIDER", _env("AUTOSKILL_EMBEDDING_PROVIDER", "")),
         help="hashing|none|openai|generic|dashscope|glm",
     )
     parser.add_argument("--embeddings-model", default=_env("AUTOSKILL_EMBEDDINGS_MODEL", ""))

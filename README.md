@@ -327,9 +327,42 @@ Notes:
 
 ### 6.6 Offline Import
 
-- `autoskill/offline/extract_from_conversation.py`: import OpenAI-format conversation `.json/.jsonl` (single file or directory), then extract and maintain skills.
-- `autoskill/offline/extract_from_doc.py`: import offline document sources and extract reusable skills.
-- `autoskill/offline/extract_from_agentic_trajectory.py`: import offline agentic trajectory data and extract workflow skills.
+- `autoskill/offline/conversation/extract.py`: import OpenAI-format conversation `.json/.jsonl` (single file or directory), then extract and maintain skills.
+- `autoskill/offline/document/extract.py`: import offline document sources and extract reusable skills.
+- `autoskill/offline/trajectory/extract.py`: import offline agentic trajectory data and extract workflow skills.
+
+Offline CLI examples (API keys via `export` env vars, same style as examples):
+
+```bash
+# 1) Provider setup (DashScope example)
+export DASHSCOPE_API_KEY="YOUR_DASHSCOPE_API_KEY"
+export DASHSCOPE_MODEL="qwen-plus"
+export DASHSCOPE_EMBED_MODEL="text-embedding-v4"
+
+# 2) Conversation -> skill extraction
+python3 -m autoskill.offline.conversation.extract \
+  --file ./data/random_50 \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope
+
+# 3) Document -> skill extraction
+python3 -m autoskill.offline.document.extract \
+  --file ./data/docs \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --max-chars-per-chunk 6000
+
+# 4) Agentic trajectory -> skill extraction
+python3 -m autoskill.offline.trajectory.extract \
+  --file ./data/traces \
+  --user-id u1 \
+  --llm-provider dashscope \
+  --embeddings-provider dashscope \
+  --success-only 1 \
+  --include-tool-events 1
+```
 
 ## 7. Quick SDK Usage
 
@@ -393,11 +426,11 @@ Notes:
 ### 7.2 Offline Conversation Extraction via CLI
 
 ```bash
-python3 -m autoskill.offline.extract_from_conversation \
+python3 -m autoskill.offline.conversation.extract \
   --file ./data/random_50 \
   --user-id u1 \
-  --llm-provider qwen \
-  --llm-model qwen-plus
+  --llm-provider dashscope \
+  --embeddings-provider dashscope
 ```
 
 Behavior:
