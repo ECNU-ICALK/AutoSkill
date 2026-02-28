@@ -55,7 +55,7 @@ class AutoSkillConfig:
     namespace: str = "default"
 
     maintenance_strategy: str = "llm"  # "heuristic" | "llm"
-    dedupe_similarity_threshold: float = 0.86
+    dedupe_similarity_threshold: float = 0.4
     max_candidates_per_ingest: int = 1
     max_similar_skills_to_consider: int = 5
 
@@ -100,7 +100,7 @@ class AutoSkillConfig:
             store=dict(data.get("store") or _default_store()),
             namespace=str(data.get("namespace") or "default"),
             maintenance_strategy=str(data.get("maintenance_strategy") or "llm"),
-            dedupe_similarity_threshold=float(data.get("dedupe_similarity_threshold", 0.86)),
+            dedupe_similarity_threshold=float(data.get("dedupe_similarity_threshold", 0.4)),
             max_candidates_per_ingest=int(data.get("max_candidates_per_ingest", 1)),
             max_similar_skills_to_consider=int(data.get("max_similar_skills_to_consider", 5)),
             default_search_limit=int(data.get("default_search_limit", 5)),
