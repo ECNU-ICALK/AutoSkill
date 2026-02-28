@@ -322,9 +322,12 @@ SkillBank/
 - `examples/openai_proxy.py`：OpenAI 兼容代理启动入口。
 - `examples/auto_evalution.py`：全自动 LLM-vs-LLM 技能演化评测脚本。
 - `examples/basic_ingest_search.py`：离线最小 SDK 流程示例。
-- `autoskill/offline/extract_from_conversation.py`：从 OpenAI 标准对话离线抽取技能。
-- `autoskill/offline/extract_from_doc.py`：从文档来源离线抽取技能。
-- `autoskill/offline/extract_from_agentic_trajectory.py`：从智能体轨迹离线抽取技能。
+
+### 6.6 Offline 导入
+
+- `autoskill/offline/extract_from_conversation.py`：导入 OpenAI 标准对话 `.json/.jsonl`（单文件或目录），并完成技能抽取与维护。
+- `autoskill/offline/extract_from_doc.py`：导入离线文档并抽取可复用技能。
+- `autoskill/offline/extract_from_agentic_trajectory.py`：导入离线智能体轨迹并抽取流程型技能。
 
 ## 7. SDK 最小使用示例
 
