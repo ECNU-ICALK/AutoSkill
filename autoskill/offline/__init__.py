@@ -20,15 +20,15 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     if name == "extract_from_doc":
-        from .extract_from_doc import extract_from_doc as fn
+        from .document.extract import extract_from_doc as fn
 
         return fn
     if name == "extract_from_conversation":
-        from .extract_from_conversation import extract_from_conversation as fn
+        from .conversation.extract import extract_from_conversation as fn
 
         return fn
     if name == "extract_from_agentic_trajectory":
-        from .extract_from_agentic_trajectory import extract_from_agentic_trajectory as fn
+        from .trajectory.extract import extract_from_agentic_trajectory as fn
 
         return fn
     raise AttributeError(name)

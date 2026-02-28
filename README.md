@@ -324,7 +324,10 @@ Notes:
 - `examples/openai_proxy.py`: OpenAI-compatible proxy entrypoint.
 - `examples/auto_evalution.py`: fully automated LLM-vs-LLM evolution evaluation.
 - `examples/basic_ingest_search.py`: minimal offline SDK loop.
-- `autoskill/offline/extract_from_conversation.py`: import OpenAI-format dialogue data and auto-extract skills.
+- `autoskill/offline/conversation/`: conversation-source offline extraction (implementation folder).
+- `autoskill/offline/document/`: document-source offline extraction (implementation folder).
+- `autoskill/offline/trajectory/`: trajectory-source offline extraction (implementation folder).
+- `autoskill/offline/extract_from_conversation.py`: backward-compatible wrapper entrypoint.
 
 ## 7. Quick SDK Usage
 
