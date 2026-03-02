@@ -25,14 +25,12 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
   - [1.3 一键部署（Docker Compose）](#13-一键部署docker-compose)
   - [1.4 技能生命周期示例（三个方面）](#14-技能生命周期示例三个方面)
 - [2. 项目核心特点](#2-项目核心特点)
-  - [2.1 解耦连接器与向量后端](#21-解耦连接器与向量后端)
 - [3. 系统工作流](#3-系统工作流)
   - [3.1 学习与进化流程](#31-学习与进化流程)
   - [3.2 检索与回答流程](#32-检索与回答流程)
   - [3.3 交互抽取策略](#33-交互抽取策略)
   - [3.4 代理服务流程](#34-代理服务流程)
-- [4. 核心概念](#4-核心概念)
-- [5. 本地存储结构（Local Store）](#5-本地存储结构local-store)
+- [5. SkillBank 存储结构](#5-skillbank-存储结构)
 - [6. 仓库结构（更易读版本）](#6-仓库结构更易读版本)
   - [6.1 顶层目录](#61-顶层目录)
   - [6.2 SDK 核心模块](#62-sdk-核心模块)
@@ -56,7 +54,6 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
   - [9.4 OpenAI 兼容代理 API](#94-openai-兼容代理-api)
   - [9.5 自动评测脚本](#95-自动评测脚本)
   - [9.6 OpenClaw 插件](#96-openclaw-插件)
-- [10. 项目价值与意义](#10-项目价值与意义)
 - [11. 引用（Citation）](#11-引用citation)
 - [12. 贡献与致谢](#12-贡献与致谢)
 
@@ -215,26 +212,7 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 - **经验驱动技能持续进化**：直接从真实用户交互和行为轨迹中抽取可复用能力，并持续进行版本演进与维护，让系统越用越贴合用户需求。
 - **通用技能格式**：采用 Agent Skill 形态（`SKILL.md`），具备可解释、可编辑的优势：结构清晰、内容可审阅、可按需人工修改；既可导入已有技能，也可将抽取技能迁移到其他系统。
 - **对已结束对话的离线技能抽取**：对话结束后无需再和模型重聊，直接导入现有历史对话日志（OpenAI 格式 `.json/.jsonl`）即可离线抽取可复用技能。
-
-## 2.1 解耦连接器与向量后端
-
-- **LLM 连接器注册机制**：`build_llm(...)` 支持运行时注册（`register_llm_connector`）和配置化自定义构建器（`connector_factory="module:function"`），新增模型后端无需修改 SDK 内核代码。
-- **Embedding 连接器注册机制**：`build_embeddings(...)` 提供同样的插件化方式（`register_embedding_connector` / `connector_factory`），更接近 LangChain/LiteLLM 的接入体验。
-- **向量后端抽象**：本地技能库通过 `build_vector_index(...)` 接入可插拔向量后端；默认 `flat`，并支持可选 `chroma`、`milvus`、`pinecone`（按依赖启用）。
-
-`store` 配置示例：
-
-```python
-store = {
-  "provider": "local",
-  "path": "SkillBank",
-  "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
-  "vector_backend_config": {
-    # 自定义插件后端示例：
-    # "backend_factory": "your_pkg.your_module:build_vector_backend"
-  },
-}
-```
+- **长期能力价值**：AutoSkill 将短期交互沉淀为长期能力资产，降低手工编写技能成本，让能力随真实反馈持续对齐升级，并支持跨运行时迁移复用。
 
 ## 3. 系统工作流
 
@@ -290,16 +268,7 @@ store = {
 - 响应时延重点在检索与生成。
 - 技能进化异步执行，避免阻塞客户端响应。
 
-## 4. 核心概念
-
-- **Experience**：对话消息或行为事件，是学习信号源。
-- **Skill**：可复用能力制品，包含元数据与可执行指令。
-- **Skill Candidate**：抽取阶段的临时候选，尚未进入长期库。
-- **Maintenance**：新增/合并/丢弃决策与版本管理。
-- **Skill Store**：技能制品与向量映射的持久化层。
-- **Retrieval Context**：被选中的技能上下文，注入回答链路。
-
-## 5. 本地存储结构（Local Store）
+## 5. SkillBank 存储结构
 
 当使用 `store={"provider": "local", "path": "SkillBank"}`：
 
@@ -742,16 +711,6 @@ curl http://127.0.0.1:9100/v1/autoskill/vectors/rebuild \
     "blocking": true
   }'
 ```
-
-## 10. 项目价值与意义
-
-AutoSkill 把短期交互沉淀为长期能力资产。
-
-- 降低手工编写技能和维护技能的成本。
-- 让能力随真实用户反馈持续对齐和升级。
-- 支持跨系统迁移与复用，形成可互操作的技能生态。
-
-可以把它理解为：从“提示词工程”走向“经验驱动终身学习 Agent”的一条可落地路径。
 
 ## 11. 引用（Citation）
 

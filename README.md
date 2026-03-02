@@ -26,14 +26,12 @@ and continuously evolves existing Skills through merge + version updates.
   - [1.3 One-click Deploy (Docker Compose)](#13-one-click-deploy-docker-compose)
   - [1.4 Skill Lifecycle Example (3 Aspects)](#14-skill-lifecycle-example-3-aspects)
 - [2. What Makes AutoSkill Different](#2-what-makes-autoskill-different)
-  - [2.1 Decoupled Connectors and Vector Backends](#21-decoupled-connectors-and-vector-backends)
 - [3. System Workflow](#3-system-workflow)
   - [3.1 Ingest and Evolve](#31-ingest-and-evolve)
   - [3.2 Retrieve and Respond](#32-retrieve-and-respond)
   - [3.3 Interactive Extraction Policy](#33-interactive-extraction-policy)
   - [3.4 Proxy Serving Flow](#34-proxy-serving-flow)
-- [4. Key Concepts](#4-key-concepts)
-- [5. Storage Layout (Local Store)](#5-storage-layout-local-store)
+- [5. SkillBank Storage Layout](#5-skillbank-storage-layout)
 - [6. Repository Structure (Readable Map)](#6-repository-structure-readable-map)
   - [6.1 Top Level](#61-top-level)
   - [6.2 Core SDK Modules](#62-core-sdk-modules)
@@ -57,7 +55,6 @@ and continuously evolves existing Skills through merge + version updates.
   - [9.4 OpenAI-Compatible Proxy API](#94-openai-compatible-proxy-api)
   - [9.5 Auto Evaluation Script](#95-auto-evaluation-script)
   - [9.6 OpenClaw Plugin (autoskill)](#96-openclaw-plugin-autoskill)
-- [10. Why This Matters](#10-why-this-matters)
 - [11. Citation](#11-citation)
 - [12. Contributions and Acknowledgments](#12-contributions-and-acknowledgments)
 
@@ -216,26 +213,7 @@ to generate outputs aligned with user expectations.
 - **Experience-driven continuous skill evolution**: extracts reusable capabilities directly from real user interactions and behavior traces, then continuously maintains versioned skills so the system better aligns with user needs over time.
 - **Universal skill format**: uses the Agent Skill artifact (`SKILL.md`) with clear explainability and editability: the structure is transparent, content is reviewable, and humans can revise it as needed; this also enables both importing existing skills and migrating extracted skills to other systems.
 - **Offline skill extraction from completed chats**: once a chat is finished, there is no need to replay it with the model; directly import the existing conversation logs (OpenAI-format `.json/.jsonl`) and run offline extraction to produce reusable skills.
-
-## 2.1 Decoupled Connectors and Vector Backends
-
-- **LLM connector registry**: `build_llm(...)` now supports runtime registration (`register_llm_connector`) and config-driven custom builders (`connector_factory="module:function"`), so new providers can be plugged in without changing SDK internals.
-- **Embedding connector registry**: `build_embeddings(...)` supports the same plugin pattern (`register_embedding_connector` / `connector_factory`), making model integration more LangChain/LiteLLM-like in spirit.
-- **Vector backend abstraction**: local store now uses pluggable vector backends through `build_vector_index(...)`; default is `flat`, and optional backends include `chroma`, `milvus`, and `pinecone` (dependency-based).
-
-Example `store` config:
-
-```python
-store = {
-  "provider": "local",
-  "path": "SkillBank",
-  "vector_backend": "flat",  # flat | chroma | milvus | pinecone | custom
-  "vector_backend_config": {
-    # For custom plugin backend:
-    # "backend_factory": "your_pkg.your_module:build_vector_backend"
-  },
-}
-```
+- **Long-term capability value**: AutoSkill turns short-term interactions into long-term capability assets. It reduces manual skill authoring cost, keeps capabilities aligned with real user feedback, and supports transfer/reuse across runtimes.
 
 ## 3. System Workflow
 
@@ -291,16 +269,7 @@ Client (OpenAI-compatible request)
 - Response latency focuses on retrieval + generation.
 - Skill evolution runs asynchronously to avoid blocking the client.
 
-## 4. Key Concepts
-
-- **Experience**: dialogue messages or behavior/event records used as learning signal.
-- **Skill**: reusable capability artifact with metadata + executable instructions.
-- **Skill Candidate**: temporary extraction output before maintenance decisions.
-- **Maintenance**: logic that decides add/merge/discard and handles versioning.
-- **Skill Store**: persistence layer for skill artifacts and vector mappings.
-- **Retrieval Context**: selected skills rendered into prompt context for answering.
-
-## 5. Storage Layout (Local Store)
+## 5. SkillBank Storage Layout
 
 When using `store={"provider": "local", "path": "SkillBank"}`:
 
@@ -743,16 +712,6 @@ curl http://127.0.0.1:9100/v1/autoskill/vectors/rebuild \
     "blocking": true
   }'
 ```
-
-## 10. Why This Matters
-
-AutoSkill turns short-term interaction into long-term capability.
-
-- It reduces manual Skill authoring cost.
-- It keeps capabilities aligned with real user feedback over time.
-- It enables a transferable skill ecosystem across different agent runtimes.
-
-In short, this framework is a concrete path from prompt engineering to **experience-driven lifelong agent learning**.
 
 ## 11. Citation
 
