@@ -2,7 +2,7 @@
 id: "d50297d6-de74-4373-a4b1-c10237d9bb37"
 name: "Standard release process"
 description: "General SOP for common requests related to as, zh, dai."
-version: "0.1.2"
+version: "0.1.3"
 tags:
   - "as"
   - "zh"

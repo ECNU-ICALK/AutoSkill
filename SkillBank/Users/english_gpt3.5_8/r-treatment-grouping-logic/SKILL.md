@@ -2,7 +2,7 @@
 id: "7c7f6383-9fea-4115-bedb-357e8374abd7"
 name: "R Treatment Grouping Logic"
 description: "Assign group IDs to treatment data based on analyte changes and dose amount rules within and across subjects using dplyr."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "R"
   - "dplyr"

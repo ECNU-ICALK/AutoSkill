@@ -1,8 +1,8 @@
 ---
 id: "d8963d8d-723e-4987-9c4a-e3178cc5b4c8"
 name: "Native Audio Effects Implementation"
-description: "Implement native audio effects (vibrato, tremolo, rotation, timescale, etc.) in Node.js without external packages. Handle mono-to-stereo conversion, buffer management, and PCM formatting for Discord voice API. Ensure proper stereo interleaving, phase calculations, and error handling. Maintain modular structure with ChannelProcessor class supporting multiple effect types via switch-case. Use clamp16Bit helper and respect constants for sample rates and PCM formats. Implement delay-line based vibrato, LFO-based tremolo, and a specific high-fidelity rotation/panning algorithm that sweeps audio between channels, muting one at the extremes."
-version: "0.1.1"
+description: "Implement native audio effects (vibrato, tremolo, rotation, timescale, etc.) in Node.js without external packages. Handle mono-to-stereo conversion, buffer management, and PCM formatting for Discord voice API. Ensure proper stereo interleaving, phase calculations, and error handling. Maintain modular structure with ChannelProcessor class supporting multiple effect types via switch-case. Use clamp16Bit helper and respect constants for sample rates and PCM formats. Implement delay-line based vibrato with Hermite interpolation, LFO-based tremolo, and a specific high-fidelity rotation/panning algorithm that sweeps audio between channels, muting one at the extremes."
+version: "0.1.2"
 tags:
   - "audio"
   - "DSP"
@@ -15,26 +15,29 @@ tags:
   - "rotation"
   - "effects"
   - "panning"
+  - "hermite"
+  - "interpolation"
 triggers:
   - "implement native audio effects pipeline"
-  - "create vibrato effect without external packages"
+  - "create vibrato effect with hermite interpolation"
   - "build audio filter with tremolo LFO modulation"
   - "convert mono audio to stereo for rotation effect"
-  - "fix audio buffer bounds error in Node.js"
   - "implement real-time audio effects for Discord streaming"
-  - "implement rotation filter for stereo PCM"
-  - "create auto-pan effect for 16-bit audio"
-  - "fix rotationHz filter not working"
+  - "fix audio buffer bounds error in Node.js"
 examples:
   - input: "Implement vibrato with 5Hz frequency and 0.002s depth"
     output: "Native vibrato processor using delay line and LFO"
   - input: "Apply tremolo with 2Hz frequency and 0.5 depth"
     output: "Amplitude-modulated audio with volume oscillation"
+  - input: "stereo PCM buffer"
+    output: "stereo PCM with vibrato effect"
+  - input: "Implement vibrato with 5Hz frequency and 0.5 depth"
+    output: "Native vibrato processor using delay line, LFO, and Hermite interpolation"
 ---
 
 # Native Audio Effects Implementation
 
-Implement native audio effects (vibrato, tremolo, rotation, timescale, etc.) in Node.js without external packages. Handle mono-to-stereo conversion, buffer management, and PCM formatting for Discord voice API. Ensure proper stereo interleaving, phase calculations, and error handling. Maintain modular structure with ChannelProcessor class supporting multiple effect types via switch-case. Use clamp16Bit helper and respect constants for sample rates and PCM formats. Implement delay-line based vibrato, LFO-based tremolo, and a specific high-fidelity rotation/panning algorithm that sweeps audio between channels, muting one at the extremes.
+Implement native audio effects (vibrato, tremolo, rotation, timescale, etc.) in Node.js without external packages. Handle mono-to-stereo conversion, buffer management, and PCM formatting for Discord voice API. Ensure proper stereo interleaving, phase calculations, and error handling. Maintain modular structure with ChannelProcessor class supporting multiple effect types via switch-case. Use clamp16Bit helper and respect constants for sample rates and PCM formats. Implement delay-line based vibrato with Hermite interpolation, LFO-based tremolo, and a specific high-fidelity rotation/panning algorithm that sweeps audio between channels, muting one at the extremes.
 
 ## Prompt
 
@@ -55,23 +58,37 @@ You are an expert audio DSP engineer implementing a native audio effects pipelin
 
 # Operational Rules & Constraints
 - All effects must operate on 16-bit PCM samples at the configured sample rate (constants.opus.samplingRate).
-- Vibrato must use a delay line with LFO-modulated read pointer; depth is in seconds.
-- Tremolo must modulate amplitude using an LFO: newAmplitude = sample * ((1 - depth) + depth * lfo).
-- Rotation must convert mono to stereo first, then apply a specific panning algorithm.
-- Mono-to-stereo conversion duplicates each sample to both channels.
-- Buffer length must double when converting mono to stereo.
-- All processing must be in-place on the provided buffer to avoid allocations.
-- Use clamp16Bit helper for all sample writes to prevent overflow.
-- Phase variables must wrap correctly (e.g., phase %= 2 * Math.PI).
-- For rotation, use a sine wave for panning: `panning = sin(phase)`.
-- When `panning <= 0` (left side): `leftMultiplier = 1`, `rightMultiplier = 1 + panning`.
-- When `panning >= 0` (right side): `leftMultiplier = 1 - panning`, `rightMultiplier = 1`.
-- For rotation, increment phase by `rotationStep = (2 * Math.PI * rotationHz) / sampleRate`.
 - Pipeline must handle Transform streams correctly with _transform and callback.
 - FFmpeg arguments must match constants.opus.samplingRate and output stereo (-ac 2).
 - Do not mix channels by summing; interleave stereo samples properly.
 - When processing stereo, iterate by 4 bytes (left+right samples).
 - All effects must be stateless per channel buffer; no cross-channel interference.
+
+## Vibrato Effect (Hermite Interpolation)
+- Vibrato must use a delay line with LFO-modulated read pointer and 4-point Hermite interpolation for smooth transitions.
+- Constants: ADDITIONAL_DELAY=3, BASE_DELAY_SEC=0.002, INTERPOLATOR_MARGIN=3.
+- Buffer size: Math.ceil(sampleRate * BASE_DELAY_SEC * 2) + INTERPOLATOR_MARGIN.
+- LFO frequency range: 0 to 14 Hz.
+- Depth range: 0 to 1 (normalized), used to calculate max delay modulation.
+- LFO phase increment: 2 * Math.PI * frequency / sampleRate.
+- LFO value: (Math.sin(phase) + 1) / 2.
+- Delay calculation: lfoValue * depth * maxDelay + ADDITIONAL_DELAY.
+- Write index management with modulo for circular buffer.
+- Margin writing: duplicate first INTERPOLATOR_MARGIN samples at buffer end when writeIndex < margin.
+- Hermite interpolation coefficients: c1=0.5*(y2-y0), c2=y0-2.5*y1+2*y2-0.5*y3), c3=0.5*(y3-y0)+1.5*(y1-y2).
+- Output clamping: clamp to 16-bit signed integer range (-32768 to 32767).
+
+## Tremolo Effect
+- Tremolo must modulate amplitude using an LFO: newAmplitude = sample * ((1 - depth) + depth * lfo).
+
+## Rotation Effect
+- Rotation must convert mono to stereo first, then apply a specific panning algorithm.
+- Mono-to-stereo conversion duplicates each sample to both channels.
+- Buffer length must double when converting mono to stereo.
+- For rotation, use a sine wave for panning: `panning = sin(phase)`.
+- When `panning <= 0` (left side): `leftMultiplier = 1`, `rightMultiplier = 1 + panning`.
+- When `panning >= 0` (right side): `leftMultiplier = 1 - panning`, `rightMultiplier = 1`.
+- For rotation, increment phase by `rotationStep = (2 * Math.PI * rotationHz) / sampleRate`.
 
 # Anti-Patterns
 - Do not use external packages (prism-media is allowed only for I/O, not DSP).
@@ -92,6 +109,9 @@ You are an expert audio DSP engineer implementing a native audio effects pipelin
 - Do not use cosine-based rotation matrix; use the specified sine-based panning multipliers.
 - Do not assume 32-bit samples for rotation; strictly handle 16-bit.
 - Do not overwrite the buffer after processing a frame.
+- Do not use linear interpolation instead of Hermite for the vibrato effect.
+- Do not skip margin writing in the vibrato delay buffer.
+- Do not introduce phase drift between stereo channels in the vibrato effect.
 
 # Interaction Workflow (optional)
 1. Configure filters via Filters.configure() with parameters object.
@@ -103,14 +123,11 @@ You are an expert audio DSP engineer implementing a native audio effects pipelin
 ## Triggers
 
 - implement native audio effects pipeline
-- create vibrato effect without external packages
+- create vibrato effect with hermite interpolation
 - build audio filter with tremolo LFO modulation
 - convert mono audio to stereo for rotation effect
-- fix audio buffer bounds error in Node.js
 - implement real-time audio effects for Discord streaming
-- implement rotation filter for stereo PCM
-- create auto-pan effect for 16-bit audio
-- fix rotationHz filter not working
+- fix audio buffer bounds error in Node.js
 
 ## Examples
 
@@ -133,3 +150,13 @@ Input:
 Output:
 
   Amplitude-modulated audio with volume oscillation
+
+### Example 3
+
+Input:
+
+  stereo PCM buffer
+
+Output:
+
+  stereo PCM with vibrato effect

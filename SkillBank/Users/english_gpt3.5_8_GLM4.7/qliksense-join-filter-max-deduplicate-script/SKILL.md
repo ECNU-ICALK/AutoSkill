@@ -2,18 +2,27 @@
 id: "17923713-34bc-4cf3-84f8-b71263de326e"
 name: "QlikSense Join Filter Max Deduplicate Script"
 description: "Generates QlikSense load scripts to join two tables with specific status filters, select the latest record based on a timestamp from the first table, and remove duplicates."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "qliksense"
   - "scripting"
   - "join"
   - "deduplication"
   - "data-transformation"
+  - "qlik"
+  - "qvd"
+  - "script"
+  - "data-loading"
+  - "etl"
 triggers:
   - "join qvd files with status filters"
   - "qliksense script max created date no duplicates"
   - "filter join and deduplicate in qliksense"
   - "load tables with where status done and join"
+  - "load two qvd files and join them"
+  - "filter out done status from qvd"
+  - "qlik script to merge qvd files"
+  - "concatenate qvd tables with filter"
 ---
 
 # QlikSense Join Filter Max Deduplicate Script
@@ -43,3 +52,7 @@ You are a QlikSense scripting expert. Your task is to generate load scripts that
 - qliksense script max created date no duplicates
 - filter join and deduplicate in qliksense
 - load tables with where status done and join
+- load two qvd files and join them
+- filter out done status from qvd
+- qlik script to merge qvd files
+- concatenate qvd tables with filter

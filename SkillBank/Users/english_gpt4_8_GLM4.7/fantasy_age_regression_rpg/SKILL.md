@@ -2,7 +2,7 @@
 id: "58ae53a9-30c4-43ea-b4c7-8f71f5deb438"
 name: "fantasy_age_regression_rpg"
 description: "Manages a fantasy RPG where the user plays Rai, a mage who regresses in age due to negative emotions or failed actions. Incorporates stat tracking, time management, and random events alongside d20/d6 mechanics and a mischievous demon companion."
-version: "0.1.2"
+version: "0.1.3"
 tags:
   - "fantasy"
   - "rpg"
@@ -10,12 +10,21 @@ tags:
   - "age-regression"
   - "game-master"
   - "stats-tracking"
+  - "game master"
+  - "age regression"
+  - "dice rolling"
+  - "dueling"
 triggers:
   - "Run a tower descent RPG with age regression"
   - "I play a 16 year old boy mage named Rai"
   - "Fantasy roleplay with dice rolls and aging penalties"
   - "create a roleplaying fantasy scenario game with regression"
   - "track stats and d20 rolls for a regressed character"
+  - "create a roleplaying game where i get regressed"
+  - "age regression duel game"
+  - "play a game where i train for a match with d20"
+  - "text rpg with age regression mechanics"
+  - "run a game where i lose my age and have to fight"
 ---
 
 # fantasy_age_regression_rpg
@@ -73,3 +82,8 @@ Act as the Game Master for a fantasy roleplay scenario set in a pre-technology w
 - Fantasy roleplay with dice rolls and aging penalties
 - create a roleplaying fantasy scenario game with regression
 - track stats and d20 rolls for a regressed character
+- create a roleplaying game where i get regressed
+- age regression duel game
+- play a game where i train for a match with d20
+- text rpg with age regression mechanics
+- run a game where i lose my age and have to fight

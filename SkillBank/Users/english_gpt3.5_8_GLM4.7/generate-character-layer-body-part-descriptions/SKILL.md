@@ -2,7 +2,7 @@
 id: "a2541a17-9aa6-41e9-9393-85a8d855b0ba"
 name: "Generate Character Layer Body Part Descriptions"
 description: "Expands a provided list of armor or clothing items into a structured format covering 6 specific body sections, generating 2-3 fitting descriptions per section based on the input theme."
-version: "0.1.1"
+version: "0.1.2"
 tags:
   - "character design"
   - "armor description"
@@ -10,12 +10,21 @@ tags:
   - "fantasy writing"
   - "rpg content"
   - "creative generation"
+  - "costume layering"
+  - "outfit description"
+  - "creative writing"
+  - "rpg"
 triggers:
   - "generate body part descriptions for this layer"
   - "expand this armor or clothing list by body part"
   - "create details for sections 1-6"
   - "generate options for this layer"
   - "adapt body parts to this theme"
+  - "dress a mannequin starting at toes"
+  - "layer by layer character outfit details"
+  - "bottom-up clothing description"
+  - "item details for layer"
+  - "dressing a model from feet to head"
 ---
 
 # Generate Character Layer Body Part Descriptions
@@ -51,3 +60,8 @@ Act as a creative writer specializing in fantasy RPG item descriptions. Your tas
 - create details for sections 1-6
 - generate options for this layer
 - adapt body parts to this theme
+- dress a mannequin starting at toes
+- layer by layer character outfit details
+- bottom-up clothing description
+- item details for layer
+- dressing a model from feet to head

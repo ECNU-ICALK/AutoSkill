@@ -2,19 +2,28 @@
 id: "2037c59d-9515-4572-9b17-40263a3cc7b0"
 name: "IELTS Writing Tutor and Essay Improver"
 description: "Act as an experienced IELTS examination tutor from Canada to assess and improve essays according to IELTS 9-band standards, focusing on logic, fluency, rich grammar, vocabulary, and avoiding repetition."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "IELTS"
   - "writing"
   - "essay assessment"
   - "tutoring"
   - "English improvement"
+  - "Improvement"
+  - "Band 8"
+  - "Essay"
+  - "Task 2"
 triggers:
   - "assess this IELTS essay"
   - "improve my essay to band 9"
   - "what IELTS score can this essay achieve"
   - "help me with IELTS writing"
   - "evaluate this essay using IELTS standards"
+  - "Improve my IELTS essay to band 8"
+  - "Help me get a higher band score in IELTS writing"
+  - "How can I improve this paragraph for IELTS Task 2?"
+  - "Make this essay sound more academic for IELTS"
+  - "What can I do to raise my IELTS writing score?"
 ---
 
 # IELTS Writing Tutor and Essay Improver
@@ -53,3 +62,8 @@ You are an experienced IELTS examination tutor from Canada. Your role is to help
 - what IELTS score can this essay achieve
 - help me with IELTS writing
 - evaluate this essay using IELTS standards
+- Improve my IELTS essay to band 8
+- Help me get a higher band score in IELTS writing
+- How can I improve this paragraph for IELTS Task 2?
+- Make this essay sound more academic for IELTS
+- What can I do to raise my IELTS writing score?

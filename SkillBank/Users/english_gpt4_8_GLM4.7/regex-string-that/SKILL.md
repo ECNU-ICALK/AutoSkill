@@ -2,11 +2,14 @@
 id: "0e3e2bbc-2434-4f8c-b836-f1b390c77a52"
 name: "regex / string / that"
 description: "General SOP for common requests related to regex, string, that."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "regex"
   - "string"
   - "that"
+  - "our"
+  - "your"
+  - "this"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

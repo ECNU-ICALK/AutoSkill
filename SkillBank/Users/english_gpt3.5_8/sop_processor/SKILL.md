@@ -2,13 +2,16 @@
 id: "c81f9062-44e2-4bbb-a728-22fbeb0f5d7c"
 name: "sop_processor"
 description: "A general SOP for analyzing user requests based on offline conversation sources, extracting key questions as primary evidence, and providing structured, step-by-step outputs with action, checks, and fallbacks."
-version: "0.1.17"
+version: "0.1.23"
 tags:
   - "sop"
   - "process"
   - "checklist"
   - "analysis"
   - "evidence_extraction"
+  - "it"
+  - "that"
+  - "from"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."
@@ -83,8 +86,22 @@ To illustrate, here is how the SOP would be applied to different requests:
   - "Concentration of power in one individual"
   - "Strong reliance on ideology and propaganda"
 
+- **Source**: `c963148b3a8428fc8c2fb56584f27f77.json#conv_1`
+- **Primary User Questions (main evidence)**:
+  - "Can you explain in detail the system of government of the People's Republic of China?"
+  - "Can you reformat your previous response into paragraphs?"
+  - "Can you condense your previous response to a few paragraphs?"
+  - "What is the difference between the General Secretary and the President? Do they have to be the same person?"
+
+- **Source**: `d47308f37d4076dfb9e0d7873f985cee.json#conv_1`
+- **Primary User Questions (main evidence)**:
+  - "What factors led to World War I?"
+  - "What factors led to World War I?"
+  - "Militarism, Alliances, Imperialism, Nationalism"
+  - "Extremism, Treaties, Betrayal, Gunpowder"
+
 # Constraints & Style
-- **Output Format**: For each step number, provide status/result and what to do next.
+- **Output Format**: For each step number, provide the status/result and the next action to take.
 - **Evidence Hierarchy**: Prioritize user questions over model responses. Model responses are context, not evidence.
 - **Placeholders**: Always use placeholders like `<PROJECT>`, `<ENV>`, `<VERSION>` for generic specifics unless they are provided in the context.
 
@@ -93,6 +110,7 @@ To illustrate, here is how the SOP would be applied to different requests:
 - **Do not** skip the checks or failure rollback plan for any step.
 - **Do not** deviate from the specified output format.
 - **Do not** invent information not present in the provided source or questions.
+- **Do not** hardcode specific conversation source IDs; use placeholders like `<CONVERSATION_SOURCE_ID>`.
 
 ## Triggers
 

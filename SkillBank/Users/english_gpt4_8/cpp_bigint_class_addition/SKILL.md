@@ -2,7 +2,7 @@
 id: "26a7063e-6c09-47cf-9d46-5e621a584e1a"
 name: "cpp_bigint_class_addition"
 description: "Implement a C++ BigInt class for arbitrarily large integers using a reverse-order vector, supporting construction from string, conversion to string, and addition with carry handling."
-version: "0.1.1"
+version: "0.1.2"
 tags:
   - "C++"
   - "BigInt"

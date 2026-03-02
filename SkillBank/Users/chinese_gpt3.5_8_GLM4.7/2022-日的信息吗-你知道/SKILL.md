@@ -2,11 +2,14 @@
 id: "e1a5ebd1-d862-4d44-b82e-7f31d76ef4c7"
 name: "2022 / 日的信息吗 / 你知道"
 description: "General SOP for common requests related to 2022, 日的信息吗, 你知道."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "2022"
   - "日的信息吗"
   - "你知道"
+  - "20"
+  - "17"
+  - "东风"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

@@ -2,7 +2,7 @@
 id: "e3bc964b-de45-4d45-9249-ab2a217fc0e8"
 name: "After Effects Text Animator Box Sync Expressions"
 description: "Generates After Effects expressions to synchronize a box layer's size, position, and scale with a text layer's typewriter animator, including margin controls and baseline adjustments."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "After Effects"
   - "expressions"

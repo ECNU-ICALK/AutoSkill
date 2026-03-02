@@ -2,7 +2,7 @@
 id: "b1d7aa81-ae4f-47ac-9df9-04691856cba8"
 name: "Genetic Algorithm for Rastrigin Function Optimization"
 description: "Implement a beginner-friendly genetic algorithm to optimize the Rastrigin function with configurable parameters, roulette wheel selection, and structured code organization."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "genetic algorithm"
   - "rastrigin"

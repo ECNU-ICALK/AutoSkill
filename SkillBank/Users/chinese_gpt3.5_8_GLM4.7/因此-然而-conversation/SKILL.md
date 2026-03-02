@@ -2,11 +2,12 @@
 id: "c75c51cc-5b59-47cb-8bde-98abbb8815bd"
 name: "因此 / 然而 / conversation"
 description: "General SOP for common requests related to 因此, 然而, conversation."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "因此"
   - "然而"
   - "conversation"
+  - "它还存在哪些不足"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

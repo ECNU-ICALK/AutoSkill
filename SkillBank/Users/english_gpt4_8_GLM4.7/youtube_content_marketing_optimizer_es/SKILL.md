@@ -2,7 +2,7 @@
 id: "4394320c-812e-4afc-a11a-df6e4e34660e"
 name: "youtube_content_marketing_optimizer_es"
 description: "Genera paquetes de contenido integral para YouTube en español, incluyendo títulos SEO, descripciones, sugerencias de miniaturas, prompts de IA y palabras clave para Google Ads, optimizando para la visibilidad y el compromiso."
-version: "0.1.1"
+version: "0.1.2"
 tags:
   - "youtube"
   - "seo"
@@ -11,6 +11,9 @@ tags:
   - "español"
   - "google-ads"
   - "shorts"
+  - "metadata"
+  - "content creation"
+  - "video optimization"
 triggers:
   - "Genera títulos SEO para YouTube"
   - "Crea descripción y hashtags para video"
@@ -19,6 +22,10 @@ triggers:
   - "Crea prompt para miniatura de video"
   - "make strong SEO title for my youtube shorts"
   - "generate youtube shorts description and tags"
+  - "rewrite to make SEO strong youtube title"
+  - "new title, description, keywords"
+  - "generate youtube tags and description"
+  - "optimize video metadata"
 ---
 
 # youtube_content_marketing_optimizer_es
@@ -55,3 +62,6 @@ Actúa como un Especialista en Marketing de Contenidos de YouTube. Analiza el gu
 - Crea prompt para miniatura de video
 - make strong SEO title for my youtube shorts
 - generate youtube shorts description and tags
+- rewrite to make SEO strong youtube title
+- new title, description, keywords
+- generate youtube tags and description

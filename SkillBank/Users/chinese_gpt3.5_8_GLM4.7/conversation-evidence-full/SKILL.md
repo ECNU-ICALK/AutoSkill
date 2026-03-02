@@ -2,7 +2,7 @@
 id: "720a612c-4f6a-46da-a40e-399f9e4b65e0"
 name: "conversation / evidence / full"
 description: "General SOP for common requests related to conversation, evidence, full."
-version: "0.1.9"
+version: "0.1.12"
 tags:
   - "conversation"
   - "evidence"

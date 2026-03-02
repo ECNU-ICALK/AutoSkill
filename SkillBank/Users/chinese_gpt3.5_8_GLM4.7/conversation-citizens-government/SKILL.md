@@ -2,11 +2,13 @@
 id: "454b2a26-071c-46e9-b525-20c37291eedc"
 name: "conversation / citizens / government"
 description: "General SOP for common requests related to conversation, citizens, government."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "conversation"
   - "citizens"
   - "government"
+  - "www"
+  - "it"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

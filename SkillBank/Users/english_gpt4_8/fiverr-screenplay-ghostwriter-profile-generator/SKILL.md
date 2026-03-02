@@ -2,7 +2,7 @@
 id: "470cb0f9-5e7e-4ae0-8be1-b43d58dcca5d"
 name: "Fiverr Screenplay Ghostwriter Profile Generator"
 description: "Generates a concise, personality-driven Fiverr profile description for a screenplay ghostwriter, emphasizing genre expertise, award-winning credits, and a self-deprecating yet confident tone, while adhering to a 600-word limit."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "Fiverr"
   - "screenplay"

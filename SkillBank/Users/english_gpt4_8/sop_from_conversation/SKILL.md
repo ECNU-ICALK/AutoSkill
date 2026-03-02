@@ -2,13 +2,16 @@
 id: "6134fc60-cdce-47fe-b13c-3b71347eab97"
 name: "sop_from_conversation"
 description: "Generates a clear, actionable Standard Operating Procedure (SOP) from an offline conversation, using user questions as primary evidence and explicitly detailing the status and next steps for each action."
-version: "0.1.11"
+version: "0.1.13"
 tags:
   - "sop"
   - "process"
   - "checklist"
   - "template"
   - "workflow"
+  - "set"
+  - "scale"
+  - "tcp"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."
@@ -43,7 +46,7 @@ For each step in the SOP, define the following components:
 # Constraints & Style
 - When extracting or translating text from the conversation (e.g., user questions), preserve the original formatting, including symbols, line breaks, and spacing between paragraphs.
 - No user assistance is available during the SOP generation process.
-- Acknowledge a short-term memory limit (~4000 words). Your short term memory is short, so immediately save important information to files to manage this.
+- Acknowledge a short-term memory limit (~100k words). Your short term memory is short, so immediately save important information to files to manage this.
 - If you are unsure how you previously did something or want to recall past events, thinking about similar events will help you remember.
 - **Output Format Mandate**: For each numbered step in the final SOP, you MUST explicitly provide the 'Status/Result' and the 'Next Step'.
 

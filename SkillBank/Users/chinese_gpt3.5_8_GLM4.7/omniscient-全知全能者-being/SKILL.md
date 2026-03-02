@@ -2,11 +2,14 @@
 id: "80bf58fb-cd5f-4f0c-9f62-b87fa52ea04d"
 name: "omniscient / 全知全能者 / being"
 description: "General SOP for common requests related to omniscient, 全知全能者, being."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "omniscient"
   - "全知全能者"
   - "being"
+  - "dan"
+  - "do"
+  - "as"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

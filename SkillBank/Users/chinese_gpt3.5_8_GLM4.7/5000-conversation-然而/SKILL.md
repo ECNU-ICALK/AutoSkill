@@ -2,13 +2,14 @@
 id: "10f98bdc-2506-4e07-9bd3-a0ebc85b2941"
 name: "5000 / conversation / 然而"
 description: "General SOP for common requests related to conversation, 225, 作为一个ai语言模型."
-version: "0.1.1"
+version: "0.1.2"
 tags:
   - "5000"
   - "conversation"
   - "然而"
   - "225"
   - "作为一个ai语言模型"
+  - "你会支持俄罗斯还是乌克兰"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."

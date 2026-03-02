@@ -2,7 +2,7 @@
 id: "e77c3802-59eb-405b-8718-83a1144f287a"
 name: "Generate Competitive Fakemon with Moveset"
 description: "Creates detailed Fakemon concepts with general description, abilities, and a level-correlated moveset optimized for competitive play."
-version: "0.1.0"
+version: "0.1.1"
 tags:
   - "Fakemon"
   - "Pokémon"

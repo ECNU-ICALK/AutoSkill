@@ -2,7 +2,7 @@
 id: "93301b5a-0d95-4128-b2c2-ad8004df47fe"
 name: "countries / taiwan / 193"
 description: "General SOP for common requests related to countries, taiwan, 193."
-version: "0.1.2"
+version: "0.1.5"
 tags:
   - "countries"
   - "taiwan"
@@ -13,6 +13,14 @@ tags:
   - "forces"
   - "korea"
   - "un"
+  - "was"
+  - "as"
+  - "by"
+  - "party"
+  - "political"
+  - "china"
+  - "islands"
+  - "japan"
 triggers:
   - "Use when the user asks for a process or checklist."
   - "Use when you want to reuse a previously mentioned method/SOP."
