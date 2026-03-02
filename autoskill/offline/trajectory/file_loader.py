@@ -80,6 +80,7 @@ def data_to_text_unit(data: Any, *, title: str = "inline_data") -> Dict[str, str
 
 
 def _read_any_file_as_text(path: str, *, max_bytes: int = 8_000_000) -> str:
+    """Run read any file as text."""
     ext = os.path.splitext(path)[1].lower()
     if ext in {".doc", ".docx"}:
         txt = _read_word_document(path)
@@ -109,6 +110,7 @@ def _read_any_file_as_text(path: str, *, max_bytes: int = 8_000_000) -> str:
 
 def _read_word_document(path: str) -> str:
     # macOS built-in converter.
+    """Run read word document."""
     out = _run_text_command(["textutil", "-convert", "txt", "-stdout", path], timeout_s=20)
     if out.strip():
         return out
@@ -123,6 +125,7 @@ def _read_word_document(path: str) -> str:
 
 
 def _run_text_command(argv: List[str], *, timeout_s: int) -> str:
+    """Run run text command."""
     if not argv:
         return ""
     bin_name = str(argv[0] or "").strip()
@@ -149,6 +152,7 @@ def _run_text_command(argv: List[str], *, timeout_s: int) -> str:
 
 
 def _to_text(obj: Any) -> str:
+    """Run to text."""
     if obj is None:
         return ""
     if isinstance(obj, str):

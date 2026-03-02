@@ -14,6 +14,7 @@ import os
 
 
 def _default_store_path() -> str:
+    """Run default store path."""
     try:
         here = os.path.abspath(os.path.dirname(__file__))
         root = os.path.abspath(os.path.join(here, os.pardir))
@@ -34,6 +35,7 @@ def default_store_path() -> str:
 
 
 def _default_store() -> Dict[str, Any]:
+    """Run default store."""
     return {"provider": "local", "path": default_store_path()}
 
 
@@ -73,6 +75,7 @@ class AutoSkillConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutoSkillConfig":
+        """Run from dict."""
         data = dict(data or {})
         if "embeddings" not in data and "embedding" in data:
             data["embeddings"] = data.get("embedding")

@@ -43,6 +43,7 @@ class _BgExtractJob:
 
 
 def _top_reference_from_hits(hits: List[Any], *, user_id: str) -> Optional[Dict[str, Any]]:
+    """Run top reference from hits."""
     if not hits:
         return None
     top = hits[0]
@@ -394,6 +395,7 @@ class InteractiveChatApp:
         import subprocess
 
         def _try(cmd: list[str]) -> Optional[bytes]:
+            """Run try."""
             try:
                 return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
             except Exception:

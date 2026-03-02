@@ -21,6 +21,7 @@ from ..utils.units import truncate_system_user
 
 
 def _content_to_text(content: Any) -> str:
+    """Run content to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -45,6 +46,7 @@ def _content_to_text(content: Any) -> str:
 
 
 def _try_extract_json_text(text: str) -> Optional[str]:
+    """Run try extract json text."""
     raw = (text or "").strip()
     if not raw:
         return None
@@ -101,6 +103,7 @@ def _extract_best_text(parsed: Dict[str, Any]) -> str:
 
 
 def _extract_stream_delta(parsed: Dict[str, Any]) -> str:
+    """Run extract stream delta."""
     choices = parsed.get("choices") or []
     if not isinstance(choices, list) or not choices:
         return ""
@@ -128,6 +131,7 @@ class OpenAIChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         system2, user2 = truncate_system_user(
             system=system, user=user, max_units=int(self.max_input_chars or 0)
         )
@@ -145,6 +149,7 @@ class OpenAIChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> Iterator[str]:
+        """Run stream complete."""
         system2, user2 = truncate_system_user(
             system=system, user=user, max_units=int(self.max_input_chars or 0)
         )
@@ -195,10 +200,12 @@ class OpenAIChatLLM(LLM):
             yield text
 
     def _build_url(self) -> str:
+        """Run build url."""
         base = self.base_url.rstrip("/")
         return (base + "/chat/completions") if base.endswith("/v1") else (base + "/v1/chat/completions")
 
     def _resolve_api_key(self) -> str:
+        """Run resolve api key."""
         key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OpenAIChatLLM requires api_key or OPENAI_API_KEY")
@@ -212,6 +219,7 @@ class OpenAIChatLLM(LLM):
         temperature: float,
         stream: bool,
     ) -> Dict[str, Any]:
+        """Run build payload."""
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -227,6 +235,7 @@ class OpenAIChatLLM(LLM):
         return payload
 
     def _build_request(self, *, payload: Dict[str, Any], stream: bool) -> urllib.request.Request:
+        """Run build request."""
         key = self._resolve_api_key()
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         return urllib.request.Request(
@@ -241,6 +250,7 @@ class OpenAIChatLLM(LLM):
         )
 
     def _post_json(self, *, payload: Dict[str, Any], stream: bool) -> str:
+        """Run post json."""
         req = self._build_request(payload=payload, stream=stream)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:

@@ -14,6 +14,7 @@ from typing import List
 class EmbeddingModel(ABC):
     @abstractmethod
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         raise NotImplementedError
 
 

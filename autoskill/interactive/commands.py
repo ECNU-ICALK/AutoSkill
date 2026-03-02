@@ -15,6 +15,7 @@ class Command:
 
 
 def parse_command(line: str) -> Optional[Command]:
+    """Run parse command."""
     s = (line or "").strip()
     if not s:
         return None

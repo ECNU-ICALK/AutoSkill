@@ -79,6 +79,7 @@ def json_from_llm_text(text: str) -> Any:
 
 
 def _score_json_candidate(obj: Any) -> int:
+    """Run score json candidate."""
     if isinstance(obj, dict):
         skills = obj.get("skills")
         if isinstance(skills, list):

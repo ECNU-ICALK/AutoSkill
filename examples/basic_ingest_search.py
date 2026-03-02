@@ -9,6 +9,7 @@ from autoskill import AutoSkill, AutoSkillConfig
 
 
 def main() -> None:
+    """Run main."""
     user_message = (
         "Before each release: run regression tests -> canary rollout -> monitor -> full rollout."
     )

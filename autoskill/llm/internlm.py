@@ -43,6 +43,7 @@ class InternLMChatLLM(OpenAIChatLLM):
     _thinking_mode_disabled_by_server: bool = field(default=False, init=False, repr=False)
 
     def _resolve_api_key(self) -> str:
+        """Run resolve api key."""
         key = (
             self.api_key
             or os.getenv("INTERNLM_API_KEY")
@@ -56,6 +57,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         return str(key)
 
     def _requested_thinking_mode(self) -> Optional[bool]:
+        """Run requested thinking mode."""
         raw = self.thinking_mode
         if raw is None:
             return None
@@ -71,6 +73,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         return None
 
     def thinking_mode_status(self) -> Dict[str, Any]:
+        """Run thinking mode status."""
         requested = self._requested_thinking_mode()
         effective = requested
         if requested is True and self._thinking_mode_disabled_by_server:
@@ -84,6 +87,7 @@ class InternLMChatLLM(OpenAIChatLLM):
 
     @staticmethod
     def _is_thinking_mode_compat_error(text: str) -> bool:
+        """Run is thinking mode compat error."""
         s = str(text or "").strip().lower()
         if "thinking_mode" not in s:
             return False
@@ -107,6 +111,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         return ("400" in s) or any(h in s for h in hints)
 
     def _should_attach_thinking_mode(self) -> bool:
+        """Run should attach thinking mode."""
         requested = self._requested_thinking_mode()
         if requested is None:
             return False
@@ -115,6 +120,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         return True
 
     def _maybe_disable_thinking_for_retry(self, *, payload: Dict[str, Any], message: str) -> bool:
+        """Run maybe disable thinking for retry."""
         if "thinking_mode" not in payload:
             return False
         if payload.get("thinking_mode") is not True:
@@ -132,6 +138,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         temperature: float,
         stream: bool,
     ) -> Dict[str, Any]:
+        """Run build payload."""
         payload = super()._build_payload(
             system=system,
             user=user,
@@ -155,6 +162,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         system2, user2 = truncate_system_user(
             system=system, user=user, max_units=int(self.max_input_chars or 0)
         )
@@ -182,6 +190,7 @@ class InternLMChatLLM(OpenAIChatLLM):
         user: str,
         temperature: float = 0.0,
     ) -> Iterator[str]:
+        """Run stream complete."""
         system2, user2 = truncate_system_user(
             system=system, user=user, max_units=int(self.max_input_chars or 0)
         )

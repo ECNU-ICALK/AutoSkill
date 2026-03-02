@@ -133,6 +133,7 @@ def extract_from_agentic_trajectory(
 
 
 def _record_from_unit(unit: Dict[str, str]) -> Dict[str, Any]:
+    """Run record from unit."""
     title = str(unit.get("title") or "").strip() or "trajectory"
     text = str(unit.get("text") or "").strip()
     source_file = str(unit.get("source_file") or "").strip()
@@ -153,6 +154,7 @@ def _record_from_unit(unit: Dict[str, str]) -> Dict[str, Any]:
 
 
 def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
+    """Run skill to plain dict."""
     try:
         examples = []
         for e in list(getattr(skill, "examples", []) or []):
@@ -177,9 +179,11 @@ def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
 
 
 def _collect_records(data: Any) -> List[Dict[str, Any]]:
+    """Run collect records."""
     out: List[Dict[str, Any]] = []
 
     def collect(obj: Any) -> None:
+        """Run collect."""
         if obj is None:
             return
         if isinstance(obj, list):
@@ -205,6 +209,7 @@ def _collect_records(data: Any) -> List[Dict[str, Any]]:
 
 
 def _looks_like_trajectory_record(obj: Dict[str, Any]) -> bool:
+    """Run looks like trajectory record."""
     if any(k in obj for k in ("messages", "events", "trace", "trajectory", "steps", "tool_calls", "actions")):
         return True
     if any(k in obj for k in ("task", "goal", "instruction", "query", "prompt", "final_answer", "output", "response")):
@@ -214,6 +219,7 @@ def _looks_like_trajectory_record(obj: Dict[str, Any]) -> bool:
 
 def _messages_from_record(record: Dict[str, Any]) -> List[Dict[str, str]]:
     # 1) Prefer canonical messages-like fields.
+    """Run messages from record."""
     for key in ("messages", "conversation", "dialogue", "history", "chat_history", "finalMessages"):
         raw = record.get(key)
         msgs = _normalize_messages(raw)
@@ -251,6 +257,7 @@ def _messages_from_record(record: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 def _attach_response_message(*, messages: List[Dict[str, str]], record: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Run attach response message."""
     response = record.get("response")
     if not isinstance(response, dict):
         return messages
@@ -272,6 +279,7 @@ def _attach_response_message(*, messages: List[Dict[str, str]], record: Dict[str
 
 
 def _normalize_messages(raw: Any) -> List[Dict[str, str]]:
+    """Run normalize messages."""
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, str]] = []
@@ -289,6 +297,7 @@ def _normalize_messages(raw: Any) -> List[Dict[str, str]]:
 
 
 def _events_from_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Run events from record."""
     out: List[Dict[str, Any]] = []
     for key in ("events", "trace", "trajectory", "steps", "actions", "tool_calls", "tools"):
         raw = record.get(key)
@@ -310,6 +319,7 @@ def _events_from_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _parse_success(record: Dict[str, Any]) -> bool:
+    """Run parse success."""
     for key in ("success", "task_success", "objective_met"):
         if key in record:
             return bool(record.get(key))
@@ -325,6 +335,7 @@ def _parse_success(record: Dict[str, Any]) -> bool:
 
 
 def _first_non_empty_text(obj: Dict[str, Any], *, keys: tuple[str, ...]) -> str:
+    """Run first non empty text."""
     for key in keys:
         text = _content_to_text(obj.get(key)).strip()
         if text:
@@ -333,6 +344,7 @@ def _first_non_empty_text(obj: Dict[str, Any], *, keys: tuple[str, ...]) -> str:
 
 
 def _content_to_text(content: Any) -> str:
+    """Run content to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -357,11 +369,13 @@ def _content_to_text(content: Any) -> str:
 
 
 def _env(name: str, default: str = "") -> str:
+    """Run env."""
     val = os.getenv(name)
     return val if val is not None and val.strip() else default
 
 
 def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build llm config."""
     provider = str(args.llm_provider or "mock").strip() or "mock"
     model = str(args.llm_model or "").strip() or None
     cfg = _build_provider_llm_config(provider, model=model)
@@ -375,6 +389,7 @@ def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build embeddings config."""
     llm_provider = str(args.llm_provider or "mock").strip().lower() or "mock"
     provider = str(args.embeddings_provider or "").strip()
     model = str(args.embeddings_model or "").strip() or None
@@ -396,6 +411,7 @@ def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
+    """Run build sdk from args."""
     llm_cfg = _build_llm_config(args)
     emb_cfg = _build_embeddings_config(args)
     store_cfg: Dict[str, Any] = {"provider": "local"}
@@ -411,6 +427,7 @@ def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
 
 
 def _parse_bool_text(v: Any, default: bool) -> bool:
+    """Run parse bool text."""
     if v is None:
         return bool(default)
     s = str(v).strip().lower()
@@ -422,6 +439,7 @@ def _parse_bool_text(v: Any, default: bool) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Run build parser."""
     parser = argparse.ArgumentParser(description="Extract skills from offline files/directories as trajectories.")
     parser.add_argument("--file", required=True, help="Path to a file or directory.")
     parser.add_argument("--user-id", default="u1", help="Target user id.")
@@ -459,6 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run main."""
     args = build_parser().parse_args()
     sdk = _build_sdk_from_args(args)
     result = extract_from_agentic_trajectory(

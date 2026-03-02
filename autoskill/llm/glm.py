@@ -23,6 +23,7 @@ from .base import LLM
 def _truncate_inputs(
     *, system: Optional[str], user: str, max_input_chars: int
 ) -> tuple[Optional[str], str]:
+    """Run truncate inputs."""
     return truncate_system_user(system=system, user=user, max_units=int(max_input_chars or 0))
 
 
@@ -47,6 +48,7 @@ class GLMChatLLM(LLM):
     extra_body: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
+        """Run post init."""
         self._auth = BigModelAuth(
             api_key=self.api_key,
             api_key_id=self.api_key_id,
@@ -63,6 +65,7 @@ class GLMChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         system2, user2 = _truncate_inputs(
             system=system, user=user, max_input_chars=int(self.max_input_chars or 0)
         )
@@ -116,6 +119,7 @@ class GLMChatLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> Iterator[str]:
+        """Run stream complete."""
         system2, user2 = _truncate_inputs(
             system=system, user=user, max_input_chars=int(self.max_input_chars or 0)
         )
@@ -199,6 +203,7 @@ class GLMChatLLM(LLM):
         retry_alternate_time_unit: bool = False,
         retry_auth_mode: Optional[str] = None,
     ) -> Tuple[str, Dict[str, Any]]:
+        """Run post json."""
         url = self.base_url.rstrip("/") + str(path)
 
         token_unit = (self.token_time_unit or "ms").lower()
@@ -253,6 +258,7 @@ class GLMChatLLM(LLM):
         retry_alternate_time_unit: bool = False,
         retry_auth_mode: Optional[str] = None,
     ) -> Iterator[str]:
+        """Run post stream lines."""
         url = self.base_url.rstrip("/") + str(path)
 
         token_unit = (self.token_time_unit or "ms").lower()
@@ -295,6 +301,7 @@ class GLMChatLLM(LLM):
 
 
 def _extract_chat_content(parsed: Dict[str, Any]) -> Optional[str]:
+    """Run extract chat content."""
     choices = _find_choices(parsed)
     if not choices:
         return None
@@ -322,6 +329,7 @@ def _extract_chat_content(parsed: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_chat_reasoning(parsed: Dict[str, Any]) -> Optional[str]:
+    """Run extract chat reasoning."""
     choices = _find_choices(parsed)
     if not choices:
         return None
@@ -340,6 +348,7 @@ def _extract_chat_reasoning(parsed: Dict[str, Any]) -> Optional[str]:
 
 
 def _looks_like_structured_output(text: str) -> bool:
+    """Run looks like structured output."""
     s = (text or "").lstrip()
     if not s:
         return False
@@ -390,6 +399,7 @@ def _extract_best_text(parsed: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_stream_delta(parsed: Dict[str, Any]) -> str:
+    """Run extract stream delta."""
     choices = _find_choices(parsed)
     if not choices:
         return ""
@@ -429,6 +439,7 @@ def _try_extract_json_text(text: str) -> Optional[str]:
 
 
 def _content_to_text(content: Any) -> Optional[str]:
+    """Run content to text."""
     if content is None:
         return None
     if isinstance(content, str):
@@ -453,6 +464,7 @@ def _content_to_text(content: Any) -> Optional[str]:
 
 
 def _find_choices(obj: Any) -> List[Any]:
+    """Run find choices."""
     if isinstance(obj, dict) and isinstance(obj.get("choices"), list):
         return obj["choices"]
     for candidate in _walk(obj, depth=4):
@@ -462,6 +474,7 @@ def _find_choices(obj: Any) -> List[Any]:
 
 
 def _walk(obj: Any, *, depth: int) -> List[Any]:
+    """Run walk."""
     if depth < 0:
         return []
     out: List[Any] = [obj]
@@ -477,6 +490,7 @@ def _walk(obj: Any, *, depth: int) -> List[Any]:
 
 
 def _is_auth_error_response(parsed: Dict[str, Any]) -> bool:
+    """Run is auth error response."""
     http_status = parsed.get("_http_status")
     if isinstance(http_status, int) and http_status in {401, 403}:
         return True
@@ -503,6 +517,7 @@ def _is_auth_error_response(parsed: Dict[str, Any]) -> bool:
 
 
 def _looks_like_auth_error_text(msg: str) -> bool:
+    """Run looks like auth error text."""
     s = str(msg or "").lower()
     needles = [
         "invalid api key",
@@ -522,6 +537,7 @@ def _looks_like_auth_error_text(msg: str) -> bool:
 
 
 def _format_unexpected_response(prefix: str, body: str, parsed: Dict[str, Any]) -> str:
+    """Run format unexpected response."""
     code = parsed.get("code")
     msg = parsed.get("msg") or parsed.get("message") or parsed.get("error")
     if code is not None or msg is not None:

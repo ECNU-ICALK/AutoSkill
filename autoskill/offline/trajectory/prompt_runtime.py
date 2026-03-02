@@ -20,6 +20,7 @@ _REPAIR_MAX_RE = re.compile(r"return at most\s+(\d+)\s+skills", re.IGNORECASE)
 
 
 def _safe_int(v: Any, default: int) -> int:
+    """Run safe int."""
     try:
         return int(v)
     except Exception:
@@ -27,6 +28,7 @@ def _safe_int(v: Any, default: int) -> int:
 
 
 def _extract_max_candidates(system: str, user: str) -> int:
+    """Run extract max candidates."""
     m = _REPAIR_MAX_RE.search(str(system or ""))
     if m:
         return max(1, _safe_int(m.group(1), 1))
@@ -52,6 +54,7 @@ def _extract_max_candidates(system: str, user: str) -> int:
 
 
 def _detect_prompt_kind(system: str) -> str:
+    """Run detect prompt kind."""
     s = str(system or "").strip()
     if not s:
         return ""
@@ -77,10 +80,12 @@ class OfflinePromptSwitchLLM(LLM):
     """
 
     def __init__(self, base: LLM, *, channel: str) -> None:
+        """Run init."""
         self._base = base
         self._channel = str(channel or "").strip().lower()
 
     def _rewrite_system(self, *, system: Optional[str], user: str) -> Optional[str]:
+        """Run rewrite system."""
         src = str(system or "")
         kind = _detect_prompt_kind(src)
         if not kind:
@@ -105,6 +110,7 @@ class OfflinePromptSwitchLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         system2 = self._rewrite_system(system=system, user=user)
         return self._base.complete(system=system2, user=user, temperature=temperature)
 
@@ -115,6 +121,7 @@ class OfflinePromptSwitchLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> Iterator[str]:
+        """Run stream complete."""
         system2 = self._rewrite_system(system=system, user=user)
         return self._base.stream_complete(system=system2, user=user, temperature=temperature)
 
@@ -126,6 +133,7 @@ def _patch_attr(
     channel: str,
     changed: List[Tuple[Any, str, Any]],
 ) -> None:
+    """Run patch attr."""
     if target is None or not hasattr(target, attr):
         return
     cur = getattr(target, attr)

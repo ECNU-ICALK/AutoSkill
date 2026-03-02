@@ -41,6 +41,7 @@ _HISTORY_LIMIT = 30
 
 
 def _name_similarity(a: str, b: str) -> float:
+    """Run name similarity."""
     a_tokens = {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(a or "").lower())}
     b_tokens = {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(b or "").lower())}
     if not a_tokens or not b_tokens:
@@ -53,10 +54,12 @@ def _name_similarity(a: str, b: str) -> float:
 
 
 def _token_set(text: str) -> set[str]:
+    """Run token set."""
     return {m.group(0) for m in _NAME_TOKEN_RE.finditer(str(text or "").lower())}
 
 
 def _overlap_ratio(a: set[str], b: set[str]) -> float:
+    """Run overlap ratio."""
     if not a or not b:
         return 0.0
     inter = len(a & b)
@@ -67,6 +70,7 @@ def _overlap_ratio(a: set[str], b: set[str]) -> float:
 
 
 def _signal_overlap(existing: Skill, candidate: SkillCandidate) -> float:
+    """Run signal overlap."""
     existing_signal = "\n".join(
         [
             str(existing.name or ""),
@@ -87,6 +91,7 @@ def _signal_overlap(existing: Skill, candidate: SkillCandidate) -> float:
 
 
 def _clip01(x: float) -> float:
+    """Run clip01."""
     v = float(x)
     if v < 0.0:
         return 0.0
@@ -96,6 +101,7 @@ def _clip01(x: float) -> float:
 
 
 def _candidate_identity_desc_norm(cand: SkillCandidate) -> str:
+    """Run candidate identity desc norm."""
     return identity_desc_norm_from_fields(
         description=str(getattr(cand, "description", "") or ""),
         name=str(getattr(cand, "name", "") or ""),
@@ -103,6 +109,7 @@ def _candidate_identity_desc_norm(cand: SkillCandidate) -> str:
 
 
 def _skill_identity_desc_norm(skill: Skill) -> str:
+    """Run skill identity desc norm."""
     md = dict(getattr(skill, "metadata", {}) or {})
     from_md = normalize_identity_text(str(md.get(META_IDENTITY_DESC_NORM) or ""))
     if from_md:
@@ -114,6 +121,7 @@ def _skill_identity_desc_norm(skill: Skill) -> str:
 
 
 def _sort_skills_by_recency(skills: List[Skill]) -> List[Skill]:
+    """Run sort skills by recency."""
     return sorted(
         list(skills or []),
         key=lambda s: (
@@ -318,11 +326,13 @@ def _json_from_llm_decision(text: str) -> Dict:
 
 
 def _is_library_skill(skill: Skill) -> bool:
+    """Run is library skill."""
     owner = str(getattr(skill, "user_id", "") or "").strip().lower()
     return owner.startswith("library:")
 
 
 def _normalize_action(action: str) -> str:
+    """Run normalize action."""
     a = str(action or "").strip().lower()
     if a in {"delete", "drop", "ignore", "skip"}:
         return "discard"
@@ -336,6 +346,7 @@ def _normalize_action(action: str) -> str:
 
 
 def _hit_for_llm(hit) -> Dict:
+    """Run hit for llm."""
     skill = getattr(hit, "skill", None)
     score = float(getattr(hit, "score", 0.0) or 0.0)
     if skill is None:
@@ -356,6 +367,7 @@ def _hit_for_llm(hit) -> Dict:
 
 
 def _ensure_skill_in_hits(hits: List, skill: Optional[Skill], score: float = 0.0) -> List:
+    """Run ensure skill in hits."""
     if skill is None:
         return list(hits or [])
     for h in hits or []:
@@ -513,6 +525,7 @@ class SkillMaintainer:
         merge_gate_cache: Dict[str, bool] = {}
 
         def _persist_merged(target: Skill) -> Skill:
+            """Run persist merged."""
             merged = (
                 _merge_with_llm(self._llm, target, cand)
                 if self._llm is not None
@@ -537,6 +550,7 @@ class SkillMaintainer:
             return merged
 
         def _can_merge_to(target: Skill, score: float, *, threshold: float) -> bool:
+            """Run can merge to."""
             sid = str(getattr(target, "id", "") or "")
             cache_key = f"{sid}|{round(float(score or 0.0), 6)}|{round(float(threshold or 0.0), 6)}"
             cached = merge_gate_cache.get(cache_key)
@@ -630,6 +644,7 @@ class SkillMaintainer:
         best_library = next((h for h in similar if _is_library_skill(h.skill)), None)
 
         def _create_new() -> Skill:
+            """Run create new."""
             new_name = cand.name.strip()
             new_description = cand.description.strip() or new_name
             created = Skill(
@@ -667,6 +682,33 @@ class SkillMaintainer:
                 )
             except Exception:
                 action, target_skill_id = "", None
+
+            # Guardrail: when candidate is semantically the same capability as existing skills,
+            # do not allow "add" even if the LLM proposes it.
+            if action == "add":
+                if (
+                    best_user
+                    and best_user.score >= self._config.dedupe_similarity_threshold
+                    and _can_merge_to(
+                        best_user.skill,
+                        float(best_user.score),
+                        threshold=float(self._config.dedupe_similarity_threshold),
+                    )
+                ):
+                    action = "merge"
+                    target_skill_id = str(getattr(best_user.skill, "id", "") or "") or None
+                elif (
+                    best_any
+                    and best_library
+                    and best_library.score >= self._config.dedupe_similarity_threshold
+                    and _can_merge_to(
+                        best_library.skill,
+                        float(best_library.score),
+                        threshold=float(self._config.dedupe_similarity_threshold),
+                    )
+                ):
+                    action = "discard"
+                    target_skill_id = None
 
             if action == "discard":
                 return None
@@ -776,7 +818,17 @@ def _decide_candidate_action_with_llm(
         "- discard: do not store the candidate\n"
         "\n"
         "### Decision Procedure (follow in order)\n"
-        "0) Topic continuity and family check\n"
+        "0) Capability-overlap hard gate\n"
+        "- If candidate is semantically the SAME capability as any existing skill (after de-identification), action MUST NOT be add.\n"
+        "- Under same-capability overlap, choose only merge or discard.\n"
+        "- If same-capability overlap is with a USER skill, prefer merge to that user skill.\n"
+        "- If overlap is only with shared/library skill and candidate adds no durable user-specific improvement, choose discard.\n"
+        "0.1) Name-collision hard gate\n"
+        "- Normalize names (trim + lowercase; ignore minor whitespace/punctuation variance) before comparison.\n"
+        "- If candidate.name matches any existing skill name after normalization, action MUST NOT be add.\n"
+        "- Under same-name collision, choose only merge or discard.\n"
+        "- If choosing merge under same-name collision, prefer the matching-name USER skill as target_skill_id when valid.\n"
+        "1) Topic continuity and family check\n"
         "- Compare candidate with existing USER skills to determine whether recent intent continues the same topic.\n"
         "- First locate a boundary turn in recent conversation (where user starts a new objective/deliverable/channel/task).\n"
         "- If boundary exists, prefer post-boundary intent as the active work item; treat pre-boundary context as background.\n"
@@ -787,12 +839,12 @@ def _decide_candidate_action_with_llm(
         "- Infer capability family first (for example: writing/editing, coding/debugging, analysis/modeling, planning/operations).\n"
         "- If candidate and target skill are in different capability families, choose add.\n"
         "- Treat family switch as stronger evidence than embedding similarity.\n"
-        "1) Discard gate\n"
+        "2) Discard gate\n"
         "- Choose discard if candidate is generic, low-signal, not clearly reusable, or adds no durable user-specific value.\n"
         "- Choose discard if a shared library skill already covers it and candidate has no stable improvement.\n"
         "- Choose discard if candidate mainly contains one-off case entities (orgs, names, addresses, project IDs, URLs, exact dates/budgets) and cannot survive de-identification.\n"
         "- Do NOT discard when candidate contributes durable user-level implementation/output policy constraints that can guide future similar tasks.\n"
-        "2) Capability identity test against USER skills\n"
+        "3) Capability identity test against USER skills\n"
         "- Compare candidate vs each user skill on four axes:\n"
         "  a) core job-to-be-done,\n"
         "  b) output contract/deliverable type,\n"
@@ -804,17 +856,20 @@ def _decide_candidate_action_with_llm(
         "- Ignore generic quality constraints (for example: be concrete, avoid hallucination, concise style, reliable citations) as identity signals; these alone must not drive merge.\n"
         "- Treat as SAME capability only when the core method and completion criteria substantially match after removing instance details.\n"
         "- If completion criteria differ (even with similar style constraints), treat as different capability.\n"
-        "3) Merge vs add\n"
-        "- If SAME capability with any user skill: choose merge to the best matching target_skill_id.\n"
+        "4) Merge vs add\n"
+        "- If SAME capability with any user skill: choose merge to the best matching target_skill_id; do not choose add.\n"
         "- If candidate is mostly an iteration (clearer prompt, stronger checks, extra constraints, better metadata), choose merge.\n"
         "- If candidate adds reusable implementation/output policy for the same job-to-be-done, choose merge rather than discard.\n"
         "- If differences are mostly topic/entity substitution but the method and quality bar are the same, choose merge.\n"
         "- Require continuity of ongoing work item before merge; otherwise choose add.\n"
         "- If topic continuity is broken (new objective/deliverable/audience in recent intent), choose add.\n"
+        "- Same-capability overlap and same-name collision override add: if either is true, do not choose add.\n"
         "- Choose add only if candidate introduces a durable non-overlapping capability that remains distinct after removing instance details.\n"
-        "4) Tie-breakers\n"
+        "5) Tie-breakers\n"
         "- On uncertainty: choose add when topic continuity is weak/unclear; choose merge only when continuity is strong.\n"
         "- Never choose add only due renaming, wording/style change, or example replacement.\n"
+        "- Under same-capability overlap, uncertainty tie-breaker should prefer merge/discard, never add.\n"
+        "- Under same-name collision, uncertainty tie-breaker should prefer merge/discard, never add.\n"
         "- Similarity scores are hints, not the sole criterion.\n"
         "\n"
         "### Constraints\n"
@@ -860,6 +915,7 @@ def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
     """
 
     def _instruction_quality_score(text: str) -> int:
+        """Run instruction quality score."""
         s = str(text or "").strip()
         if not s:
             return 0
@@ -1025,6 +1081,7 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
 
 
 def _examples_from_obj(obj) -> List[SkillExample]:
+    """Run examples from obj."""
     if not isinstance(obj, list):
         return []
     out: List[SkillExample] = []
@@ -1045,6 +1102,7 @@ def _examples_from_obj(obj) -> List[SkillExample]:
 
 
 def _dedupe(items: List[str]) -> List[str]:
+    """Run dedupe."""
     out: List[str] = []
     seen = set()
     for it in items:
@@ -1060,6 +1118,7 @@ def _dedupe(items: List[str]) -> List[str]:
 
 
 def _merge_examples(old: List[SkillExample], new: List[SkillExample]) -> List[SkillExample]:
+    """Run merge examples."""
     out: List[SkillExample] = []
     seen = set()
     for e in (old or []) + (new or []):
@@ -1072,6 +1131,7 @@ def _merge_examples(old: List[SkillExample], new: List[SkillExample]) -> List[Sk
 
 
 def _bump_patch(version: str) -> str:
+    """Run bump patch."""
     parts = [p for p in str(version or "").split(".") if p.strip().isdigit()]
     if len(parts) != 3:
         return "0.1.1"
@@ -1102,6 +1162,7 @@ def _merge_metadata(old: Dict, extra: Optional[Dict], cand: SkillCandidate) -> D
 
 
 def _with_identity_metadata(metadata: Dict, *, name: str, description: str) -> Dict:
+    """Run with identity metadata."""
     out = dict(metadata or {})
     desc_norm = identity_desc_norm_from_fields(description=description, name=name)
     if desc_norm:
@@ -1111,6 +1172,7 @@ def _with_identity_metadata(metadata: Dict, *, name: str, description: str) -> D
 
 
 def _skill_snapshot_for_history(skill: Skill) -> Dict[str, Optional[str]]:
+    """Run skill snapshot for history."""
     files = dict(getattr(skill, "files", {}) or {})
     return {
         "version": str(getattr(skill, "version", "") or ""),
@@ -1123,6 +1185,7 @@ def _skill_snapshot_for_history(skill: Skill) -> Dict[str, Optional[str]]:
 
 
 def _append_version_snapshot(metadata: Dict, skill: Skill) -> Dict:
+    """Run append version snapshot."""
     out = dict(metadata or {})
     hist_raw = out.get(_HISTORY_KEY)
     hist: List[Dict] = []

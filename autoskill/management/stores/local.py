@@ -43,12 +43,14 @@ from .base import SkillStore
 
 
 def _dot(a: List[float], b: List[float]) -> float:
+    """Run dot."""
     if not a or not b or len(a) != len(b):
         return 0.0
     return float(sum(x * y for x, y in zip(a, b)))
 
 
 def _skill_to_text(skill: Skill) -> str:
+    """Run skill to text."""
     triggers = "\n".join(skill.triggers or [])
     tags = " ".join(skill.tags or [])
     return (
@@ -61,10 +63,12 @@ def _skill_to_text(skill: Skill) -> str:
 
 
 def _hash_text(text: str) -> str:
+    """Run hash text."""
     return hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()
 
 
 def _passes_filters(skill: Skill, filters: Dict[str, Any]) -> bool:
+    """Run passes filters."""
     want_tags = filters.get("tags")
     if want_tags:
         want_set = {str(t).strip().lower() for t in want_tags if str(t).strip()}
@@ -86,6 +90,7 @@ def _passes_filters(skill: Skill, filters: Dict[str, Any]) -> bool:
 
 
 def _safe_rel_path(path: str) -> str:
+    """Run safe rel path."""
     rel = str(path or "").lstrip("/").replace("\\", "/")
     parts: List[str] = []
     for p in rel.split("/"):
@@ -101,6 +106,7 @@ _ID_LINE_RE = re.compile(r"^\s*id\s*:\s*(.*?)\s*$", re.IGNORECASE)
 
 
 def _skill_md_has_nonempty_id(md: str) -> bool:
+    """Run skill md has nonempty id."""
     lines = (md or "").splitlines()
     if not lines or lines[0].strip() != "---":
         return False
@@ -1042,6 +1048,7 @@ class LocalSkillStore(SkillStore):
             return
 
     def _identity_desc_norm_for_skill(self, skill: Skill) -> str:
+        """Run identity desc norm for skill."""
         md = dict(getattr(skill, "metadata", {}) or {})
         from_md = normalize_identity_text(str(md.get(META_IDENTITY_DESC_NORM) or ""))
         if from_md:
@@ -1052,12 +1059,14 @@ class LocalSkillStore(SkillStore):
         )
 
     def _rebuild_identity_desc_index_locked(self) -> None:
+        """Run rebuild identity desc index locked."""
         self._identity_desc_index_by_user = {}
         self._identity_desc_key_by_skill = {}
         for rec in self._records.values():
             self._index_identity_desc_locked(rec)
 
     def _rebuild_bm25_docs_locked(self) -> None:
+        """Run rebuild bm25 docs locked."""
         self._bm25_docs_by_id = {}
         self._bm25_doc_hash_by_id = {}
         for rec in self._records.values():
@@ -1069,6 +1078,7 @@ class LocalSkillStore(SkillStore):
             self._bm25_doc_hash_by_id[sid] = _hash_text(txt)
 
     def _set_bm25_doc_locked(self, skill: Skill) -> None:
+        """Run set bm25 doc locked."""
         sid = str(getattr(skill, "id", "") or "").strip()
         if not sid:
             return
@@ -1086,6 +1096,7 @@ class LocalSkillStore(SkillStore):
                 self._bm25_index.save()
 
     def _remove_bm25_doc_locked(self, skill_id: str) -> None:
+        """Run remove bm25 doc locked."""
         sid = str(skill_id or "").strip()
         if not sid:
             return
@@ -1097,6 +1108,7 @@ class LocalSkillStore(SkillStore):
                 self._bm25_index.save()
 
     def _sync_bm25_index_locked(self) -> None:
+        """Run sync bm25 index locked."""
         if self._bm25_index is None:
             return
         self._ensure_bm25_index_health_locked(force=False)
@@ -1153,6 +1165,7 @@ class LocalSkillStore(SkillStore):
         self._bm25_health_checked = True
 
     def _load_vector_doc_hash_manifest(self) -> None:
+        """Run load vector doc hash manifest."""
         self._vector_doc_hash_by_id = {}
         if not self._cache_vectors:
             return
@@ -1175,6 +1188,7 @@ class LocalSkillStore(SkillStore):
             self._vector_doc_hash_by_id = {}
 
     def _save_vector_doc_hash_manifest_locked(self) -> None:
+        """Run save vector doc hash manifest locked."""
         if not self._cache_vectors:
             return
         path = str(self._vector_doc_hash_path or "").strip()
@@ -1190,21 +1204,25 @@ class LocalSkillStore(SkillStore):
             return
 
     def _skill_text_hash(self, skill: Skill) -> str:
+        """Run skill text hash."""
         return _hash_text(_skill_to_text(skill))
 
     def _set_vector_doc_hash_locked(self, skill: Skill) -> None:
+        """Run set vector doc hash locked."""
         sid = str(getattr(skill, "id", "") or "").strip()
         if not sid:
             return
         self._vector_doc_hash_by_id[sid] = self._skill_text_hash(skill)
 
     def _remove_vector_doc_hash_locked(self, skill_id: str) -> None:
+        """Run remove vector doc hash locked."""
         sid = str(skill_id or "").strip()
         if not sid:
             return
         self._vector_doc_hash_by_id.pop(sid, None)
 
     def _sync_vector_doc_hash_locked(self) -> None:
+        """Run sync vector doc hash locked."""
         live_ids = {str(sid).strip() for sid in self._records.keys() if str(sid).strip()}
         changed = False
         for sid in list(self._vector_doc_hash_by_id.keys()):
@@ -1216,6 +1234,7 @@ class LocalSkillStore(SkillStore):
             self._save_vector_doc_hash_manifest_locked()
 
     def _has_fresh_vector_locked(self, rec: _Record) -> bool:
+        """Run has fresh vector locked."""
         sid = str(getattr(rec.skill, "id", "") or "").strip()
         if not sid:
             return False
@@ -1267,6 +1286,7 @@ class LocalSkillStore(SkillStore):
             self._save_vector_doc_hash_manifest_locked()
 
     def _deindex_identity_desc_locked(self, skill_id: str) -> None:
+        """Run deindex identity desc locked."""
         sid = str(skill_id or "").strip()
         if not sid:
             return
@@ -1287,6 +1307,7 @@ class LocalSkillStore(SkillStore):
             self._identity_desc_index_by_user.pop(uid, None)
 
     def _index_identity_desc_locked(self, rec: _Record) -> None:
+        """Run index identity desc locked."""
         if rec.scope != "user":
             return
         uid = str(rec.owner or "").strip()
@@ -1367,6 +1388,7 @@ class LocalSkillStore(SkillStore):
             used_set = {os.path.abspath(p) for p in used_dirs if str(p or "").strip()}
 
         def _is_taken(path: str) -> bool:
+            """Run is taken."""
             p_abs = os.path.abspath(path)
             if exclude_abs and p_abs == exclude_abs:
                 return False

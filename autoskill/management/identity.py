@@ -21,6 +21,7 @@ _NOISE_RE = re.compile(r"[^\w\u4e00-\u9fff]+", re.UNICODE)
 
 
 def normalize_identity_text(text: str) -> str:
+    """Run normalize identity text."""
     s = unicodedata.normalize("NFKC", str(text or ""))
     s = s.strip().lower()
     if not s:
@@ -31,11 +32,13 @@ def normalize_identity_text(text: str) -> str:
 
 
 def identity_desc_norm_from_fields(*, description: str, name: str) -> str:
+    """Run identity desc norm from fields."""
     base = str(description or "").strip() or str(name or "").strip()
     return normalize_identity_text(base)
 
 
 def identity_hash_from_norm(norm: str) -> str:
+    """Run identity hash from norm."""
     key = str(norm or "").strip()
     if not key:
         return ""

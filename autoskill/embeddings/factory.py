@@ -45,6 +45,7 @@ _EMBEDDING_ALIASES: Dict[str, str] = {
 
 
 def _normalize_provider(name: Any) -> str:
+    """Run normalize provider."""
     s = str(name or "hashing").strip().lower()
     if not s:
         s = "hashing"
@@ -52,6 +53,7 @@ def _normalize_provider(name: Any) -> str:
 
 
 def _load_builder_from_path(path: str) -> EmbeddingBuilder:
+    """Run load builder from path."""
     spec = str(path or "").strip()
     if not spec:
         raise ValueError("Empty connector_factory")
@@ -99,19 +101,23 @@ def register_embedding_connector(
 
 
 def list_embedding_connectors() -> List[str]:
+    """Run list embedding connectors."""
     _ensure_builtins_registered()
     return sorted(_EMBEDDING_BUILDERS.keys())
 
 
 def _build_hashing(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build hashing."""
     return HashingEmbedding(dims=int(config.get("dims", 256)))
 
 
 def _build_none(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build none."""
     return DisabledEmbedding()
 
 
 def _build_openai(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build openai."""
     return OpenAIEmbedding(
         model=str(config.get("model", "text-embedding-3-small")),
         api_key=config.get("api_key"),
@@ -125,6 +131,7 @@ def _build_openai(config: Dict[str, Any]) -> EmbeddingModel:
 
 
 def _build_generic(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build generic."""
     base_url = str(
         config.get("url")
         or config.get("base_url")
@@ -143,6 +150,7 @@ def _build_generic(config: Dict[str, Any]) -> EmbeddingModel:
 
 
 def _build_dashscope(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build dashscope."""
     extra = config.get("extra_body") or config.get("extra_payload") or {}
     extra_dict = dict(extra) if isinstance(extra, dict) else {}
     extra_dict.setdefault("dimensions", 1024)
@@ -160,6 +168,7 @@ def _build_dashscope(config: Dict[str, Any]) -> EmbeddingModel:
 
 
 def _build_glm(config: Dict[str, Any]) -> EmbeddingModel:
+    """Run build glm."""
     return BigModelEmbedding3(
         model=str(config.get("model", "embedding-3")),
         api_key=config.get("api_key"),
@@ -177,6 +186,7 @@ def _build_glm(config: Dict[str, Any]) -> EmbeddingModel:
 
 
 def _ensure_builtins_registered() -> None:
+    """Run ensure builtins registered."""
     if _EMBEDDING_BUILDERS:
         return
     register_embedding_connector("none", _build_none, aliases=["off", "disabled", "null", "no_embedding", "no-embedding"])

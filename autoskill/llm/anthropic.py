@@ -35,6 +35,7 @@ class AnthropicLLM(LLM):
         temperature: float = 0.0,
     ) -> str:
         # Prefer explicit api_key; fall back to env var ANTHROPIC_API_KEY.
+        """Run complete."""
         key = self.api_key or os.getenv("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("AnthropicLLM requires api_key or ANTHROPIC_API_KEY")

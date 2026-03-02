@@ -26,22 +26,27 @@ class VectorIndex(ABC):
     @property
     @abstractmethod
     def dims(self) -> Optional[int]:
+        """Run dims."""
         raise NotImplementedError
 
     @abstractmethod
     def has(self, key: str) -> bool:
+        """Run has."""
         raise NotImplementedError
 
     @abstractmethod
     def get(self, key: str) -> Optional[List[float]]:
+        """Run get."""
         raise NotImplementedError
 
     @abstractmethod
     def upsert(self, key: str, vector: Sequence[float]) -> None:
+        """Run upsert."""
         raise NotImplementedError
 
     @abstractmethod
     def delete(self, key: str) -> bool:
+        """Run delete."""
         raise NotImplementedError
 
     @abstractmethod
@@ -52,18 +57,22 @@ class VectorIndex(ABC):
         keys: Optional[Iterable[str]] = None,
         top_k: int = 5,
     ) -> List[Tuple[str, float]]:
+        """Run search."""
         raise NotImplementedError
 
     @abstractmethod
     def load(self) -> None:
+        """Run load."""
         raise NotImplementedError
 
     @abstractmethod
     def save(self) -> None:
+        """Run save."""
         raise NotImplementedError
 
     @abstractmethod
     def reset(self, *, dims: Optional[int] = None) -> None:
+        """Run reset."""
         raise NotImplementedError
 
 

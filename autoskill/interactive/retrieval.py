@@ -16,6 +16,7 @@ from ..models import SkillHit
 
 
 def normalize_scope(scope: str) -> str:
+    """Run normalize scope."""
     s = str(scope or "all").strip().lower()
     if s == "common":
         s = "library"
@@ -25,6 +26,7 @@ def normalize_scope(scope: str) -> str:
 
 
 def _score_of(hit: SkillHit) -> float:
+    """Run score of."""
     return float(getattr(hit, "score", 0.0) or 0.0)
 
 
@@ -46,6 +48,7 @@ def _hit_scope_match(hit: SkillHit, *, one_scope: str, user_id: str) -> bool:
 
 
 def _filter_by_min_score(hits: List[SkillHit], *, min_score: float) -> List[SkillHit]:
+    """Run filter by min score."""
     if not hits or min_score <= 0:
         return list(hits or [])
     out: List[SkillHit] = []
@@ -85,6 +88,7 @@ def retrieve_hits_by_scope(
     errors: Dict[str, str] = {}
 
     def _search(one_scope: str) -> List[SkillHit]:
+        """Run search."""
         try:
             out = sdk.search(
                 query,

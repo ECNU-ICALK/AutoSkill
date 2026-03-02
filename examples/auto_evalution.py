@@ -57,6 +57,7 @@ class EvalScenario:
 
 
 def _short_text(text: Any, limit: int = 120) -> str:
+    """Run short text."""
     s = str(text or "").replace("\n", " ").strip()
     if len(s) <= int(limit):
         return s
@@ -64,17 +65,20 @@ def _short_text(text: Any, limit: int = 120) -> str:
 
 
 def _has_cjk(text: Any) -> bool:
+    """Run has cjk."""
     s = str(text or "")
     return any(("\u4e00" <= ch <= "\u9fff") for ch in s)
 
 
 class HTTPClient:
     def __init__(self, *, base_url: str, api_key: str, timeout_s: float) -> None:
+        """Run init."""
         self.base_url = str(base_url or "").rstrip("/")
         self.api_key = str(api_key or "").strip()
         self.timeout_s = float(timeout_s)
 
     def _headers(self, *, json_body: bool, stream: bool = False) -> Dict[str, str]:
+        """Run headers."""
         out: Dict[str, str] = {"Accept": ("text/event-stream" if stream else "application/json")}
         if json_body:
             out["Content-Type"] = "application/json"
@@ -89,6 +93,7 @@ class HTTPClient:
         path: str,
         payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Run request json."""
         url = f"{self.base_url}{path}"
         data = None
         if payload is not None:
@@ -123,6 +128,7 @@ class HTTPClient:
         return obj
 
     def request_stream_chat(self, *, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Run request stream chat."""
         url = f"{self.base_url}{path}"
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
@@ -199,6 +205,7 @@ class OpenAICompatLLMClient:
     """
 
     def __init__(self, *, base_url: str, api_key: str, model: str, timeout_s: float) -> None:
+        """Run init."""
         self.http = HTTPClient(base_url=base_url, api_key=api_key, timeout_s=timeout_s)
         self.model = str(model or "").strip()
         if not self.model:
@@ -211,6 +218,7 @@ class OpenAICompatLLMClient:
         temperature: float = 0.2,
         max_tokens: int = 1024,
     ) -> Dict[str, Any]:
+        """Run chat json."""
         payload = {
             "model": self.model,
             "messages": messages,
@@ -227,11 +235,13 @@ class OpenAICompatLLMClient:
         temperature: float = 0.2,
         max_tokens: int = 1024,
     ) -> str:
+        """Run chat text."""
         obj = self.chat_json(messages=messages, temperature=temperature, max_tokens=max_tokens)
         return _extract_chat_content(obj)
 
 
 def _extract_chat_content(obj: Dict[str, Any]) -> str:
+    """Run extract chat content."""
     choices = obj.get("choices")
     if not isinstance(choices, list) or not choices:
         return ""
@@ -243,6 +253,7 @@ def _extract_chat_content(obj: Dict[str, Any]) -> str:
 
 
 def _json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """Run json from text."""
     raw = str(text or "").strip()
     if not raw:
         return None
@@ -268,6 +279,7 @@ def _json_from_text(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _pick_chat_model(client: HTTPClient, *, preferred: str = "") -> str:
+    """Run pick chat model."""
     if str(preferred or "").strip():
         return str(preferred).strip()
     obj = client.request_json(method="GET", path="/v1/models")
@@ -282,6 +294,7 @@ def _pick_chat_model(client: HTTPClient, *, preferred: str = "") -> str:
 
 
 def _proxy_chat_payload(user_id: str, *, stream: bool, model: str, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Run proxy chat payload."""
     return {
         "model": str(model),
         "stream": bool(stream),
@@ -300,6 +313,7 @@ def _poll_extraction_event(
     timeout_s: float,
     poll_interval_s: float = 0.6,
 ) -> Dict[str, Any]:
+    """Run poll extraction event."""
     terminal = {"completed", "failed"}
     deadline = time.time() + float(timeout_s)
     last: Dict[str, Any] = {"job_id": str(job_id), "status": "unknown"}
@@ -320,6 +334,7 @@ def _poll_extraction_event(
 
 
 def _build_eval_templates() -> List[EvalTemplate]:
+    """Run build eval templates."""
     variants_pos_zh: List[Tuple[str, str, str]] = [
         ("budget", "预算再压缩10%，给不降核心质量的替代方案。", "并附预算压缩版替代方案。"),
         ("timeline", "把时间压缩一周，说明哪些步骤不能删。", "并附时间压缩一周的执行版本。"),
@@ -793,6 +808,7 @@ def _simulate_turns_with_llm(
     template: EvalTemplate,
     target_turns: int,
 ) -> Optional[List[str]]:
+    """Run simulate turns with llm."""
     system = (
         "You are a user-turn generator for benchmark conversations.\n"
         "Return strict JSON only: {\"turns\":[\"...\", ...]}.\n"
@@ -839,6 +855,7 @@ def _sample_scenarios(
     simulator: Optional[OpenAICompatLLMClient],
     verbose: bool,
 ) -> List[EvalScenario]:
+    """Run sample scenarios."""
     templates = _build_eval_templates()
     if not templates:
         return []
@@ -900,6 +917,7 @@ def _proxy_chat_once(
     chat_stream: bool,
     turn_timeout_s: float,
 ) -> Tuple[str, Dict[str, Any]]:
+    """Run proxy chat once."""
     payload = _proxy_chat_payload(
         user_id=user_id,
         stream=bool(chat_stream),
@@ -937,6 +955,7 @@ def _judge_task_success(
     stage: str,
     success_threshold: float,
 ) -> Dict[str, Any]:
+    """Run judge task success."""
     system = (
         "You are a strict task-success judge for AutoSkill evaluation.\n"
         "Score only the assistant answer quality against user requirements and constraints.\n"
@@ -1063,6 +1082,7 @@ def _evaluate_stage_with_queries(
     requirement_contract: Optional[Dict[str, Any]],
     success_threshold: float,
 ) -> Dict[str, Any]:
+    """Run evaluate stage with queries."""
     used_queries = [str(q).strip() for q in list(queries or []) if str(q).strip()]
     if not used_queries:
         used_queries = [str(scenario.objective or "").strip() or "Provide your best final answer for this task."]
@@ -1210,6 +1230,7 @@ def _run_eval_case_evolution(
     max_train_turns: int,
     verbose: bool,
 ) -> Dict[str, Any]:
+    """Run run eval case evolution."""
     case_start = time.time()
     base_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_base"
     evo_user = f"{user_prefix}_{scenario.scenario_id}_{run_nonce}_evo"
@@ -1432,6 +1453,7 @@ def run_eval_evolution(
     max_train_turns: int,
     verbose: bool,
 ) -> Dict[str, Any]:
+    """Run run eval evolution."""
     scenarios = _sample_scenarios(
         runs=eval_runs,
         seed=eval_seed,
@@ -1582,6 +1604,7 @@ def run_eval_evolution(
 
 
 def _build_case_analysis_rows(eval_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Run build case analysis rows."""
     rows: List[Dict[str, Any]] = []
     cases = eval_result.get("cases") if isinstance(eval_result, dict) else None
     if not isinstance(cases, list):
@@ -1669,6 +1692,7 @@ def _persist_eval_outputs(
     eval_result: Dict[str, Any],
     report_json_arg: str,
 ) -> Tuple[str, str]:
+    """Run persist eval outputs."""
     ts = int(time.time())
     requested = str(report_json_arg or "").strip()
     if requested:
@@ -1706,6 +1730,7 @@ def _build_simulator_client(
     default_model: str,
     timeout_s: float,
 ) -> Optional[OpenAICompatLLMClient]:
+    """Run build simulator client."""
     base, api_key, _ = _resolve_llm_endpoint(
         provider=str(sim_provider or ""),
         explicit_base_url="",
@@ -1739,6 +1764,7 @@ def _build_judge_client(
     default_model: str,
     timeout_s: float,
 ) -> Optional[OpenAICompatLLMClient]:
+    """Run build judge client."""
     base, api_key, _ = _resolve_llm_endpoint(
         provider=str(judge_provider or ""),
         explicit_base_url="",
@@ -1763,6 +1789,7 @@ def _build_judge_client(
 
 
 def _normalize_provider(provider: str) -> str:
+    """Run normalize provider."""
     p = str(provider or "").strip().lower()
     aliases = {
         "qwen": "dashscope",
@@ -1780,6 +1807,7 @@ def _normalize_provider(provider: str) -> str:
 
 
 def _strip_last_v1(base_url: str) -> str:
+    """Run strip last v1."""
     s = str(base_url or "").strip().rstrip("/")
     if s.endswith("/v1"):
         return s[: -len("/v1")]
@@ -1794,6 +1822,7 @@ def _resolve_llm_endpoint(
     default_base_url: str,
     default_api_key: str,
 ) -> Tuple[str, str, str]:
+    """Run resolve llm endpoint."""
     p = _normalize_provider(provider)
     base = str(explicit_base_url or "").strip()
     key = str(explicit_api_key or "").strip()
@@ -1839,6 +1868,7 @@ def _resolve_llm_endpoint(
 
 
 def main() -> None:
+    """Run main."""
     parser = argparse.ArgumentParser(description="AutoSkill automatic evolution evaluation")
     parser.add_argument("--mode", default="eval", choices=["eval"])
     parser.add_argument("--eval-strategy", default="evolution", choices=["evolution"])

@@ -29,6 +29,7 @@ _CJK_RANGES: Tuple[Tuple[int, int], ...] = (
 
 
 def _is_cjk_ideograph(ch: str) -> bool:
+    """Run is cjk ideograph."""
     if not ch:
         return False
     code = ord(ch)
@@ -39,10 +40,12 @@ def _is_cjk_ideograph(ch: str) -> bool:
 
 
 def _is_ascii_alnum(ch: str) -> bool:
+    """Run is ascii alnum."""
     return bool(ch) and ch.isascii() and ch.isalnum()
 
 
 def _is_ascii_word_char(ch: str) -> bool:
+    """Run is ascii word char."""
     if not ch or not ch.isascii():
         return False
     if ch.isalnum():
@@ -86,6 +89,7 @@ def text_units(text: str) -> int:
 
 
 def _clip_head_no_marker(text: str, *, max_units: int) -> str:
+    """Run clip head no marker."""
     s = str(text or "")
     limit = int(max_units or 0)
     if limit <= 0 or not s:
@@ -126,6 +130,7 @@ def _clip_head_no_marker(text: str, *, max_units: int) -> str:
 
 
 def _clip_tail_no_marker(text: str, *, max_units: int) -> str:
+    """Run clip tail no marker."""
     s = str(text or "")
     limit = int(max_units or 0)
     if limit <= 0 or not s:
@@ -171,6 +176,7 @@ def truncate_keep_head(
     max_units: int,
     marker: str = "\n...[truncated]...\n",
 ) -> str:
+    """Run truncate keep head."""
     s = str(text or "")
     limit = int(max_units or 0)
     if limit <= 0 or not s:
@@ -193,6 +199,7 @@ def truncate_keep_tail(
     max_units: int,
     marker: str = "\n...[truncated]...\n",
 ) -> str:
+    """Run truncate keep tail."""
     s = str(text or "")
     limit = int(max_units or 0)
     if limit <= 0 or not s:
@@ -216,6 +223,7 @@ def truncate_keep_head_tail(
     head_ratio: float = 0.7,
     marker: str = "\n\n...[truncated]...\n\n",
 ) -> str:
+    """Run truncate keep head tail."""
     s = str(text or "")
     limit = int(max_units or 0)
     if limit <= 0 or not s:

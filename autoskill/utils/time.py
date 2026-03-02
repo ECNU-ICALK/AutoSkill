@@ -8,4 +8,5 @@ from datetime import datetime, timezone
 
 
 def now_iso() -> str:
+    """Run now iso."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

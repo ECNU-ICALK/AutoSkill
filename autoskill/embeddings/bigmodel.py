@@ -41,6 +41,7 @@ class BigModelEmbedding3(EmbeddingModel):
     min_text_chars: int = 512
 
     def __post_init__(self) -> None:
+        """Run post init."""
         self._auth = BigModelAuth(
             api_key=self.api_key,
             api_key_id=self.api_key_id,
@@ -51,6 +52,7 @@ class BigModelEmbedding3(EmbeddingModel):
         )
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         texts = [str(t or "") for t in (texts or [])]
         if not texts:
             return []
@@ -58,6 +60,7 @@ class BigModelEmbedding3(EmbeddingModel):
 
     def _embed_with_auto_split(self, texts: List[str]) -> List[List[float]]:
         # Pre-truncate very large inputs so a single huge skill cannot break embedding.
+        """Run embed with auto split."""
         texts2 = [truncate_keep_head_tail(t, max_units=int(self.max_text_chars or 0)) for t in texts]
         try:
             return self._embed_once(texts2)
@@ -80,6 +83,7 @@ class BigModelEmbedding3(EmbeddingModel):
             return left + right
 
     def _embed_once(self, texts: List[str]) -> List[List[float]]:
+        """Run embed once."""
         body = self._post(texts)
 
         try:
@@ -142,6 +146,7 @@ class BigModelEmbedding3(EmbeddingModel):
         retry_alternate_time_unit: bool = False,
         retry_auth_mode: Optional[str] = None,
     ) -> str:
+        """Run post."""
         url = self.base_url.rstrip("/") + "/embeddings"
         payload: Dict[str, Any] = {"model": self.model, "input": texts}
         if self.extra_body:
@@ -179,6 +184,7 @@ class BigModelEmbedding3(EmbeddingModel):
 
 
 def _find_embedding_items(obj: Any) -> List[Dict[str, Any]]:
+    """Run find embedding items."""
     if isinstance(obj, dict):
         data = obj.get("data")
         if isinstance(data, list) and all(isinstance(x, dict) for x in data):
@@ -191,6 +197,7 @@ def _find_embedding_items(obj: Any) -> List[Dict[str, Any]]:
 
 
 def _looks_like_auth_issue(obj: Any) -> bool:
+    """Run looks like auth issue."""
     if isinstance(obj, dict):
         http_status = obj.get("_http_status")
         if isinstance(http_status, int) and http_status in {401, 403}:
@@ -217,6 +224,7 @@ def _looks_like_auth_issue(obj: Any) -> bool:
 
 
 def _looks_like_request_too_large(message: str) -> bool:
+    """Run looks like request too large."""
     s = str(message or "").lower()
     needles = [
         "request entity too large",

@@ -17,12 +17,14 @@ from ..utils.units import text_units, truncate_keep_head_tail
 
 class EmbeddingsHTTPError(RuntimeError):
     def __init__(self, code: int, body: str) -> None:
+        """Run init."""
         self.code = int(code or 0)
         self.body = str(body or "")
         super().__init__(f"Embeddings HTTP {self.code}: {self.body}")
 
 
 def _looks_like_request_too_large(text: str) -> bool:
+    """Run looks like request too large."""
     s = str(text or "").lower()
     needles = [
         "request entity too large",
@@ -56,6 +58,7 @@ class OpenAIEmbedding(EmbeddingModel):
     extra_body: Optional[Dict[str, Any]] = None
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         key = self.api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OpenAIEmbedding requires api_key or OPENAI_API_KEY")
@@ -74,6 +77,7 @@ class OpenAIEmbedding(EmbeddingModel):
         return self._embed_with_fallback(texts2, key=key, depth=0)
 
     def _embed_with_fallback(self, texts: List[str], *, key: str, depth: int) -> List[List[float]]:
+        """Run embed with fallback."""
         if not texts:
             return []
         if depth > 6:
@@ -130,12 +134,14 @@ class OpenAIEmbedding(EmbeddingModel):
         return out
 
     def _embed_per_item(self, texts: List[str], *, key: str) -> List[List[float]]:
+        """Run embed per item."""
         out: List[List[float]] = []
         for t in texts:
             out.extend(self._embed_once([t], key=key))
         return out
 
     def _embed_once(self, texts: List[str], *, key: str) -> List[List[float]]:
+        """Run embed once."""
         base = self.base_url.rstrip("/")
         # Support both styles:
         # - https://api.openai.com

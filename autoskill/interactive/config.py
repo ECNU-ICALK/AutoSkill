@@ -52,6 +52,7 @@ class InteractiveConfig:
     assistant_temperature: float = 0.2
 
     def normalize(self) -> "InteractiveConfig":
+        """Run normalize."""
         self.store_dir = str(self.store_dir or default_store_path()).strip() or default_store_path()
 
         self.skill_scope = (self.skill_scope or "all").strip().lower()

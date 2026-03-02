@@ -29,6 +29,7 @@ from .interactive_chat import (
 
 
 def main() -> None:
+    """Run main."""
     parser = argparse.ArgumentParser(description="AutoSkill OpenAI-compatible proxy")
     parser.add_argument("--host", default=_env("AUTOSKILL_PROXY_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(_env("AUTOSKILL_PROXY_PORT", "9000")))

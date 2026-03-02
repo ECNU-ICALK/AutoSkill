@@ -19,6 +19,7 @@ class LLM(ABC):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         raise NotImplementedError
 
     def stream_complete(

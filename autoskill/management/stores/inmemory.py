@@ -21,6 +21,7 @@ from .base import SkillStore
 
 def _cosine(a: List[float], b: List[float]) -> float:
     # Assumes vectors are normalized; dot product can be used as cosine similarity.
+    """Run cosine."""
     if not a or not b or len(a) != len(b):
         return 0.0
     return float(sum(x * y for x, y in zip(a, b)))
@@ -29,6 +30,7 @@ def _cosine(a: List[float], b: List[float]) -> float:
 def _skill_to_text(skill: Skill) -> str:
     # Use structured fields to keep vectors stable across versions/ids and avoid
     # coupling similarity to artifact frontmatter formatting.
+    """Run skill to text."""
     triggers = "\n".join(skill.triggers or [])
     tags = " ".join(skill.tags or [])
     return (
@@ -49,6 +51,7 @@ class _Record:
 
 class InMemorySkillStore(SkillStore):
     def __init__(self, *, embeddings: EmbeddingModel, bm25_weight: float = 0.1) -> None:
+        """Run init."""
         self._embeddings = embeddings
         self._embedding_disabled = bool(getattr(embeddings, "disabled", False))
         self._bm25_weight = float(bm25_weight)
@@ -61,6 +64,7 @@ class InMemorySkillStore(SkillStore):
         self._bm25_docs_by_id: Dict[str, str] = {}
 
     def upsert(self, skill: Skill, *, raw: Optional[Dict[str, Any]] = None) -> None:
+        """Run upsert."""
         vector: Optional[List[float]] = None
         if not self._embedding_disabled:
             text = _skill_to_text(skill)
@@ -73,17 +77,20 @@ class InMemorySkillStore(SkillStore):
             self._bm25_docs_by_id[str(skill.id)] = _skill_to_text(skill)
 
     def get(self, skill_id: str) -> Optional[Skill]:
+        """Run get."""
         with self._lock:
             rec = self._records.get(skill_id)
             return rec.skill if rec else None
 
     def delete(self, skill_id: str) -> bool:
+        """Run delete."""
         with self._lock:
             removed = self._records.pop(skill_id, None) is not None
             self._bm25_docs_by_id.pop(str(skill_id), None)
             return removed
 
     def list(self, *, user_id: str) -> List[Skill]:
+        """Run list."""
         with self._lock:
             return [
                 r.skill
@@ -99,6 +106,7 @@ class InMemorySkillStore(SkillStore):
         limit: int,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SkillHit]:
+        """Run search."""
         filters = filters or {}
         want_ids_raw = filters.get("ids")
         if want_ids_raw is None:
@@ -169,6 +177,7 @@ class InMemorySkillStore(SkillStore):
 
 
 def _passes_filters(skill: Skill, filters: Dict[str, Any]) -> bool:
+    """Run passes filters."""
     want_tags = filters.get("tags")
     if want_tags:
         want_set = {str(t).strip().lower() for t in want_tags if str(t).strip()}

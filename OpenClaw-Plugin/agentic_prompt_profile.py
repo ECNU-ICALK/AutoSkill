@@ -34,6 +34,7 @@ class OpenClawTrajectorySkillExtractor(LLMSkillExtractor):
     """
 
     def __init__(self, config: AutoSkillConfig) -> None:
+        """Run init."""
         super().__init__(config)
         self._config = config
 
@@ -47,6 +48,7 @@ class OpenClawTrajectorySkillExtractor(LLMSkillExtractor):
         hint: Optional[str] = None,
         retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
+        """Run extract."""
         payload = {
             "user_id": user_id,
             "messages": messages or [],
@@ -161,6 +163,7 @@ class OpenClawTrajectorySkillExtractor(LLMSkillExtractor):
         return out
 
     def _repair_to_json(self, *, payload: Dict[str, Any], draft: str, max_candidates: int) -> str:
+        """Run repair to json."""
         system = _build_openclaw_agentic_repair_prompt(max_candidates=max_candidates)
         user = (
             f"DATA:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -170,6 +173,7 @@ class OpenClawTrajectorySkillExtractor(LLMSkillExtractor):
 
 
 def _build_openclaw_agentic_extract_prompt(*, max_candidates: int) -> str:
+    """Run build openclaw agentic extract prompt."""
     return (
         "You are AutoSkill's OpenClaw Trajectory Skill Extractor.\n"
         "Task: derive reusable AGENTIC skills from interaction trajectories (messages/events/tool-use traces).\n"
@@ -226,6 +230,7 @@ def _build_openclaw_agentic_extract_prompt(*, max_candidates: int) -> str:
 
 
 def _build_openclaw_agentic_repair_prompt(*, max_candidates: int) -> str:
+    """Run build openclaw agentic repair prompt."""
     return (
         "You are a JSON output fixer for OpenClaw trajectory skill extraction.\n"
         "Given DATA and DRAFT, output ONLY strict JSON: {\"skills\": [...]}.\n"
@@ -256,6 +261,7 @@ def _decide_candidate_action_with_llm_agentic(
     user_id: str,
     dedupe_threshold: float,
 ) -> Tuple[str, Optional[str], Optional[str]]:
+    """Run decide candidate action with llm agentic."""
     system = (
         "You are AutoSkill's OpenClaw Agentic Skill Set Manager.\n"
         "Task: decide add|merge|discard for a newly extracted trajectory skill.\n"
@@ -310,6 +316,7 @@ def _decide_candidate_action_with_llm_agentic(
 
 
 def _merge_with_llm_agentic(llm, existing: Skill, cand: SkillCandidate) -> Skill:
+    """Run merge with llm agentic."""
     try:
         system = (
             "You are AutoSkill's OpenClaw Agentic Skill Merger.\n"
@@ -377,6 +384,7 @@ def _merge_with_llm_agentic(llm, existing: Skill, cand: SkillCandidate) -> Skill
 
 
 def _examples_from_obj(obj: Any) -> List[SkillExample]:
+    """Run examples from obj."""
     if not isinstance(obj, list):
         return []
     out: List[SkillExample] = []

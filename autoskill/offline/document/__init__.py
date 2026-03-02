@@ -10,6 +10,7 @@ __all__ = ["extract_from_doc", "main"]
 
 
 def __getattr__(name: str) -> Any:
+    """Run getattr."""
     if name == "extract_from_doc":
         from .extract import extract_from_doc as fn
 

@@ -24,6 +24,7 @@ from .hybrid_rank import tokenize_for_bm25
 
 class PersistentBM25Index:
     def __init__(self, *, dir_path: str, name: str = "skills-bm25") -> None:
+        """Run init."""
         self._dir = os.path.abspath(os.path.expanduser(str(dir_path)))
         self._name = str(name or "skills-bm25").strip() or "skills-bm25"
         self._meta_path = os.path.join(self._dir, f"{self._name}.meta.json")
@@ -56,10 +57,12 @@ class PersistentBM25Index:
         }
 
     def ids(self) -> List[str]:
+        """Run ids."""
         with self._lock:
             return list(self._doc_len.keys())
 
     def has(self, doc_id: str) -> bool:
+        """Run has."""
         sid = str(doc_id or "").strip()
         if not sid:
             return False
@@ -67,6 +70,7 @@ class PersistentBM25Index:
             return sid in self._doc_len
 
     def doc_hash_of(self, doc_id: str) -> str:
+        """Run doc hash of."""
         sid = str(doc_id or "").strip()
         if not sid:
             return ""
@@ -74,6 +78,7 @@ class PersistentBM25Index:
             return str(self._doc_hash.get(sid) or "")
 
     def upsert(self, doc_id: str, text: str) -> bool:
+        """Run upsert."""
         sid = str(doc_id or "").strip()
         if not sid:
             return False
@@ -106,6 +111,7 @@ class PersistentBM25Index:
             return True
 
     def delete(self, doc_id: str) -> bool:
+        """Run delete."""
         sid = str(doc_id or "").strip()
         if not sid:
             return False
@@ -129,6 +135,7 @@ class PersistentBM25Index:
         k1: float = 1.5,
         b: float = 0.75,
     ) -> Dict[str, float]:
+        """Run search scores."""
         q_terms = tokenize_for_bm25(query)
         if not q_terms:
             return {}
@@ -182,6 +189,7 @@ class PersistentBM25Index:
         return norm
 
     def load(self) -> None:
+        """Run load."""
         with self._lock:
             self._reset_locked()
 
@@ -302,6 +310,7 @@ class PersistentBM25Index:
             return {"built": int(built), "docs": int(len(docs or {}))}
 
     def save(self) -> None:
+        """Run save."""
         with self._lock:
             meta = {
                 "version": 1,
@@ -316,6 +325,7 @@ class PersistentBM25Index:
             _write_json_atomic(self._doc_hash_path, self._doc_hash)
 
     def _add_doc_terms_locked(self, *, sid: str, tf: Dict[str, int]) -> None:
+        """Run add doc terms locked."""
         for term, freq in (tf or {}).items():
             t = str(term or "").strip()
             f = int(freq or 0)
@@ -325,6 +335,7 @@ class PersistentBM25Index:
             posting[sid] = f
 
     def _remove_doc_terms_locked(self, *, sid: str, tf: Dict[str, int]) -> None:
+        """Run remove doc terms locked."""
         for term in list((tf or {}).keys()):
             t = str(term or "").strip()
             if not t:
@@ -337,6 +348,7 @@ class PersistentBM25Index:
                 self._postings.pop(t, None)
 
     def _reset_locked(self) -> None:
+        """Run reset locked."""
         self._postings = {}
         self._doc_len = {}
         self._doc_tf = {}
@@ -346,16 +358,19 @@ class PersistentBM25Index:
 
 
 def _hash_text(text: str) -> str:
+    """Run hash text."""
     return hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()
 
 
 def _read_json(path: str) -> Dict:
+    """Run read json."""
     with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
     return dict(obj) if isinstance(obj, dict) else {}
 
 
 def _write_json_atomic(path: str, obj: Dict) -> None:
+    """Run write json atomic."""
     p = str(path)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -364,6 +379,7 @@ def _write_json_atomic(path: str, obj: Dict) -> None:
 
 
 def _as_postings(obj: Dict) -> Dict[str, Dict[str, int]]:
+    """Run as postings."""
     out: Dict[str, Dict[str, int]] = {}
     for term, posting in dict(obj or {}).items():
         t = str(term or "").strip()
@@ -386,6 +402,7 @@ def _as_postings(obj: Dict) -> Dict[str, Dict[str, int]]:
 
 
 def _as_doc_len(obj: Dict) -> Dict[str, int]:
+    """Run as doc len."""
     out: Dict[str, int] = {}
     for sid, val in dict(obj or {}).items():
         s = str(sid or "").strip()
@@ -400,6 +417,7 @@ def _as_doc_len(obj: Dict) -> Dict[str, int]:
 
 
 def _as_doc_tf(obj: Dict) -> Dict[str, Dict[str, int]]:
+    """Run as doc tf."""
     out: Dict[str, Dict[str, int]] = {}
     for sid, tf in dict(obj or {}).items():
         s = str(sid or "").strip()
@@ -421,6 +439,7 @@ def _as_doc_tf(obj: Dict) -> Dict[str, Dict[str, int]]:
 
 
 def _as_doc_hash(obj: Dict) -> Dict[str, str]:
+    """Run as doc hash."""
     out: Dict[str, str] = {}
     for sid, h in dict(obj or {}).items():
         s = str(sid or "").strip()

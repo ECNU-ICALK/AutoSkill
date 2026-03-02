@@ -14,11 +14,13 @@ from typing import Any, Dict, Optional
 
 
 def env(name: str, default: str = "") -> str:
+    """Run env."""
     value = os.getenv(name)
     return value if value is not None and value.strip() else default
 
 
 def env_bool(name: str, default: bool) -> bool:
+    """Run env bool."""
     value = os.getenv(name)
     if value is None or not value.strip():
         return bool(default)
@@ -31,6 +33,7 @@ def env_bool(name: str, default: bool) -> bool:
 
 
 def env_json(name: str) -> Optional[Dict[str, Any]]:
+    """Run env json."""
     raw = os.getenv(name)
     if not raw or not raw.strip():
         return None
@@ -46,6 +49,7 @@ def env_json(name: str) -> Optional[Dict[str, Any]]:
 
 
 def pick_default_provider() -> str:
+    """Run pick default provider."""
     if os.getenv("AUTOSKILL_GENERIC_LLM_URL"):
         return "generic"
     if os.getenv("DASHSCOPE_API_KEY"):
@@ -62,6 +66,7 @@ def pick_default_provider() -> str:
 
 
 def _require_key(env_name: str) -> str:
+    """Run require key."""
     v = os.getenv(env_name)
     if not v or not v.strip():
         raise SystemExit(f"Missing env var {env_name}.")
@@ -69,6 +74,7 @@ def _require_key(env_name: str) -> str:
 
 
 def _bigmodel_key() -> str:
+    """Run bigmodel key."""
     v = os.getenv("ZHIPUAI_API_KEY") or os.getenv("BIGMODEL_API_KEY")
     if not v or not v.strip():
         raise SystemExit("Missing API key. Set ZHIPUAI_API_KEY or BIGMODEL_API_KEY to 'id.secret'.")
@@ -76,6 +82,7 @@ def _bigmodel_key() -> str:
 
 
 def _internlm_key() -> str:
+    """Run internlm key."""
     v = os.getenv("INTERNLM_API_KEY") or os.getenv("INTERN_API_KEY") or os.getenv("INTERNLM_TOKEN")
     if not v or not v.strip():
         raise SystemExit("Missing API key. Set INTERNLM_API_KEY (or INTERN_API_KEY).")
@@ -83,6 +90,7 @@ def _internlm_key() -> str:
 
 
 def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
+    """Run build llm config."""
     provider = (provider or "mock").lower()
     if provider == "mock":
         return {"provider": "mock"}
@@ -156,6 +164,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
 
 
 def build_embeddings_config(provider: str, *, model: Optional[str], llm_provider: str) -> Dict[str, Any]:
+    """Run build embeddings config."""
     provider = (provider or "").strip().lower()
     if not provider:
         if llm_provider in {"glm", "bigmodel", "zhipu"}:

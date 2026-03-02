@@ -135,6 +135,7 @@ def extract_from_doc(
 
 
 def _build_doc_message(*, title: str, chunk: str) -> str:
+    """Run build doc message."""
     return (
         "Document source for offline skill learning.\n"
         f"Title: {title}\n"
@@ -145,6 +146,7 @@ def _build_doc_message(*, title: str, chunk: str) -> str:
 
 
 def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
+    """Run skill to plain dict."""
     try:
         examples = []
         for e in list(getattr(skill, "examples", []) or []):
@@ -212,11 +214,13 @@ def _split_text(text: str, *, max_chars: int, overlap: int) -> List[str]:
 
 
 def _env(name: str, default: str = "") -> str:
+    """Run env."""
     val = os.getenv(name)
     return val if val is not None and val.strip() else default
 
 
 def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build llm config."""
     provider = str(args.llm_provider or "mock").strip() or "mock"
     model = str(args.llm_model or "").strip() or None
     cfg = _build_provider_llm_config(provider, model=model)
@@ -230,6 +234,7 @@ def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build embeddings config."""
     llm_provider = str(args.llm_provider or "mock").strip().lower() or "mock"
     provider = str(args.embeddings_provider or "").strip()
     model = str(args.embeddings_model or "").strip() or None
@@ -251,6 +256,7 @@ def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
+    """Run build sdk from args."""
     llm_cfg = _build_llm_config(args)
     emb_cfg = _build_embeddings_config(args)
     store_cfg: Dict[str, Any] = {"provider": "local"}
@@ -266,6 +272,7 @@ def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Run build parser."""
     parser = argparse.ArgumentParser(description="Extract skills from offline document corpora.")
     parser.add_argument("--file", required=True, help="Path to a file or directory.")
     parser.add_argument("--user-id", default="u1", help="Target user id.")
@@ -302,6 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run main."""
     args = build_parser().parse_args()
     sdk = _build_sdk_from_args(args)
     result = extract_from_doc(

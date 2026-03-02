@@ -2,6 +2,10 @@
 
 中文 | [English](README.md)
 
+<p align="center">
+  <img src="imgs/AutoSkill_logo.png" alt="AutoSkill Logo" width="320" />
+</p>
+
 AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身学习）** 的工程化实践。
 它从真实交互经验（对话 + 行为/事件）中学习，自动生成可复用技能，并通过合并与版本演进持续优化已有技能。
 
@@ -12,7 +16,53 @@ AutoSkill 是 **Experience-driven Lifelong Learning（ELL，经验驱动终身�
 - **2025-02-26**: 发布 **AutoSkill-OpenClaw-Plugin 1.0**。
 - **2025-02-04**：发布 **AutoSkill 1.0**。
 
-## 1. 快速开始：Web UI
+## 目录
+
+- [News](#news)
+- [1. 快速开始（Web / Proxy / Docker）](#1-快速开始web--proxy--docker)
+  - [1.1 Web UI](#11-web-ui)
+  - [1.2 标准 API 代理](#12-标准-api-代理)
+  - [1.3 一键部署（Docker Compose）](#13-一键部署docker-compose)
+  - [1.4 技能生命周期示例（三个方面）](#14-技能生命周期示例三个方面)
+- [2. 项目核心特点](#2-项目核心特点)
+  - [2.1 解耦连接器与向量后端](#21-解耦连接器与向量后端)
+- [3. 系统工作流](#3-系统工作流)
+  - [3.1 学习与进化流程](#31-学习与进化流程)
+  - [3.2 检索与回答流程](#32-检索与回答流程)
+  - [3.3 交互抽取策略](#33-交互抽取策略)
+  - [3.4 代理服务流程](#34-代理服务流程)
+- [4. 核心概念](#4-核心概念)
+- [5. 本地存储结构（Local Store）](#5-本地存储结构local-store)
+- [6. 仓库结构（更易读版本）](#6-仓库结构更易读版本)
+  - [6.1 顶层目录](#61-顶层目录)
+  - [6.2 SDK 核心模块](#62-sdk-核心模块)
+  - [6.3 Skill Management 层](#63-skill-management-层)
+  - [6.4 Interactive 层](#64-interactive-层)
+  - [6.5 示例入口](#65-示例入口)
+  - [6.6 Offline 导入](#66-offline-导入)
+- [7. SDK 与离线使用](#7-sdk-与离线使用)
+  - [7.1 导入 OpenAI 对话并自动抽取技能](#71-导入-openai-对话并自动抽取技能)
+  - [7.2 通过 CLI 执行离线对话抽取](#72-通过-cli-执行离线对话抽取)
+- [8. Provider 配置建议](#8-provider-配置建议)
+  - [8.1 百炼 DashScope（示例）](#81-百炼-dashscope示例)
+  - [8.2 GLM（BigModel）](#82-glmbigmodel)
+  - [8.3 OpenAI / Anthropic](#83-openai--anthropic)
+  - [8.4 InternLM（Intern-S1 Pro）](#84-internlmintern-s1-pro)
+  - [8.5 通用 URL 后端（LLM + Embedding）](#85-通用-url-后端llm--embedding)
+- [9. 运行工作流与 API](#9-运行工作流与-api)
+  - [9.1 终端交互（每轮检索）](#91-终端交互每轮检索)
+  - [9.2 Web UI](#92-web-ui)
+  - [9.3 启动时离线维护（自动执行）](#93-启动时离线维护自动执行)
+  - [9.4 OpenAI 兼容代理 API](#94-openai-兼容代理-api)
+  - [9.5 自动评测脚本](#95-自动评测脚本)
+  - [9.6 OpenClaw 插件](#96-openclaw-插件)
+- [10. 项目价值与意义](#10-项目价值与意义)
+- [11. 引用（Citation）](#11-引用citation)
+- [12. 贡献与致谢](#12-贡献与致谢)
+
+## 1. 快速开始（Web / Proxy / Docker）
+
+### 1.1 Web UI
 
 ```bash
 python3 -m pip install -e .
@@ -35,7 +85,7 @@ python3 -m examples.web_ui \
 
 启动后打开 `http://127.0.0.1:8000`。
 
-## 1.1 标准 API 代理
+### 1.2 标准 API 代理
 
 AutoSkill 也可以作为反向代理部署，对外暴露 OpenAI 兼容接口，并在内部自动执行：
 - 每次对话请求的技能检索与注入
@@ -96,7 +146,7 @@ curl -N http://127.0.0.1:9000/v1/chat/completions \
 -H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
 ```
 
-## 1.2 一键部署（Docker Compose）
+### 1.3 一键部署（Docker Compose）
 
 ```bash
 cp .env.example .env
@@ -122,7 +172,7 @@ Compose 会同时拉起两个服务：
 - 宿主机：`./SkillBank`
 - 容器内：`/data/SkillBank`
 
-## 1.3 技能生命周期示例（三个方面）
+### 1.4 技能生命周期示例（三个方面）
 
 ### A) 自动判断 + 反馈触发抽取与技能管理（v0.1.0）
 
@@ -164,7 +214,7 @@ AutoSkill 会默认不新增技能（抽取结果为空），避免产生噪声�
 
 - **经验驱动技能持续进化**：直接从真实用户交互和行为轨迹中抽取可复用能力，并持续进行版本演进与维护，让系统越用越贴合用户需求。
 - **通用技能格式**：采用 Agent Skill 形态（`SKILL.md`），具备可解释、可编辑的优势：结构清晰、内容可审阅、可按需人工修改；既可导入已有技能，也可将抽取技能迁移到其他系统。
-- **标准接口服务化**：以可插拔方式接入现有大模型；通过 OpenAI 兼容代理，可在不改业务调用形态的情况下接入 AutoSkill。
+- **对已结束对话的离线技能抽取**：对话结束后无需再和模型重聊，直接导入现有历史对话日志（OpenAI 格式 `.json/.jsonl`）即可离线抽取可复用技能。
 
 ## 2.1 解耦连接器与向量后端
 
@@ -276,6 +326,8 @@ SkillBank/
 - `Users/<user_id>`：用户私有技能。
 - `Common/`：共享技能库（通常只读）。
 - `vectors/`：按 embedding 签名分开的持久化向量缓存，切换 embedding 模型后不会混用旧索引。
+- 从 WildChat 1M 离线抽取得到的技能可在 `SkillBank/Users` 下找到，目录为：
+  `chinese_gpt3.5_8`、`english_gpt3.5_8`、`chinese_gpt4_8`、`english_gpt4_8`。
 
 ## 6. 仓库结构（更易读版本）
 
@@ -362,7 +414,7 @@ python3 -m autoskill.offline.trajectory.extract \
   --include-tool-events 1
 ```
 
-## 7. SDK 最小使用示例
+## 7. SDK 与离线使用
 
 ```python
 from autoskill import AutoSkill, AutoSkillConfig
@@ -433,6 +485,7 @@ python3 -m autoskill.offline.conversation.extract \
 
 行为说明：
 - `--file` 支持单个 OpenAI 标准 `.json`/`.jsonl` 文件，或包含多个文件的目录。
+- 如果单个 `.json` 文件中包含多个对话，加载器会自动遍历所有对话并按对话单元执行技能抽取。
 - 运行过程中会实时输出每个文件的处理进度、文件名和抽取到的技能名，便于定位。
 
 ## 8. Provider 配置建议
@@ -481,7 +534,7 @@ export AUTOSKILL_GENERIC_API_KEY=""
 python3 -m examples.interactive_chat --llm-provider generic --embeddings-provider generic
 ```
 
-## 9. 常用工作流
+## 9. 运行工作流与 API
 
 ### 9.1 终端交互（每轮检索）
 

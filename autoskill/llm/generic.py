@@ -27,12 +27,14 @@ class GenericChatLLM(OpenAIChatLLM):
     max_tokens: int = 30000
 
     def _resolve_api_key_optional(self) -> str:
+        """Run resolve api key optional."""
         key = self.api_key
         if key is None or not str(key).strip():
             key = os.getenv("AUTOSKILL_GENERIC_API_KEY", "")
         return str(key or "").strip()
 
     def _build_request(self, *, payload: Dict[str, Any], stream: bool) -> urllib.request.Request:
+        """Run build request."""
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers: Dict[str, str] = {
             "Content-Type": "application/json",

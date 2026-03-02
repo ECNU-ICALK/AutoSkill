@@ -41,6 +41,7 @@ _ACK_LINES = {
 }
 
 def _normalize_ack_line(text: str) -> str:
+    """Run normalize ack line."""
     s = (text or "").strip().lower()
     s = re.sub(r"^[^\w]+", "", s).strip()
     s = re.sub(r"[^\w]+$", "", s).strip()
@@ -50,6 +51,7 @@ def _normalize_ack_line(text: str) -> str:
 _ACK_KEYS = {_normalize_ack_line(s) for s in _ACK_LINES}
 
 def _sanitize_step_for_prompt(step: str, idx: int) -> str:
+    """Run sanitize step for prompt."""
     s = str(step or "").strip()
     if not s:
         return f"<STEP_{idx}>"
@@ -79,11 +81,13 @@ class SkillExtractor(Protocol):
         hint: Optional[str] = None,
         retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
+        """Run extract."""
         ...
 
 
 def build_default_extractor(config: AutoSkillConfig) -> SkillExtractor:
     # Default: provider=mock uses heuristic extraction (offline); other providers use LLM-based extraction.
+    """Run build default extractor."""
     provider = (config.llm.get("provider") or "mock").lower()
     if provider == "mock":
         return HeuristicSkillExtractor(config)
@@ -92,6 +96,7 @@ def build_default_extractor(config: AutoSkillConfig) -> SkillExtractor:
 
 class HeuristicSkillExtractor:
     def __init__(self, config: AutoSkillConfig) -> None:
+        """Run init."""
         self._config = config
 
     def extract(
@@ -104,6 +109,7 @@ class HeuristicSkillExtractor:
         hint: Optional[str] = None,
         retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
+        """Run extract."""
         text = _flatten_sources(messages=messages, events=events)
         if hint and str(hint).strip():
             text = f"{text}\n\nHint:\n{str(hint).strip()}\n"
@@ -142,6 +148,7 @@ class HeuristicSkillExtractor:
 
 class LLMSkillExtractor:
     def __init__(self, config: AutoSkillConfig, *, llm: Optional[LLM] = None) -> None:
+        """Run init."""
         self._config = config
         self._llm = llm or build_llm(config.llm)
 
@@ -155,6 +162,7 @@ class LLMSkillExtractor:
         hint: Optional[str] = None,
         retrieved_reference: Optional[Dict[str, Any]] = None,
     ) -> List[SkillCandidate]:
+        """Run extract."""
         payload = {
             "user_id": user_id,
             "messages": messages or [],
@@ -381,6 +389,7 @@ class LLMSkillExtractor:
         return out
 
     def _repair_to_json(self, *, payload: Dict[str, Any], draft: str, max_candidates: int) -> str:
+        """Run repair to json."""
         system = (
             "You are a JSON output fixer.\n"
             "Given DATA (and optionally DRAFT), output ONLY strict JSON: {\"skills\": [...]}.\n"
@@ -459,6 +468,7 @@ def _candidate_from_freeform_llm_text(
     }
 
     def slice_until(idx: Optional[int], stop_keys: List[str]) -> List[str]:
+        """Run slice until."""
         if idx is None:
             return []
         start = idx + 1
@@ -575,6 +585,7 @@ def _candidate_from_freeform_llm_text(
 
 
 def _find_section_index(lines: List[str], needles: List[str]) -> Optional[int]:
+    """Run find section index."""
     for i, ln in enumerate(lines):
         low = ln.lower()
         for n in needles:
@@ -592,6 +603,7 @@ def _find_section_index(lines: List[str], needles: List[str]) -> Optional[int]:
 
 
 def _pick_choice_or_value(block: List[str], *, primary_keys: List[str]) -> str:
+    """Run pick choice or value."""
     if not block:
         return ""
     choices = []
@@ -627,6 +639,7 @@ def _pick_choice_or_value(block: List[str], *, primary_keys: List[str]) -> str:
 
 
 def _extract_bullets(block: List[str]) -> List[str]:
+    """Run extract bullets."""
     out: List[str] = []
     for ln in block or []:
         s = re.sub(r"^\s*[*\-•]\s*", "", ln).strip()
@@ -643,6 +656,7 @@ def _extract_bullets(block: List[str]) -> List[str]:
 
 
 def _drop_leading_markers(lines: List[str], *, markers: List[str]) -> List[str]:
+    """Run drop leading markers."""
     if not lines:
         return []
     start = 0
@@ -657,6 +671,7 @@ def _drop_leading_markers(lines: List[str], *, markers: List[str]) -> List[str]:
 
 
 def _candidate_from_obj(obj: Any, *, source: Optional[Dict[str, Any]]) -> Optional[SkillCandidate]:
+    """Run candidate from obj."""
     if not isinstance(obj, dict):
         return None
     name = str(obj.get("name") or "").strip()
@@ -704,6 +719,7 @@ def _candidate_from_obj(obj: Any, *, source: Optional[Dict[str, Any]]) -> Option
 def _flatten_sources(
     *, messages: Optional[List[Dict[str, Any]]], events: Optional[List[Dict[str, Any]]]
 ) -> str:
+    """Run flatten sources."""
     chunks: List[str] = []
     for m in messages or []:
         role = str(m.get("role") or "").strip().lower()
@@ -722,6 +738,7 @@ def _flatten_sources(
 
 
 def _collect_primary_user_questions(messages: List[Dict[str, Any]]) -> str:
+    """Run collect primary user questions."""
     parts: List[str] = []
     for m in list(messages or []):
         role = str(m.get("role") or "").strip().lower()
@@ -737,6 +754,7 @@ def _collect_primary_user_questions(messages: List[Dict[str, Any]]) -> str:
 def _format_full_conversation_context(
     *, messages: List[Dict[str, Any]], events: List[Dict[str, Any]]
 ) -> str:
+    """Run format full conversation context."""
     out: List[str] = []
     for m in list(messages or []):
         role = str(m.get("role") or "").strip().lower() or "user"
@@ -753,6 +771,7 @@ def _format_full_conversation_context(
 
 
 def _heuristic_instructions(text: str) -> str:
+    """Run heuristic instructions."""
     steps = _extract_steps(text)
     if len(steps) >= 2:
         lines: List[str] = []
@@ -787,6 +806,7 @@ def _heuristic_instructions(text: str) -> str:
 
 
 def _heuristic_name(text: str, kws: List[str]) -> str:
+    """Run heuristic name."""
     low = (text or "").lower()
     if any(x in low for x in ["release", "deploy", "deployment", "go-live", "rollout"]):
         return "Standard release process"
@@ -796,6 +816,7 @@ def _heuristic_name(text: str, kws: List[str]) -> str:
 
 
 def _extract_steps(text: str) -> List[str]:
+    """Run extract steps."""
     t = (text or "").strip()
     if not t:
         return []
@@ -842,6 +863,7 @@ def _source_obj(
     messages: Optional[List[Dict[str, Any]]],
     events: Optional[List[Dict[str, Any]]],
 ) -> Optional[Dict[str, Any]]:
+    """Run source obj."""
     if not config.store_sources:
         return None
     return {"messages": messages or [], "events": events or []}

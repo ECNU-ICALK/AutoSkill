@@ -23,10 +23,12 @@ _OFFLINE_CHANNELS = {
 
 
 def is_offline_channel(channel: str) -> bool:
+    """Run is offline channel."""
     return str(channel or "").strip().lower() in _OFFLINE_CHANNELS
 
 
 def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
+    """Run build offline extract prompt."""
     ch = str(channel or "").strip().lower()
     if ch == OFFLINE_CHANNEL_DOC:
         return (
@@ -205,6 +207,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
 
 
 def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
+    """Run build offline repair prompt."""
     ch = str(channel or "").strip().lower()
     if ch == OFFLINE_CHANNEL_DOC:
         label = "document"
@@ -240,6 +243,7 @@ def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
 
 
 def build_offline_manage_decide_prompt(channel: str) -> str:
+    """Run build offline manage decide prompt."""
     ch = str(channel or "").strip().lower()
     
     # 针对不同渠道定制化的决策准则与焦点
@@ -307,6 +311,7 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
 
 
 def build_offline_merge_gate_prompt(channel: str) -> str:
+    """Run build offline merge gate prompt."""
     ch = str(channel or "").strip().lower()
     
     if ch in {"doc", OFFLINE_CHANNEL_DOC}:
@@ -355,6 +360,7 @@ def build_offline_merge_gate_prompt(channel: str) -> str:
 
 
 def build_offline_merge_prompt(channel: str) -> str:
+    """Run build offline merge prompt."""
     ch = str(channel or "").strip().lower()
     
     # 定义不同场景的融合策略 (Fusion Strategy)
@@ -418,6 +424,7 @@ def maybe_offline_prompt(
     kind: str,
     max_candidates: Optional[int] = None,
 ) -> str:
+    """Run maybe offline prompt."""
     ch = str(channel or "").strip().lower()
     k = str(kind or "").strip().lower()
     if not is_offline_channel(ch):

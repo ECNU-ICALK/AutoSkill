@@ -21,6 +21,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[^\W\d_]+")
 
 
 def _tokenize(text: str) -> List[str]:
+    """Run tokenize."""
     return _TOKEN_RE.findall(text.lower())
 
 
@@ -35,6 +36,7 @@ class HashingEmbedding(EmbeddingModel):
     dims: int = 256
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         vectors: List[List[float]] = []
         for text in texts:
             vec = [0.0] * self.dims

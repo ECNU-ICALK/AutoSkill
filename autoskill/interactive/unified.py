@@ -39,6 +39,7 @@ class AutoSkillRuntime:
         query_rewriter: Optional[LLMQueryRewriter] = None,
         skill_selector: Optional[LLMSkillSelector] = None,
     ) -> None:
+        """Run init."""
         self.sdk = sdk
         self.llm_config = dict(llm_config or {})
         self.embeddings_config = dict(embeddings_config or {})
@@ -65,6 +66,7 @@ class AutoSkillRuntime:
         *,
         config_override: Optional[InteractiveConfig] = None,
     ) -> InteractiveSession:
+        """Run new session."""
         cfg = (config_override or InteractiveConfig(**asdict(self.interactive_config))).normalize()
         provider = str(self.llm_config.get("provider") or "mock").lower()
         chat_llm = None if provider == "mock" else build_llm(dict(self.llm_config))
@@ -81,6 +83,7 @@ class AutoSkillRuntime:
         *,
         config_override: Optional[AutoSkillProxyConfig] = None,
     ) -> AutoSkillProxyRuntime:
+        """Run new proxy runtime."""
         cfg = (config_override or AutoSkillProxyConfig(**asdict(self.proxy_config))).normalize()
         return AutoSkillProxyRuntime(
             sdk=self.sdk,
@@ -98,5 +101,6 @@ class AutoSkillRuntime:
         port: int,
         config_override: Optional[AutoSkillProxyConfig] = None,
     ):
+        """Run create proxy server."""
         runtime = self.new_proxy_runtime(config_override=config_override)
         return runtime.create_server(host=host, port=port)

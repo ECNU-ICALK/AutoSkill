@@ -46,6 +46,7 @@ def build_agent_skill_files(skill: Skill) -> Dict[str, str]:
 
 
 def render_skill_md(skill: Skill) -> str:
+    """Run render skill md."""
     frontmatter = _render_frontmatter(
         skill_id=skill.id,
         name=skill.name,
@@ -94,6 +95,7 @@ def upsert_skill_md_metadata(
 
 
 def _upsert_frontmatter_scalar(md: str, *, key: str, value: str) -> str:
+    """Run upsert frontmatter scalar."""
     import re
 
     key_s = str(key or "").strip()
@@ -133,6 +135,7 @@ def _upsert_frontmatter_scalar(md: str, *, key: str, value: str) -> str:
 
 
 def _render_body(skill: Skill) -> str:
+    """Run render body."""
     lines: List[str] = []
     lines.append(f"# {skill.name}".strip())
     lines.append("")
@@ -196,6 +199,7 @@ def _render_frontmatter(
     triggers: List[str],
     examples: List[SkillExample],
 ) -> str:
+    """Run render frontmatter."""
     lines: List[str] = []
     lines.append(f"id: {_q(skill_id.strip())}")
     lines.append(f"name: {_q(name.strip())}")
@@ -229,10 +233,12 @@ def _render_frontmatter(
 
 
 def _q(value: str) -> str:
+    """Run q."""
     return json.dumps(value, ensure_ascii=False)
 
 
 def _slugify(text: str) -> str:
+    """Run slugify."""
     s = (text or "").strip().lower()
     s = s.replace("/", "-").replace("\\", "-")
     s = _WS_RE.sub("-", s)
@@ -242,6 +248,7 @@ def _slugify(text: str) -> str:
 
 
 def _indent(text: str, spaces: int = 2) -> str:
+    """Run indent."""
     prefix = " " * spaces
     lines = (text or "").splitlines() or [""]
     return "\n".join(prefix + ln for ln in lines)
@@ -374,6 +381,7 @@ def parse_agent_skill_md(md: str) -> Dict[str, object]:
 
 
 def _parse_skill_md(md: str) -> tuple[Dict[str, object], str]:
+    """Run parse skill md."""
     frontmatter, body = _split_frontmatter(md)
     meta: Dict[str, object] = {}
     if frontmatter is not None:
@@ -408,6 +416,7 @@ def _extract_frontmatter_scalar(frontmatter: Optional[str], *, key: str) -> str:
 
 
 def _split_frontmatter(md: str) -> tuple[Optional[str], str]:
+    """Run split frontmatter."""
     lines = (md or "").splitlines()
     if not lines:
         return None, ""
@@ -423,6 +432,7 @@ def _split_frontmatter(md: str) -> tuple[Optional[str], str]:
 
 def _parse_frontmatter(frontmatter: str) -> Dict[str, object]:
     # Prefer PyYAML when available but keep a fallback parser to avoid adding mandatory dependencies.
+    """Run parse frontmatter."""
     try:
         import yaml  # type: ignore
 
@@ -542,6 +552,7 @@ def _parse_frontmatter_fallback(frontmatter: str) -> Dict[str, object]:
 
 
 def _parse_scalar(value: str) -> str:
+    """Run parse scalar."""
     s = (value or "").strip()
     if not s:
         return ""
@@ -556,6 +567,7 @@ def _parse_scalar(value: str) -> str:
 
 
 def _extract_markdown_section(body: str, title: str) -> str:
+    """Run extract markdown section."""
     target = f"## {title}".strip().lower()
     lines = (body or "").splitlines()
     for i, ln in enumerate(lines):
@@ -576,6 +588,7 @@ def _extract_markdown_section(body: str, title: str) -> str:
 
 
 def _infer_name_from_body(body: str) -> str:
+    """Run infer name from body."""
     for ln in (body or "").splitlines():
         s = ln.strip()
         if s.startswith("# "):
@@ -584,6 +597,7 @@ def _infer_name_from_body(body: str) -> str:
 
 
 def _infer_description_from_body(body: str) -> str:
+    """Run infer description from body."""
     lines = (body or "").splitlines()
     start = None
     for i, ln in enumerate(lines):
@@ -604,6 +618,7 @@ def _infer_description_from_body(body: str) -> str:
 
 
 def _coerce_str_list(obj: object) -> List[str]:
+    """Run coerce str list."""
     if obj is None:
         return []
     if isinstance(obj, list):
@@ -624,6 +639,7 @@ def _coerce_str_list(obj: object) -> List[str]:
 
 
 def _coerce_examples(obj: object) -> List[SkillExample]:
+    """Run coerce examples."""
     if not isinstance(obj, list):
         return []
     out: List[SkillExample] = []
@@ -647,6 +663,7 @@ def _coerce_examples(obj: object) -> List[SkillExample]:
 
 
 def _read_text_file(path: str, *, max_bytes: int) -> str:
+    """Run read text file."""
     with open(path, "rb") as f:
         data = f.read(max_bytes + 1)
     if len(data) > max_bytes:
@@ -662,6 +679,7 @@ def _read_dir_text_files(
     max_bytes: int,
     skip_paths: set[str],
 ) -> Dict[str, str]:
+    """Run read dir text files."""
     out: Dict[str, str] = {}
     for root, _dirs, files in os.walk(abs_dir):
         for fn in files:

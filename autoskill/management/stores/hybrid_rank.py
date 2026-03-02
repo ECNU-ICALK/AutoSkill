@@ -44,6 +44,7 @@ _STOPWORDS = {
 
 
 def _tokenize(text: str) -> List[str]:
+    """Run tokenize."""
     tokens = [t.lower().strip() for t in _TOKEN_RE.findall(text or "")]
     out: List[str] = []
     for t in tokens:
@@ -161,5 +162,6 @@ def blend_scores(
 
 
 def _iter_keys(d: Dict[str, float]) -> Iterable[str]:
+    """Run iter keys."""
     for k in (d or {}).keys():
         yield str(k)

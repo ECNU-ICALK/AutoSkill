@@ -148,6 +148,7 @@ def _build_conversation_message(
     user_questions: str,
     full_conversation: str,
 ) -> str:
+    """Run build conversation message."""
     return (
         "Offline OpenAI-format conversation source.\n"
         f"Title: {title}\n"
@@ -162,6 +163,7 @@ def _build_conversation_message(
 
 
 def _collect_user_questions(messages: List[Dict[str, str]]) -> str:
+    """Run collect user questions."""
     parts: List[str] = []
     for m in list(messages or []):
         role = str(m.get("role") or "").strip().lower()
@@ -177,6 +179,7 @@ def _collect_user_questions(messages: List[Dict[str, str]]) -> str:
 
 
 def _format_full_conversation(messages: List[Dict[str, str]]) -> str:
+    """Run format full conversation."""
     out: List[str] = []
     for m in list(messages or []):
         role = str(m.get("role") or "").strip().lower() or "user"
@@ -188,6 +191,7 @@ def _format_full_conversation(messages: List[Dict[str, str]]) -> str:
 
 
 def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
+    """Run skill to plain dict."""
     try:
         examples = []
         for e in list(getattr(skill, "examples", []) or []):
@@ -212,6 +216,7 @@ def _skill_to_plain_dict(skill: Any) -> Dict[str, Any]:
 
 
 def _skills_compact_list(skills: Any) -> List[Dict[str, str]]:
+    """Run skills compact list."""
     out: List[Dict[str, str]] = []
     seen = set()
     for s in list(skills or []):
@@ -226,11 +231,13 @@ def _skills_compact_list(skills: Any) -> List[Dict[str, str]]:
 
 
 def _env(name: str, default: str = "") -> str:
+    """Run env."""
     val = os.getenv(name)
     return val if val is not None and val.strip() else default
 
 
 def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build llm config."""
     provider = str(args.llm_provider or "mock").strip() or "mock"
     model = str(args.llm_model or "").strip() or None
     cfg = _build_provider_llm_config(provider, model=model)
@@ -244,6 +251,7 @@ def _build_llm_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run build embeddings config."""
     llm_provider = str(args.llm_provider or "mock").strip().lower() or "mock"
     provider = str(args.embeddings_provider or "").strip()
     model = str(args.embeddings_model or "").strip() or None
@@ -265,6 +273,7 @@ def _build_embeddings_config(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
+    """Run build sdk from args."""
     llm_cfg = _build_llm_config(args)
     emb_cfg = _build_embeddings_config(args)
     store_cfg: Dict[str, Any] = {"provider": "local"}
@@ -280,6 +289,7 @@ def _build_sdk_from_args(args: argparse.Namespace) -> AutoSkill:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Run build parser."""
     parser = argparse.ArgumentParser(
         description="Extract skills from OpenAI-format conversation JSON/JSONL files (or a directory of them)."
     )
@@ -324,10 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run main."""
     args = build_parser().parse_args()
     sdk = _build_sdk_from_args(args)
 
     def _on_progress(evt: Dict[str, Any]) -> None:
+        """Run on progress."""
         idx = int(evt.get("index", 0)) + 1
         total = int(evt.get("total", 0))
         fname = str(evt.get("file_name") or "")

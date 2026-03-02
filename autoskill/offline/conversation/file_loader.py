@@ -29,6 +29,7 @@ def load_openai_units(*, data: Optional[Any] = None, file_path: str = "") -> Tup
 
 
 def _units_from_openai_data(data: Any, *, source_file: str) -> List[Dict[str, Any]]:
+    """Run units from openai data."""
     conversations = _extract_openai_conversations(data)
     out: List[Dict[str, Any]] = []
     base = os.path.basename(source_file) if source_file else "inline"
@@ -45,6 +46,7 @@ def _units_from_openai_data(data: Any, *, source_file: str) -> List[Dict[str, An
 
 
 def _units_from_openai_path(path: str) -> Tuple[List[Dict[str, Any]], str]:
+    """Run units from openai path."""
     abs_path = os.path.abspath(os.path.expanduser(str(path or "").strip()))
     if not abs_path:
         return [], ""
@@ -65,6 +67,7 @@ def _units_from_openai_path(path: str) -> Tuple[List[Dict[str, Any]], str]:
 
 
 def _iter_openai_dataset_files(root: str) -> List[str]:
+    """Run iter openai dataset files."""
     files: List[str] = []
     for dirpath, _, names in os.walk(root):
         for name in names:
@@ -78,6 +81,7 @@ def _iter_openai_dataset_files(root: str) -> List[str]:
 
 
 def _load_openai_data_from_file(path: str) -> Any:
+    """Run load openai data from file."""
     if not os.path.isfile(path):
         raise ValueError(f"file not found: {path}")
     if str(path).lower().endswith(".jsonl"):
@@ -97,9 +101,11 @@ def _load_openai_data_from_file(path: str) -> Any:
 
 
 def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
+    """Run extract openai conversations."""
     out: List[List[Dict[str, str]]] = []
 
     def collect(obj: Any) -> None:
+        """Run collect."""
         if isinstance(obj, list):
             if _looks_like_messages(obj):
                 msgs = _normalize_openai_messages(obj)
@@ -113,6 +119,8 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
         if not isinstance(obj, dict):
             return
 
+        handled = False
+
         for key in ("messages", "conversation", "dialogue", "history", "chat_history"):
             v = obj.get(key)
             if _looks_like_messages(v):
@@ -120,7 +128,7 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
                 if msgs:
                     msgs = _attach_response_message(messages=msgs, record=obj)
                     out.append(msgs)
-                return
+                    handled = True
 
         for key in ("body", "request", "input", "payload"):
             v = obj.get(key)
@@ -129,18 +137,27 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
                 if msgs:
                     msgs = _attach_response_message(messages=msgs, record=obj)
                     out.append(msgs)
-                return
+                    handled = True
 
         for key in ("data", "items", "records", "conversations", "dialogues", "samples"):
             v = obj.get(key)
             if isinstance(v, (list, dict)):
+                handled = True
                 collect(v)
+
+        # Fallback: support single JSON files that contain multiple conversations
+        # under custom keys (e.g., {"chat_a": {...}, "chat_b": {...}}).
+        if not handled:
+            for v in obj.values():
+                if isinstance(v, (list, dict)):
+                    collect(v)
 
     collect(data)
     return out
 
 
 def _looks_like_messages(raw: Any) -> bool:
+    """Run looks like messages."""
     if not isinstance(raw, list) or not raw:
         return False
     if not all(isinstance(x, dict) for x in raw):
@@ -157,6 +174,7 @@ def _looks_like_messages(raw: Any) -> bool:
 
 
 def _normalize_openai_messages(raw: Any) -> List[Dict[str, str]]:
+    """Run normalize openai messages."""
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, str]] = []
@@ -174,6 +192,7 @@ def _normalize_openai_messages(raw: Any) -> List[Dict[str, str]]:
 
 
 def _content_to_text(content: Any) -> str:
+    """Run content to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -198,6 +217,7 @@ def _content_to_text(content: Any) -> str:
 
 
 def _attach_response_message(*, messages: List[Dict[str, str]], record: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Run attach response message."""
     response = record.get("response")
     if not isinstance(response, dict):
         return messages

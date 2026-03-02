@@ -44,6 +44,7 @@ _LLM_ALIASES: Dict[str, str] = {
 
 
 def _normalize_provider(name: Any) -> str:
+    """Run normalize provider."""
     s = str(name or "mock").strip().lower()
     if not s:
         s = "mock"
@@ -51,6 +52,7 @@ def _normalize_provider(name: Any) -> str:
 
 
 def _load_builder_from_path(path: str) -> LLMBuilder:
+    """Run load builder from path."""
     spec = str(path or "").strip()
     if not spec:
         raise ValueError("Empty connector_factory")
@@ -98,15 +100,18 @@ def register_llm_connector(
 
 
 def list_llm_connectors() -> List[str]:
+    """Run list llm connectors."""
     _ensure_builtins_registered()
     return sorted(_LLM_BUILDERS.keys())
 
 
 def _build_mock(config: Dict[str, Any]) -> LLM:
+    """Run build mock."""
     return MockLLM(response=str(config.get("response") or '{"skills": []}'))
 
 
 def _build_openai(config: Dict[str, Any]) -> LLM:
+    """Run build openai."""
     return OpenAIChatLLM(
         model=str(config.get("model", "gpt-4o-mini")),
         api_key=config.get("api_key"),
@@ -118,6 +123,7 @@ def _build_openai(config: Dict[str, Any]) -> LLM:
 
 
 def _build_generic(config: Dict[str, Any]) -> LLM:
+    """Run build generic."""
     base_url = str(
         config.get("url")
         or config.get("base_url")
@@ -135,6 +141,7 @@ def _build_generic(config: Dict[str, Any]) -> LLM:
 
 def _build_dashscope(config: Dict[str, Any]) -> LLM:
     # DashScope's "compatible-mode" is OpenAI Chat Completions compatible.
+    """Run build dashscope."""
     return OpenAIChatLLM(
         model=str(config.get("model", "qwen-plus")),
         api_key=(config.get("api_key") or os.getenv("DASHSCOPE_API_KEY")),
@@ -146,6 +153,7 @@ def _build_dashscope(config: Dict[str, Any]) -> LLM:
 
 
 def _build_internlm(config: Dict[str, Any]) -> LLM:
+    """Run build internlm."""
     return InternLMChatLLM(
         model=str(config.get("model", "intern-s1-pro")),
         api_key=(config.get("api_key") or os.getenv("INTERNLM_API_KEY")),
@@ -159,6 +167,7 @@ def _build_internlm(config: Dict[str, Any]) -> LLM:
 
 
 def _build_glm(config: Dict[str, Any]) -> LLM:
+    """Run build glm."""
     return GLMChatLLM(
         model=str(config.get("model", "glm-4.7")),
         api_key=config.get("api_key"),
@@ -176,6 +185,7 @@ def _build_glm(config: Dict[str, Any]) -> LLM:
 
 
 def _build_anthropic(config: Dict[str, Any]) -> LLM:
+    """Run build anthropic."""
     return AnthropicLLM(
         model=str(config.get("model", "claude-3-5-sonnet-latest")),
         api_key=config.get("api_key"),
@@ -187,6 +197,7 @@ def _build_anthropic(config: Dict[str, Any]) -> LLM:
 
 
 def _ensure_builtins_registered() -> None:
+    """Run ensure builtins registered."""
     if _LLM_BUILDERS:
         return
     register_llm_connector("mock", _build_mock)

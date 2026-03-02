@@ -37,6 +37,7 @@ _VECTOR_ALIASES: Dict[str, str] = {
 
 
 def _normalize_backend(name: Any) -> str:
+    """Run normalize backend."""
     s = str(name or "flat").strip().lower()
     if not s:
         s = "flat"
@@ -44,6 +45,7 @@ def _normalize_backend(name: Any) -> str:
 
 
 def _load_builder_from_path(path: str) -> VectorBackendBuilder:
+    """Run load builder from path."""
     spec = str(path or "").strip()
     if not spec:
         raise ValueError("Empty backend_factory")
@@ -71,6 +73,7 @@ def register_vector_backend(
     aliases: List[str] | None = None,
     override: bool = True,
 ) -> None:
+    """Run register vector backend."""
     key = _normalize_backend(backend)
     if not key:
         raise ValueError("backend is required")
@@ -84,15 +87,18 @@ def register_vector_backend(
 
 
 def list_vector_backends() -> List[str]:
+    """Run list vector backends."""
     _ensure_builtins_registered()
     return sorted(_VECTOR_BUILDERS.keys())
 
 
 def _build_flat(dir_path: str, name: str, config: Dict[str, Any]) -> VectorIndex:
+    """Run build flat."""
     return FlatFileVectorIndex(dir_path=dir_path, name=name)
 
 
 def _build_chroma(dir_path: str, name: str, config: Dict[str, Any]) -> VectorIndex:
+    """Run build chroma."""
     persist_dir = str(config.get("persist_dir") or config.get("path") or dir_path)
     collection_name = str(config.get("collection_name") or config.get("collection") or name)
     metric = str(config.get("metric") or "cosine")
@@ -104,6 +110,7 @@ def _build_chroma(dir_path: str, name: str, config: Dict[str, Any]) -> VectorInd
 
 
 def _build_milvus(dir_path: str, name: str, config: Dict[str, Any]) -> VectorIndex:
+    """Run build milvus."""
     uri = str(config.get("uri") or config.get("host") or "").strip()
     if not uri:
         raise ValueError("Milvus backend requires `vector_backend_config.uri`")
@@ -119,6 +126,7 @@ def _build_milvus(dir_path: str, name: str, config: Dict[str, Any]) -> VectorInd
 
 
 def _build_pinecone(dir_path: str, name: str, config: Dict[str, Any]) -> VectorIndex:
+    """Run build pinecone."""
     api_key = str(config.get("api_key") or os.getenv("PINECONE_API_KEY") or "")
     index_name = str(config.get("index_name") or config.get("index") or "").strip()
     if not index_name:
@@ -134,6 +142,7 @@ def _build_pinecone(dir_path: str, name: str, config: Dict[str, Any]) -> VectorI
 
 
 def _ensure_builtins_registered() -> None:
+    """Run ensure builtins registered."""
     if _VECTOR_BUILDERS:
         return
     register_vector_backend("flat", _build_flat, aliases=["filesystem", "local", "file", "disk"])

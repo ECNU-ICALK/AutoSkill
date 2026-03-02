@@ -52,6 +52,7 @@ _SESSION_DUMP_VERSION = 1
 
 
 def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int = 200) -> None:
+    """Run json response."""
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(int(status))
     handler.send_header("Content-Type", "application/json; charset=utf-8")
@@ -62,6 +63,7 @@ def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int
 
 
 def _read_json(handler: BaseHTTPRequestHandler, *, max_bytes: int = 5_000_000) -> Dict[str, Any]:
+    """Run read json."""
     length = int(handler.headers.get("Content-Length", "0") or 0)
     if length <= 0:
         return {}
@@ -80,14 +82,17 @@ def _read_json(handler: BaseHTTPRequestHandler, *, max_bytes: int = 5_000_000) -
 
 def _repo_root() -> Path:
     # examples/web_ui.py -> examples/ -> repo root
+    """Run repo root."""
     return Path(__file__).resolve().parents[1]
 
 
 def _web_dir() -> Path:
+    """Run web dir."""
     return _repo_root() / "web"
 
 
 def _safe_static_path(path: str) -> Optional[Path]:
+    """Run safe static path."""
     web = _web_dir().resolve()
     rel = str(path or "").lstrip("/")
     if not rel.startswith("static/"):
@@ -101,6 +106,7 @@ def _safe_static_path(path: str) -> Optional[Path]:
 
 
 def _content_type_for(path: str) -> str:
+    """Run content type for."""
     p = str(path or "").lower()
     if p.endswith(".html"):
         return "text/html; charset=utf-8"
@@ -122,6 +128,7 @@ def _content_type_for(path: str) -> str:
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
+    """Run coerce bool."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -146,6 +153,7 @@ class _SessionManager:
         query_rewriter: Optional[LLMQueryRewriter],
         llm_config: Optional[Dict[str, Any]] = None,
     ) -> None:
+        """Run init."""
         self.sdk = sdk
         self.interactive_cfg = interactive_cfg
         self.chat_llm = chat_llm
@@ -165,6 +173,7 @@ class _SessionManager:
         self._load_from_disk()
 
     def runtime_info(self) -> Dict[str, Any]:
+        """Run runtime info."""
         provider = str(self.llm_config.get("provider") or "mock").strip().lower() or "mock"
         model = str(self.llm_config.get("model") or "").strip()
 
@@ -210,12 +219,14 @@ class _SessionManager:
 
     @staticmethod
     def _now_ms() -> int:
+        """Run now ms."""
         import time
 
         return int(time.time() * 1000)
 
     @staticmethod
     def _title_from_text(text: str, *, max_chars: int = 32) -> str:
+        """Run title from text."""
         s = " ".join(str(text or "").strip().split())
         if not s:
             return "New Chat"
@@ -226,6 +237,7 @@ class _SessionManager:
 
     @staticmethod
     def _session_preview(messages: List[Dict[str, Any]], *, max_chars: int = 120) -> str:
+        """Run session preview."""
         for m in reversed(messages or []):
             content = str((m or {}).get("content") or "").strip()
             if content:
@@ -237,6 +249,7 @@ class _SessionManager:
 
     @staticmethod
     def _default_trace() -> Dict[str, Any]:
+        """Run default trace."""
         return {
             "version": 1,
             "next_turn_seq": 1,
@@ -249,12 +262,14 @@ class _SessionManager:
 
     @staticmethod
     def _clone(obj: Any) -> Any:
+        """Run clone."""
         try:
             return json.loads(json.dumps(obj, ensure_ascii=False))
         except Exception:
             return None
 
     def _trace_for_locked(self, sid: str) -> Dict[str, Any]:
+        """Run trace for locked."""
         t = self._trace.get(sid)
         if not isinstance(t, dict):
             t = self._default_trace()
@@ -262,6 +277,7 @@ class _SessionManager:
         return t
 
     def _append_event_locked(self, sid: str, bucket: str, payload: Dict[str, Any]) -> None:
+        """Run append event locked."""
         tr = self._trace_for_locked(sid)
         arr = tr.get(bucket)
         if not isinstance(arr, list):
@@ -271,9 +287,11 @@ class _SessionManager:
 
     @staticmethod
     def _trace_turn_id(seq: int) -> str:
+        """Run trace turn id."""
         return f"turn_{int(seq)}"
 
     def _next_turn_id_locked(self, sid: str) -> str:
+        """Run next turn id locked."""
         tr = self._trace_for_locked(sid)
         seq_raw = tr.get("next_turn_seq")
         try:
@@ -286,6 +304,7 @@ class _SessionManager:
         return self._trace_turn_id(seq)
 
     def _find_turn_locked(self, sid: str, turn_id: str) -> Optional[Dict[str, Any]]:
+        """Run find turn locked."""
         tr = self._trace_for_locked(sid)
         turns = tr.get("turns")
         if not isinstance(turns, list):
@@ -299,6 +318,7 @@ class _SessionManager:
         return None
 
     def begin_turn(self, sid: str, *, user_text: str) -> Optional[str]:
+        """Run begin turn."""
         key = str(sid or "").strip()
         if not key:
             return None
@@ -329,6 +349,7 @@ class _SessionManager:
             return turn_id
 
     def record_retrieval(self, sid: str, *, turn_id: Optional[str], retrieval: Any, source: str) -> None:
+        """Run record retrieval."""
         key = str(sid or "").strip()
         if not key:
             return
@@ -355,6 +376,7 @@ class _SessionManager:
                     turn["retrieval"] = rec
 
     def record_extraction(self, sid: str, *, turn_id: Optional[str], extraction: Any, source: str) -> None:
+        """Run record extraction."""
         key = str(sid or "").strip()
         if not key:
             return
@@ -408,6 +430,7 @@ class _SessionManager:
             tr["last_result"] = last_result
 
     def complete_turn(self, sid: str, *, turn_id: Optional[str], result: Any, source: str) -> None:
+        """Run complete turn."""
         key = str(sid or "").strip()
         if not key:
             return
@@ -435,6 +458,7 @@ class _SessionManager:
         self.record_extraction(key, turn_id=turn_id, extraction=result.get("extraction"), source=source)
 
     def fail_turn(self, sid: str, *, turn_id: Optional[str], error: str) -> None:
+        """Run fail turn."""
         key = str(sid or "").strip()
         if not key:
             return
@@ -455,6 +479,7 @@ class _SessionManager:
             tr["last_result"] = {"kind": "error", "error": msg}
 
     def _save_to_disk_locked(self) -> None:
+        """Run save to disk locked."""
         try:
             root_dir = os.path.dirname(self._persist_file)
             os.makedirs(root_dir, exist_ok=True)
@@ -484,6 +509,7 @@ class _SessionManager:
             return
 
     def _load_from_disk(self) -> None:
+        """Run load from disk."""
         path = str(self._persist_file or "")
         if not path or not os.path.isfile(path):
             return
@@ -552,6 +578,7 @@ class _SessionManager:
             self._trace[sid] = trace
 
     def new_session(self, *, overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, InteractiveSession]:
+        """Run new session."""
         overrides2 = dict(overrides or {})
         cfg = InteractiveConfig(**asdict(self.interactive_cfg)).normalize()
         for k, v in overrides2.items():
@@ -587,6 +614,7 @@ class _SessionManager:
         return sid, session
 
     def get(self, sid: str) -> Optional[InteractiveSession]:
+        """Run get."""
         key = str(sid or "").strip()
         if not key:
             return None
@@ -594,6 +622,7 @@ class _SessionManager:
             return self._sessions.get(key)
 
     def get_trace(self, sid: str) -> Optional[Dict[str, Any]]:
+        """Run get trace."""
         key = str(sid or "").strip()
         if not key:
             return None
@@ -606,6 +635,7 @@ class _SessionManager:
             return trace
 
     def touch(self, sid: str, *, user_text: Optional[str] = None) -> None:
+        """Run touch."""
         key = str(sid or "").strip()
         if not key:
             return
@@ -629,6 +659,7 @@ class _SessionManager:
             self._save_to_disk_locked()
 
     def list_sessions(self) -> List[Dict[str, Any]]:
+        """Run list sessions."""
         with self._lock:
             items: List[Dict[str, Any]] = []
             for sid, session in self._sessions.items():
@@ -651,6 +682,7 @@ class _SessionManager:
         return items
 
     def delete_session(self, sid: str) -> Tuple[bool, Optional[str]]:
+        """Run delete session."""
         key = str(sid or "").strip()
         if not key:
             return False, None
@@ -676,6 +708,7 @@ class _SessionManager:
 
 
 def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
+    """Run make handler."""
     web = _web_dir()
 
     class Handler(BaseHTTPRequestHandler):
@@ -683,10 +716,12 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
 
         def log_message(self, format: str, *args: Any) -> None:
             # Keep console output readable.
+            """Run log message."""
             msg = str(format or "") % args
             print(f"[web] {msg}")
 
         def do_GET(self) -> None:  # noqa: N802
+            """Run do GET."""
             parsed = urlparse(self.path or "/")
             path = parsed.path or "/"
 
@@ -721,6 +756,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
 
         def _start_ndjson(self) -> None:
+            """Run start ndjson."""
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -728,12 +764,14 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
 
         def _write_ndjson(self, payload: Dict[str, Any]) -> None:
+            """Run write ndjson."""
             data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
             self.wfile.write(data)
             self.wfile.flush()
 
         @staticmethod
         def _extract_extraction_events(polled: Any) -> List[Dict[str, Any]]:
+            """Run extract extraction events."""
             events_obj = polled.get("events") if isinstance(polled, dict) else {}
             out: List[Dict[str, Any]] = []
             if isinstance(events_obj, dict):
@@ -760,6 +798,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
             return extraction_events
 
         def do_POST(self) -> None:  # noqa: N802
+            """Run do POST."""
             parsed = urlparse(self.path or "/")
             path = parsed.path or "/"
             try:
@@ -1157,6 +1196,7 @@ def make_handler(manager: _SessionManager) -> type[BaseHTTPRequestHandler]:
 
 
 def main() -> None:
+    """Run main."""
     parser = argparse.ArgumentParser(description="AutoSkill local web UI")
     parser.add_argument("--host", default=_env("AUTOSKILL_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(_env("AUTOSKILL_WEB_PORT", "8000")))

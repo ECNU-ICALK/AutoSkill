@@ -37,6 +37,7 @@ from service_runtime import OpenClawSkillRuntime
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Run build parser."""
     parser = argparse.ArgumentParser(description="AutoSkill OpenClaw skill service")
     parser.add_argument("--host", default=_env("AUTOSKILL_PROXY_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(_env("AUTOSKILL_PROXY_PORT", "9100")))
@@ -105,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run main."""
     args = build_parser().parse_args()
     llm_provider = str(args.llm_provider or "mock").lower()
     llm_cfg = build_llm_config(llm_provider, model=args.llm_model)

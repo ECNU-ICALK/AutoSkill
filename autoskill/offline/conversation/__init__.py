@@ -10,6 +10,7 @@ __all__ = ["extract_from_conversation", "main"]
 
 
 def __getattr__(name: str) -> Any:
+    """Run getattr."""
     if name == "extract_from_conversation":
         from .extract import extract_from_conversation as fn
 

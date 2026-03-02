@@ -22,14 +22,17 @@ from typing import Optional, Tuple
 
 
 def _base64url(data: bytes) -> str:
+    """Run base64url."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
 def _json_compact(obj) -> bytes:
+    """Run json compact."""
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def _parse_api_key(api_key: str) -> Tuple[str, str]:
+    """Run parse api key."""
     parts = (api_key or "").strip().split(".")
     if len(parts) != 2 or not parts[0] or not parts[1]:
         raise ValueError("BigModel api_key must look like '<id>.<secret>'")
@@ -95,6 +98,7 @@ class BigModelAuth:
         token_time_unit: Optional[str] = None,
         auth_mode: Optional[str] = None,
     ) -> str:
+        """Run bearer token."""
         unit = (token_time_unit or self.token_time_unit or "ms").lower()
         if unit not in {"ms", "s"}:
             unit = "ms"

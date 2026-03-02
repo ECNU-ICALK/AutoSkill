@@ -447,6 +447,7 @@ class AutoSkill:
         scope: Optional[str] = None,  # user|common|library|all
         filters: Optional[Dict[str, Any]] = None,
     ) -> str:
+        """Run render context."""
         hits = self.search(query, user_id=user_id, limit=limit, scope=scope, filters=filters)
         skills = [h.skill for h in hits]
         return render_skills_context(
@@ -457,6 +458,7 @@ class AutoSkill:
 
 
 def _load_openai_data_from_file(path: str) -> Any:
+    """Run load openai data from file."""
     if not os.path.isfile(path):
         raise ValueError(f"file not found: {path}")
     if str(path).lower().endswith(".jsonl"):
@@ -476,9 +478,11 @@ def _load_openai_data_from_file(path: str) -> Any:
 
 
 def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
+    """Run extract openai conversations."""
     out: List[List[Dict[str, str]]] = []
 
     def collect(obj: Any) -> None:
+        """Run collect."""
         if isinstance(obj, list):
             if _looks_like_messages(obj):
                 msgs = _normalize_openai_messages(obj)
@@ -492,6 +496,8 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
         if not isinstance(obj, dict):
             return
 
+        handled = False
+
         # Direct canonical shape: {"messages": [...]}
         for key in ("messages", "conversation", "dialogue", "history", "chat_history"):
             v = obj.get(key)
@@ -500,7 +506,7 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
                 if msgs:
                     msgs = _attach_response_message(messages=msgs, record=obj)
                     out.append(msgs)
-                return
+                    handled = True
 
         # Request-log / batch style: {"body": {"messages": [...]}}
         for key in ("body", "request", "input", "payload"):
@@ -510,19 +516,28 @@ def _extract_openai_conversations(data: Any) -> List[List[Dict[str, str]]]:
                 if msgs:
                     msgs = _attach_response_message(messages=msgs, record=obj)
                     out.append(msgs)
-                return
+                    handled = True
 
         # Dataset wrapper shapes.
         for key in ("data", "items", "records", "conversations", "dialogues", "samples"):
             v = obj.get(key)
             if isinstance(v, (list, dict)):
+                handled = True
                 collect(v)
+
+        # Fallback: support custom wrapper keys that still contain multiple
+        # OpenAI-format conversations in one JSON file.
+        if not handled:
+            for v in obj.values():
+                if isinstance(v, (list, dict)):
+                    collect(v)
 
     collect(data)
     return out
 
 
 def _looks_like_messages(raw: Any) -> bool:
+    """Run looks like messages."""
     if not isinstance(raw, list) or not raw:
         return False
     if not all(isinstance(x, dict) for x in raw):
@@ -539,6 +554,7 @@ def _looks_like_messages(raw: Any) -> bool:
 
 
 def _normalize_openai_messages(raw: Any) -> List[Dict[str, str]]:
+    """Run normalize openai messages."""
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, str]] = []
@@ -556,6 +572,7 @@ def _normalize_openai_messages(raw: Any) -> List[Dict[str, str]]:
 
 
 def _content_to_text(content: Any) -> str:
+    """Run content to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -584,6 +601,7 @@ def _attach_response_message(
     messages: List[Dict[str, str]],
     record: Dict[str, Any],
 ) -> List[Dict[str, str]]:
+    """Run attach response message."""
     response = record.get("response")
     if not isinstance(response, dict):
         return messages

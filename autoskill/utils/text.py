@@ -35,6 +35,7 @@ _STOPWORDS = {
 
 
 def keywords(text: str, *, limit: int = 3) -> List[str]:
+    """Run keywords."""
     tokens = [t.lower() for t in _TOKEN_RE.findall(text or "") if t.strip()]
     tokens = [t for t in tokens if t not in _STOPWORDS and len(t) > 1]
     if not tokens:

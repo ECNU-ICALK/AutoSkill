@@ -15,6 +15,7 @@ from .stores.base import SkillStore
 
 
 def export_skill_md(store: SkillStore, skill_id: str) -> Optional[str]:
+    """Run export skill md."""
     skill = store.get(skill_id)
     if not skill:
         return None
@@ -22,6 +23,7 @@ def export_skill_md(store: SkillStore, skill_id: str) -> Optional[str]:
 
 
 def export_skill_dir(store: SkillStore, skill_id: str) -> Optional[Dict[str, str]]:
+    """Run export skill dir."""
     skill = store.get(skill_id)
     if not skill:
         return None
@@ -32,6 +34,7 @@ def export_skill_dir(store: SkillStore, skill_id: str) -> Optional[Dict[str, str
 
 
 def write_skill_dir(store: SkillStore, skill_id: str, *, root_dir: str) -> Optional[str]:
+    """Run write skill dir."""
     skill = store.get(skill_id)
     if not skill:
         return None
@@ -86,6 +89,7 @@ def write_skill_dirs(store: SkillStore, *, user_id: str, root_dir: str) -> List[
 
 
 def ensure_skill_files(skill: Skill) -> Dict[str, str]:
+    """Run ensure skill files."""
     files = dict(skill.files or {})
     if "SKILL.md" not in files or not str(files.get("SKILL.md") or "").strip():
         files.update(build_agent_skill_files(skill))

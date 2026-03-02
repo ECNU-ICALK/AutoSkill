@@ -177,6 +177,7 @@ class LLMSkillSelector:
         messages: List[Dict[str, Any]],
         skills: List[Skill],
     ) -> List[Skill]:
+        """Run select."""
         q = str(query or "").strip()
         if not q or not skills:
             return []
@@ -272,6 +273,7 @@ class LLMSkillSelector:
 
 
 def _json_dumps(obj: Any) -> str:
+    """Run json dumps."""
     import json
 
     return json.dumps(obj, ensure_ascii=False)

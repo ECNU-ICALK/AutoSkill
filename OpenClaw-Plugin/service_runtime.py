@@ -32,6 +32,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
     """
 
     def capabilities(self) -> Dict[str, Any]:
+        """Run capabilities."""
         payload = dict(super().capabilities() or {})
         data = dict(payload.get("data") or {})
         data.pop("chat", None)
@@ -47,6 +48,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         return payload
 
     def openapi_spec(self) -> Dict[str, Any]:
+        """Run openapi spec."""
         spec = dict(super().openapi_spec() or {})
         paths = dict(spec.get("paths") or {})
         paths.pop("/v1/chat/completions", None)
@@ -300,11 +302,13 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         }
 
     def make_handler(self) -> type:
+        """Run make handler."""
         base_handler = super().make_handler()
         runtime = self
 
         class Handler(base_handler):
             def do_POST(self) -> None:  # noqa: N802
+                """Run do POST."""
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
 

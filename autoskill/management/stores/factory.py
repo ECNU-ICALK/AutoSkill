@@ -22,6 +22,7 @@ _SAFE_NAME_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _slug(value: str, *, max_len: int = 32) -> str:
+    """Run slug."""
     s = str(value or "").strip().lower()
     s = _SAFE_NAME_RE.sub("-", s).strip("-")
     if not s:
@@ -30,6 +31,7 @@ def _slug(value: str, *, max_len: int = 32) -> str:
 
 
 def _embedding_signature(config: AutoSkillConfig) -> dict:
+    """Run embedding signature."""
     emb = dict(config.embeddings or {})
     provider = str(emb.get("provider") or "hashing").strip().lower()
     if provider in {"bigmodel", "zhipu"}:
@@ -72,6 +74,7 @@ def _embedding_signature(config: AutoSkillConfig) -> dict:
 
 
 def _vector_index_name_from_embeddings(config: AutoSkillConfig) -> str:
+    """Run vector index name from embeddings."""
     sig = _embedding_signature(config)
     provider = str(sig.get("provider") or "emb")
     model = str(sig.get("model") or "model")
@@ -88,6 +91,7 @@ def _vector_index_name_from_embeddings(config: AutoSkillConfig) -> str:
 
 
 def build_store(config: AutoSkillConfig) -> SkillStore:
+    """Run build store."""
     provider = (config.store.get("provider") or "inmemory").lower()
     embeddings = build_embeddings(config.embeddings)
     raw_bm25_weight = config.store.get("bm25_weight", config.bm25_weight)

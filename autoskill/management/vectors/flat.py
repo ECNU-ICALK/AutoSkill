@@ -22,6 +22,7 @@ from .base import VectorIndex
 
 
 def _dot(q: Sequence[float], vecs: array, *, offset: int, dims: int) -> float:
+    """Run dot."""
     s = 0.0
     for i in range(dims):
         s += q[i] * vecs[offset + i]
@@ -265,12 +266,14 @@ class FlatFileVectorIndex(VectorIndex):
 
 
 def _read_json(path: str) -> dict:
+    """Run read json."""
     with open(path, "r", encoding="utf-8") as f:
         obj = json.loads(f.read())
     return obj if isinstance(obj, dict) else {}
 
 
 def _read_lines(path: str) -> List[str]:
+    """Run read lines."""
     out: List[str] = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -281,6 +284,7 @@ def _read_lines(path: str) -> List[str]:
 
 
 def _atomic_write_json(path: str, obj: dict) -> None:
+    """Run atomic write json."""
     tmp = path + ".tmp"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as f:
@@ -289,6 +293,7 @@ def _atomic_write_json(path: str, obj: dict) -> None:
 
 
 def _atomic_write_lines(path: str, lines: List[str]) -> None:
+    """Run atomic write lines."""
     tmp = path + ".tmp"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as f:
@@ -299,6 +304,7 @@ def _atomic_write_lines(path: str, lines: List[str]) -> None:
 
 
 def _atomic_write_vecs(path: str, vecs: array) -> None:
+    """Run atomic write vecs."""
     tmp = path + ".tmp"
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(tmp, "wb") as f:

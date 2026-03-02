@@ -32,4 +32,5 @@ class MockLLM(LLM):
         user: str,
         temperature: float = 0.0,
     ) -> str:
+        """Run complete."""
         return self.response

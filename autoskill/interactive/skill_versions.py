@@ -16,6 +16,7 @@ DEFAULT_HISTORY_LIMIT = 30
 
 
 def examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
+    """Run examples to raw."""
     out: List[Dict[str, Any]] = []
     for ex in examples or []:
         out.append(
@@ -29,6 +30,7 @@ def examples_to_raw(examples: List[SkillExample]) -> List[Dict[str, Any]]:
 
 
 def examples_from_raw(raw: Any) -> List[SkillExample]:
+    """Run examples from raw."""
     out: List[SkillExample] = []
     if not isinstance(raw, list):
         return out
@@ -49,12 +51,14 @@ def examples_from_raw(raw: Any) -> List[SkillExample]:
 
 
 def metadata_without_history(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Run metadata without history."""
     md = dict(metadata or {})
     md.pop(HISTORY_KEY, None)
     return md
 
 
 def make_skill_snapshot(skill: Skill) -> Dict[str, Any]:
+    """Run make skill snapshot."""
     files = dict(getattr(skill, "files", {}) or {})
     return {
         "version": str(getattr(skill, "version", "") or ""),
@@ -72,6 +76,7 @@ def make_skill_snapshot(skill: Skill) -> Dict[str, Any]:
 
 
 def history_from_metadata(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Run history from metadata."""
     hist = metadata.get(HISTORY_KEY)
     if not isinstance(hist, list):
         return []
@@ -83,6 +88,7 @@ def history_from_metadata(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def push_skill_snapshot(skill: Skill, *, limit: int = DEFAULT_HISTORY_LIMIT) -> int:
+    """Run push skill snapshot."""
     metadata = dict(getattr(skill, "metadata", {}) or {})
     history = history_from_metadata(metadata)
     history.append(make_skill_snapshot(skill))
@@ -94,6 +100,7 @@ def push_skill_snapshot(skill: Skill, *, limit: int = DEFAULT_HISTORY_LIMIT) -> 
 
 
 def pop_skill_snapshot(skill: Skill) -> Optional[Dict[str, Any]]:
+    """Run pop skill snapshot."""
     metadata = dict(getattr(skill, "metadata", {}) or {})
     history = history_from_metadata(metadata)
     if not history:
@@ -106,6 +113,7 @@ def pop_skill_snapshot(skill: Skill) -> Optional[Dict[str, Any]]:
 
 
 def apply_snapshot(skill: Skill, snapshot: Dict[str, Any]) -> None:
+    """Run apply snapshot."""
     skill.version = str(snapshot.get("version") or str(getattr(skill, "version", "0.1.0")))
     skill.name = str(snapshot.get("name") or str(getattr(skill, "name", "")))
     skill.description = str(snapshot.get("description") or str(getattr(skill, "description", "")))

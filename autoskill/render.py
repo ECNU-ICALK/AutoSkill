@@ -52,6 +52,7 @@ def select_skills_for_context(
 def render_skills_context(
     skills: Iterable[Skill], *, query: Optional[str] = None, max_chars: int = 6_000
 ) -> str:
+    """Run render skills context."""
     parts: List[str] = []
     header = (
         "## AutoSkill Skills\n"
@@ -79,6 +80,7 @@ def render_skills_context(
 
 
 def _render_one(skill: Skill, *, index: int, max_chars: Optional[int] = None) -> str:
+    """Run render one."""
     triggers = "\n".join(f"- {t}" for t in (skill.triggers or [])[:6])
     tags = ", ".join((skill.tags or [])[:10])
     lines = [

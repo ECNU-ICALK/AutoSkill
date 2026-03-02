@@ -17,6 +17,7 @@ from .formats.agent_skill import load_agent_skill_dir, upsert_skill_md_id
 
 
 def _iter_skill_dirs(root_dir: str, *, max_depth: int) -> List[Tuple[str, str]]:
+    """Run iter skill dirs."""
     abs_root = os.path.abspath(os.path.expanduser(str(root_dir)))
     base_sep = abs_root.rstrip(os.sep) + os.sep
     out: List[Tuple[str, str]] = []
@@ -36,16 +37,19 @@ def _iter_skill_dirs(root_dir: str, *, max_depth: int) -> List[Tuple[str, str]]:
 
 
 def _read(path: str) -> str:
+    """Run read."""
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
 def _write(path: str, content: str) -> None:
+    """Run write."""
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
 def _has_frontmatter_id(md: str) -> bool:
+    """Run has frontmatter id."""
     lines = (md or "").splitlines()
     if not lines or lines[0].strip() != "---":
         return False
@@ -69,6 +73,7 @@ def _has_frontmatter_id(md: str) -> bool:
 
 
 def _deterministic_import_id(*, scope: str, owner: str, rel_path: str) -> str:
+    """Run deterministic import id."""
     base = f"autoskill-skill-id-v1:{scope}:{owner}:{rel_path}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, base))
 
@@ -80,6 +85,7 @@ def _rewrite_skill_md_id(
     deterministic_id_key: str,
     force: bool,
 ) -> bool:
+    """Run rewrite skill md id."""
     md_path = os.path.join(dir_path, "SKILL.md")
     if not os.path.isfile(md_path):
         return False
@@ -242,6 +248,7 @@ def import_agent_skills_to_common(
 
 
 def _to_bool(v: Any, default: bool) -> bool:
+    """Run to bool."""
     if v is None:
         return bool(default)
     if isinstance(v, bool):
@@ -257,6 +264,7 @@ def _to_bool(v: Any, default: bool) -> bool:
 
 
 def _to_int(v: Any, default: int) -> int:
+    """Run to int."""
     try:
         return int(v)
     except Exception:
@@ -264,6 +272,7 @@ def _to_int(v: Any, default: int) -> int:
 
 
 def _to_str_list(v: Any) -> List[str]:
+    """Run to str list."""
     if v is None:
         return []
     if isinstance(v, (list, tuple, set)):

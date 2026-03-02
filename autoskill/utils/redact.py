@@ -33,6 +33,7 @@ def redact_obj(obj: Any) -> Any:
 
 
 def redact_text(text: str) -> str:
+    """Run redact text."""
     s = text or ""
     s = _EMAIL_RE.sub("<EMAIL>", s)
     s = _URL_RE.sub("<URL>", s)

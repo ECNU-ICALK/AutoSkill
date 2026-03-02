@@ -49,10 +49,12 @@ _ASCII_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 def _ascii_words(text_lower: str) -> set[str]:
+    """Run ascii words."""
     return {m.group(0) for m in _ASCII_WORD_RE.finditer(text_lower or "")}
 
 
 def _looks_like_ack(text: str) -> bool:
+    """Run looks like ack."""
     s = (text or "").strip().lower()
     if not s:
         return False

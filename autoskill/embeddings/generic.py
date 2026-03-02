@@ -30,12 +30,14 @@ class GenericEmbedding(OpenAIEmbedding):
     max_batch_size: int = 256
 
     def _resolve_api_key_optional(self) -> str:
+        """Run resolve api key optional."""
         key = self.api_key
         if key is None or not str(key).strip():
             key = os.getenv("AUTOSKILL_GENERIC_API_KEY", "")
         return str(key or "").strip()
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         key = self._resolve_api_key_optional()
         raw_texts = [str(t or "") for t in (texts or [])]
         if not raw_texts:
@@ -50,6 +52,7 @@ class GenericEmbedding(OpenAIEmbedding):
         return self._embed_with_fallback(texts2, key=key, depth=0)
 
     def _embed_once(self, texts: List[str], *, key: str) -> List[List[float]]:
+        """Run embed once."""
         base = self.base_url.rstrip("/")
         url = (base + "/embeddings") if base.endswith("/v1") else (base + "/v1/embeddings")
         input_value: Any = texts[0] if len(texts) == 1 else list(texts)

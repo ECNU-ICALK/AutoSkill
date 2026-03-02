@@ -14,6 +14,7 @@ from .base import VectorIndex
 
 
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
+    """Run dot."""
     if not a or not b or len(a) != len(b):
         return 0.0
     s = 0.0
@@ -23,6 +24,7 @@ def _dot(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def _to_dict(obj: Any) -> Dict[str, Any]:
+    """Run to dict."""
     if isinstance(obj, dict):
         return obj
     to_dict = getattr(obj, "to_dict", None)
@@ -45,6 +47,7 @@ class PineconeVectorIndex(VectorIndex):
         namespace: str = "",
         host: str = "",
     ) -> None:
+        """Run init."""
         try:
             from pinecone import Pinecone  # type: ignore
         except Exception as e:
@@ -73,12 +76,15 @@ class PineconeVectorIndex(VectorIndex):
 
     @property
     def dims(self) -> Optional[int]:
+        """Run dims."""
         return self._dims
 
     def has(self, key: str) -> bool:
+        """Run has."""
         return self.get(key) is not None
 
     def get(self, key: str) -> Optional[List[float]]:
+        """Run get."""
         sid = str(key or "").strip()
         if not sid:
             return None
@@ -103,6 +109,7 @@ class PineconeVectorIndex(VectorIndex):
             return vec
 
     def upsert(self, key: str, vector: Sequence[float]) -> None:
+        """Run upsert."""
         sid = str(key or "").strip()
         vec = [float(x) for x in (vector or [])]
         if not sid or not vec:
@@ -115,6 +122,7 @@ class PineconeVectorIndex(VectorIndex):
             )
 
     def delete(self, key: str) -> bool:
+        """Run delete."""
         sid = str(key or "").strip()
         if not sid:
             return False
@@ -133,6 +141,7 @@ class PineconeVectorIndex(VectorIndex):
         keys: Optional[Iterable[str]] = None,
         top_k: int = 5,
     ) -> List[Tuple[str, float]]:
+        """Run search."""
         k = max(0, int(top_k))
         q = [float(x) for x in (query_vector or [])]
         if k <= 0 or not q:
@@ -183,18 +192,22 @@ class PineconeVectorIndex(VectorIndex):
 
     def load(self) -> None:
         # No explicit load phase for managed Pinecone indexes.
+        """Run load."""
         return None
 
     def save(self) -> None:
         # Managed service persists server-side.
+        """Run save."""
         return None
 
     def reset(self, *, dims: Optional[int] = None) -> None:
+        """Run reset."""
         with self._lock:
             self._index.delete(delete_all=True, namespace=self._namespace)
             self._dims = int(dims) if dims is not None else None
 
     def _ensure_dims(self, dims: int) -> None:
+        """Run ensure dims."""
         d = int(dims)
         if d <= 0:
             return

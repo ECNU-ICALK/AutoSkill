@@ -14,6 +14,7 @@ ADAPTER_PLUGIN_ID = "autoskill-openclaw-adapter"
 
 
 def _write_text(path: Path, content: str, executable: bool = False) -> None:
+    """Run write text."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     if executable:
@@ -23,20 +24,24 @@ def _write_text(path: Path, content: str, executable: bool = False) -> None:
 
 def _default_repo_dir() -> Path:
     # OpenClaw-Plugin/install.py -> repo root is parent directory.
+    """Run default repo dir."""
     return Path(__file__).resolve().parents[1]
 
 
 def _default_adapter_dir(workspace_dir: Path) -> Path:
+    """Run default adapter dir."""
     return (workspace_dir / "extensions" / ADAPTER_PLUGIN_ID).resolve()
 
 
 def _sync_tree(src: Path, dst: Path) -> None:
+    """Run sync tree."""
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
 
 
 def _load_json_dict(path: Path) -> dict:
+    """Run load json dict."""
     if not path.exists():
         return {}
     try:
@@ -47,6 +52,7 @@ def _load_json_dict(path: Path) -> dict:
 
 
 def _save_json(path: Path, data: dict) -> None:
+    """Run save json."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -57,6 +63,7 @@ def _upsert_openclaw_plugin_config(
     adapter_dir: Path,
     proxy_port: int,
 ) -> Path:
+    """Run upsert openclaw plugin config."""
     conf_path = (workspace_dir / "openclaw.json").resolve()
     root = _load_json_dict(conf_path)
     plugins = root.get("plugins")
@@ -103,6 +110,7 @@ def _upsert_openclaw_plugin_config(
 
 
 def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Path) -> str:
+    """Run env template."""
     store_dir = Path(str(args.store_dir or "")).expanduser()
     if not str(store_dir).strip():
         store_dir = workspace_dir / "autoskill" / "SkillBank"
@@ -138,6 +146,7 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
 
 
 def _run_sh() -> str:
+    """Run run sh."""
     return """#!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -151,6 +160,7 @@ exec "${AUTOSKILL_PYTHON:-python3}" "${AUTOSKILL_REPO_DIR}/OpenClaw-Plugin/run_p
 
 
 def _start_sh() -> str:
+    """Run start sh."""
     return """#!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -172,6 +182,7 @@ echo "[autoskill-openclaw-plugin] started pid=$(cat "$PID_FILE") log=$LOG_FILE"
 
 
 def _stop_sh() -> str:
+    """Run stop sh."""
     return """#!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -191,6 +202,7 @@ echo "[autoskill-openclaw-plugin] stopped"
 
 
 def _status_sh() -> str:
+    """Run status sh."""
     return """#!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -209,6 +221,7 @@ fi
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Run build parser."""
     parser = argparse.ArgumentParser(description="Install AutoSkill OpenClaw plugin sidecar.")
     parser.add_argument("--workspace-dir", default="~/.openclaw")
     parser.add_argument("--install-dir", default="~/.openclaw/plugins/autoskill-openclaw-plugin")
@@ -240,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run main."""
     args = build_parser().parse_args()
     workspace_dir = Path(os.path.expanduser(str(args.workspace_dir))).resolve()
     install_dir = Path(os.path.expanduser(str(args.install_dir))).resolve()

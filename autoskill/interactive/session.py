@@ -77,6 +77,7 @@ def _format_hit(hit: SkillHit, *, rank: int) -> Dict[str, Any]:
 
 
 def _top_reference_from_hits(hits: List[SkillHit], *, user_id: str) -> Optional[Dict[str, Any]]:
+    """Run top reference from hits."""
     if not hits:
         return None
     top = hits[0]
@@ -105,6 +106,7 @@ def _truncate_text(text: str, *, max_chars: int) -> str:
 
 
 def _now_ms() -> int:
+    """Run now ms."""
     return int(time.time() * 1000)
 
 
@@ -126,6 +128,7 @@ class InteractiveSession:
         query_rewriter: Optional[LLMQueryRewriter] = None,
         skill_selector: Optional[LLMSkillSelector] = None,
     ) -> None:
+        """Run init."""
         self.sdk = sdk
         self.config = (config or InteractiveConfig()).normalize()
         self.chat_llm = chat_llm
@@ -254,6 +257,7 @@ class InteractiveSession:
         self._caller_system_prompt = str(caller_system or "").strip()
 
         def _gen() -> Iterator[Dict[str, Any]]:
+            """Run gen."""
             try:
                 for ev in self._handle_user_message_stream(latest):
                     yield ev
@@ -282,6 +286,7 @@ class InteractiveSession:
         return latest
 
     def _handle_command(self, cmd: Command) -> Dict[str, Any]:
+        """Run handle command."""
         name = cmd.name
         arg = cmd.arg
 
@@ -819,6 +824,7 @@ class InteractiveSession:
         yield {"type": "result", "result": result}
 
     def _help_text(self) -> str:
+        """Run help text."""
         return (
             "Commands:\n"
             "  /help\n"

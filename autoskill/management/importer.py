@@ -36,6 +36,7 @@ def import_agent_skill_dirs(
         raise ValueError(f"root_dir is not a directory: {root_dir}")
 
     def iter_skill_dirs(base: str):
+        """Run iter skill dirs."""
         base_sep = base.rstrip(os.sep) + os.sep
         for current, dirs, files in os.walk(base):
             current_abs = os.path.abspath(current)

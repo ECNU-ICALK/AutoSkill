@@ -14,6 +14,7 @@ from .base import VectorIndex
 
 
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
+    """Run dot."""
     if not a or not b or len(a) != len(b):
         return 0.0
     s = 0.0
@@ -30,6 +31,7 @@ class ChromaVectorIndex(VectorIndex):
         collection_name: str = "skills",
         metric: str = "cosine",
     ) -> None:
+        """Run init."""
         try:
             import chromadb  # type: ignore
         except Exception as e:
@@ -51,12 +53,15 @@ class ChromaVectorIndex(VectorIndex):
 
     @property
     def dims(self) -> Optional[int]:
+        """Run dims."""
         return self._dims
 
     def has(self, key: str) -> bool:
+        """Run has."""
         return self.get(key) is not None
 
     def get(self, key: str) -> Optional[List[float]]:
+        """Run get."""
         sid = str(key or "").strip()
         if not sid:
             return None
@@ -78,6 +83,7 @@ class ChromaVectorIndex(VectorIndex):
             return vec
 
     def upsert(self, key: str, vector: Sequence[float]) -> None:
+        """Run upsert."""
         sid = str(key or "").strip()
         vec = [float(x) for x in (vector or [])]
         if not sid or not vec:
@@ -87,6 +93,7 @@ class ChromaVectorIndex(VectorIndex):
             self._collection.upsert(ids=[sid], embeddings=[vec])
 
     def delete(self, key: str) -> bool:
+        """Run delete."""
         sid = str(key or "").strip()
         if not sid:
             return False
@@ -105,6 +112,7 @@ class ChromaVectorIndex(VectorIndex):
         keys: Optional[Iterable[str]] = None,
         top_k: int = 5,
     ) -> List[Tuple[str, float]]:
+        """Run search."""
         k = max(0, int(top_k))
         q = [float(x) for x in (query_vector or [])]
         if k <= 0 or not q:
@@ -160,6 +168,7 @@ class ChromaVectorIndex(VectorIndex):
             return scored2[:k]
 
     def load(self) -> None:
+        """Run load."""
         with self._lock:
             try:
                 out = self._collection.get(limit=1, include=["embeddings"])
@@ -174,9 +183,11 @@ class ChromaVectorIndex(VectorIndex):
 
     def save(self) -> None:
         # Chroma persistence is managed by the client.
+        """Run save."""
         return None
 
     def reset(self, *, dims: Optional[int] = None) -> None:
+        """Run reset."""
         with self._lock:
             try:
                 self._client.delete_collection(self._collection_name)
@@ -189,6 +200,7 @@ class ChromaVectorIndex(VectorIndex):
             self._dims = int(dims) if dims is not None else None
 
     def _ensure_dims(self, dims: int) -> None:
+        """Run ensure dims."""
         d = int(dims)
         if d <= 0:
             return

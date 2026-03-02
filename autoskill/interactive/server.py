@@ -53,6 +53,7 @@ _EXTRACT_TERMINAL = {"completed", "failed"}
 
 
 def _content_to_text(content: Any) -> str:
+    """Run content to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -77,6 +78,7 @@ def _content_to_text(content: Any) -> str:
 
 
 def _safe_float(v: Any, default: float) -> float:
+    """Run safe float."""
     try:
         return float(v)
     except Exception:
@@ -84,6 +86,7 @@ def _safe_float(v: Any, default: float) -> float:
 
 
 def _safe_int(v: Any, default: Optional[int]) -> Optional[int]:
+    """Run safe int."""
     if v is None:
         return default
     try:
@@ -93,6 +96,7 @@ def _safe_int(v: Any, default: Optional[int]) -> Optional[int]:
 
 
 def _safe_optional_bool(v: Any) -> Optional[bool]:
+    """Run safe optional bool."""
     if v is None:
         return None
     if isinstance(v, bool):
@@ -108,6 +112,7 @@ def _safe_optional_bool(v: Any) -> Optional[bool]:
 
 
 def _normalize_scope(scope: str) -> str:
+    """Run normalize scope."""
     s = str(scope or "all").strip().lower()
     if s == "common":
         s = "library"
@@ -117,6 +122,7 @@ def _normalize_scope(scope: str) -> str:
 
 
 def _normalize_messages(raw: Any) -> List[Dict[str, str]]:
+    """Run normalize messages."""
     if not isinstance(raw, list):
         return []
     out: List[Dict[str, str]] = []
@@ -134,6 +140,7 @@ def _normalize_messages(raw: Any) -> List[Dict[str, str]]:
 
 
 def _parse_bool(v: Any, *, default: bool = False) -> bool:
+    """Run parse bool."""
     if v is None:
         return bool(default)
     s = str(v).strip().lower()
@@ -147,6 +154,7 @@ def _parse_bool(v: Any, *, default: bool = False) -> bool:
 
 
 def _q_first(qs: Dict[str, List[str]], key: str, default: str = "") -> str:
+    """Run q first."""
     vals = qs.get(key) or []
     if not vals:
         return str(default or "")
@@ -222,6 +230,7 @@ def _decode_jwt_payload_no_verify(token: str) -> Dict[str, Any]:
 
 
 def _user_id_from_auth_jwt(headers: Any) -> str:
+    """Run user id from auth jwt."""
     auth = str(headers.get("Authorization") or "").strip()
     if not auth:
         return ""
@@ -236,11 +245,13 @@ def _user_id_from_auth_jwt(headers: Any) -> str:
 
 
 def _is_library_skill(skill: Skill) -> bool:
+    """Run is library skill."""
     owner = str(getattr(skill, "user_id", "") or "").strip().lower()
     return owner.startswith("library:")
 
 
 def _skill_source_label(skill: Skill) -> str:
+    """Run skill source label."""
     owner = str(getattr(skill, "user_id", "") or "").strip()
     if owner.startswith("library:"):
         return owner
@@ -250,6 +261,7 @@ def _skill_source_label(skill: Skill) -> str:
 
 
 def _format_retrieval_hit(hit: Any, *, rank: int) -> Dict[str, Any]:
+    """Run format retrieval hit."""
     skill = getattr(hit, "skill", None)
     score = float(getattr(hit, "score", 0.0) or 0.0)
     if skill is None:
@@ -269,6 +281,7 @@ def _format_retrieval_hit(hit: Any, *, rank: int) -> Dict[str, Any]:
 
 
 def _skill_summary(skill: Skill) -> Dict[str, Any]:
+    """Run skill summary."""
     return {
         "id": str(skill.id),
         "name": str(skill.name),
@@ -282,6 +295,7 @@ def _skill_summary(skill: Skill) -> Dict[str, Any]:
 
 
 def _skill_detail(skill: Skill, *, include_md: bool) -> Dict[str, Any]:
+    """Run skill detail."""
     files = dict(skill.files or {})
     out = {
         **_skill_summary(skill),
@@ -296,6 +310,7 @@ def _skill_detail(skill: Skill, *, include_md: bool) -> Dict[str, Any]:
 
 
 def _candidate_detail(candidate: Any) -> Dict[str, Any]:
+    """Run candidate detail."""
     return {
         "name": str(getattr(candidate, "name", "") or ""),
         "description": str(getattr(candidate, "description", "") or ""),
@@ -309,6 +324,7 @@ def _candidate_detail(candidate: Any) -> Dict[str, Any]:
 
 
 def _skill_versions(skill: Skill) -> List[Dict[str, Any]]:
+    """Run skill versions."""
     versions: List[Dict[str, Any]] = []
     hist = _history_from_metadata(dict(skill.metadata or {}))
     for item in hist:
@@ -334,6 +350,7 @@ def _skill_versions(skill: Skill) -> List[Dict[str, Any]]:
 
 
 def _safe_extract_zip(zip_path: str, out_dir: str) -> None:
+    """Run safe extract zip."""
     with zipfile.ZipFile(zip_path, "r") as zf:
         for info in zf.infolist():
             name = str(info.filename or "")
@@ -353,6 +370,7 @@ def _safe_extract_zip(zip_path: str, out_dir: str) -> None:
 
 
 def _latest_user_query(messages: List[Dict[str, str]]) -> str:
+    """Run latest user query."""
     for m in reversed(messages):
         if str(m.get("role") or "").strip().lower() == "user":
             q = str(m.get("content") or "").strip()
@@ -366,6 +384,7 @@ def _latest_user_query(messages: List[Dict[str, str]]) -> str:
 
 
 def _extract_base_system(messages: List[Dict[str, str]]) -> str:
+    """Run extract base system."""
     parts: List[str] = []
     for m in messages:
         if str(m.get("role") or "").strip().lower() != "system":
@@ -377,6 +396,7 @@ def _extract_base_system(messages: List[Dict[str, str]]) -> str:
 
 
 def _openai_error(message: str, *, code: str = "bad_request", err_type: str = "invalid_request_error") -> Dict[str, Any]:
+    """Run openai error."""
     return {
         "error": {
             "message": str(message),
@@ -388,6 +408,7 @@ def _openai_error(message: str, *, code: str = "bad_request", err_type: str = "i
 
 
 def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int = 200) -> None:
+    """Run json response."""
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
         handler.send_response(int(status))
@@ -406,6 +427,7 @@ def _json_response(handler: BaseHTTPRequestHandler, payload: Any, *, status: int
 
 
 def _read_json(handler: BaseHTTPRequestHandler, *, max_bytes: int = 10_000_000) -> Dict[str, Any]:
+    """Run read json."""
     length = int(handler.headers.get("Content-Length", "0") or 0)
     if length <= 0:
         return {}
@@ -442,6 +464,7 @@ class AutoSkillProxyConfig:
     served_models: List[Dict[str, Any]] = field(default_factory=list)
 
     def normalize(self) -> "AutoSkillProxyConfig":
+        """Run normalize."""
         self.user_id = str(self.user_id or "u1").strip() or "u1"
         self.skill_scope = _normalize_scope(self.skill_scope)
         mode = str(self.rewrite_mode or "always").strip().lower()
@@ -489,6 +512,7 @@ class AutoSkillProxyRuntime:
         query_rewriter: Optional[LLMQueryRewriter] = None,
         skill_selector: Optional[LLMSkillSelector] = None,
     ) -> None:
+        """Run init."""
         self.sdk = sdk
         self.llm_config = dict(llm_config or {})
         self.embeddings_config = dict(embeddings_config or {})
@@ -749,11 +773,13 @@ class AutoSkillProxyRuntime:
         handler.end_headers()
 
         def _send(obj: Dict[str, Any]) -> None:
+            """Run send."""
             data = f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
             handler.wfile.write(data)
             handler.wfile.flush()
 
         def _done() -> None:
+            """Run done."""
             handler.wfile.write(b"data: [DONE]\n\n")
             handler.wfile.flush()
             handler.close_connection = True
@@ -918,16 +944,19 @@ class AutoSkillProxyRuntime:
                 handler.close_connection = True
 
     def make_handler(self) -> type[BaseHTTPRequestHandler]:
+        """Run make handler."""
         runtime = self
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "AutoSkillProxy/0.1"
 
             def log_message(self, format: str, *args: Any) -> None:
+                """Run log message."""
                 msg = str(format or "") % args
                 print(f"[proxy] {msg}")
 
             def _authorized(self) -> bool:
+                """Run authorized."""
                 expected = runtime.config.proxy_api_key
                 if not expected:
                     return True
@@ -945,6 +974,7 @@ class AutoSkillProxyRuntime:
                 return False
 
             def _read_body_safely(self) -> Dict[str, Any]:
+                """Run read body safely."""
                 try:
                     return _read_json(self)
                 except Exception as e:
@@ -956,6 +986,7 @@ class AutoSkillProxyRuntime:
                     return {"_error": True}
 
             def do_GET(self) -> None:  # noqa: N802
+                """Run do GET."""
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
                 qs = parse_qs(parsed.query or "", keep_blank_values=False)
@@ -1144,6 +1175,7 @@ class AutoSkillProxyRuntime:
                 self.end_headers()
 
             def do_POST(self) -> None:  # noqa: N802
+                """Run do POST."""
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
                 if path.startswith("/v1/") and not self._authorized():
@@ -1283,6 +1315,7 @@ class AutoSkillProxyRuntime:
                 )
 
             def do_PUT(self) -> None:  # noqa: N802
+                """Run do PUT."""
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
                 if path.startswith("/v1/") and not self._authorized():
@@ -1308,6 +1341,7 @@ class AutoSkillProxyRuntime:
                 )
 
             def do_DELETE(self) -> None:  # noqa: N802
+                """Run do DELETE."""
                 parsed = urlparse(self.path or "/")
                 path = parsed.path or "/"
                 if path.startswith("/v1/") and not self._authorized():
@@ -1332,10 +1366,12 @@ class AutoSkillProxyRuntime:
         return Handler
 
     def create_server(self, *, host: str, port: int) -> ThreadingHTTPServer:
+        """Run create server."""
         handler = self.make_handler()
         return ThreadingHTTPServer((str(host), int(port)), handler)
 
     def capabilities(self) -> Dict[str, Any]:
+        """Run capabilities."""
         return {
             "object": "autoskill.capabilities",
             "data": {
@@ -1378,6 +1414,7 @@ class AutoSkillProxyRuntime:
         }
 
     def _runtime_llm_info(self) -> Dict[str, Any]:
+        """Run runtime llm info."""
         provider = str(self.llm_config.get("provider") or "mock").strip().lower() or "mock"
         model = str(self.llm_config.get("model") or "").strip()
         thinking_supported = provider in {"internlm", "intern", "intern-s1", "intern-s1-pro"}
@@ -1394,6 +1431,7 @@ class AutoSkillProxyRuntime:
         }
 
     def openapi_spec(self) -> Dict[str, Any]:
+        """Run openapi spec."""
         return {
             "openapi": "3.1.0",
             "info": {
@@ -1449,6 +1487,7 @@ class AutoSkillProxyRuntime:
         limit: Optional[int] = None,
         min_score: Optional[float] = None,
     ) -> Dict[str, Any]:
+        """Run retrieve context."""
         latest_user = _latest_user_query(messages)
         search_query = latest_user
         rewritten_query = ""
@@ -1577,6 +1616,7 @@ class AutoSkillProxyRuntime:
         return out
 
     def create_embeddings(self, *, body: Dict[str, Any]) -> Dict[str, Any]:
+        """Run create embeddings."""
         inp = body.get("input")
         model = str(body.get("model") or self.embeddings_config.get("model") or "embedding-model")
         texts = self._normalize_embedding_input(inp)
@@ -1596,6 +1636,7 @@ class AutoSkillProxyRuntime:
         }
 
     def search_skills_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run search skills api."""
         query = str(body.get("query") or body.get("q") or "").strip()
         if not query:
             raise ValueError("query is required")
@@ -1640,6 +1681,7 @@ class AutoSkillProxyRuntime:
         }
 
     def retrieval_preview_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run retrieval preview api."""
         messages = _normalize_messages(body.get("messages"))
         query = str(body.get("query") or body.get("q") or "").strip()
         if not messages and query:
@@ -1670,6 +1712,7 @@ class AutoSkillProxyRuntime:
         }
 
     def extract_now_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run extract now api."""
         user_id = self._resolve_user_id(body=body, headers=headers)
         messages = _normalize_messages(body.get("messages"))
         query = str(body.get("query") or "").strip()
@@ -1708,6 +1751,7 @@ class AutoSkillProxyRuntime:
         }
 
     def simulate_extraction_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run simulate extraction api."""
         user_id = self._resolve_user_id(body=body, headers=headers)
         messages = _normalize_messages(body.get("messages"))
         query = str(body.get("query") or "").strip()
@@ -1749,6 +1793,7 @@ class AutoSkillProxyRuntime:
         }
 
     def save_skill_md_api(self, *, path: str, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run save skill md api."""
         skill_id, tail = self._parse_skill_path(path)
         if not skill_id or tail != "/md":
             return {"_status": 400, **_openai_error("Invalid skill md path", code="invalid_request")}
@@ -1813,6 +1858,7 @@ class AutoSkillProxyRuntime:
         }
 
     def rollback_skill_api(self, *, path: str, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run rollback skill api."""
         skill_id, tail = self._parse_skill_path(path)
         if not skill_id or tail != "/rollback":
             return {"_status": 400, **_openai_error("Invalid rollback path", code="invalid_request")}
@@ -1852,6 +1898,7 @@ class AutoSkillProxyRuntime:
         }
 
     def export_skill_api(self, *, path: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
+        """Run export skill api."""
         skill_id, tail = self._parse_skill_path(path)
         if not skill_id or tail != "/export":
             return {"_status": 400, **_openai_error("Invalid skill export path", code="invalid_request")}
@@ -1902,6 +1949,7 @@ class AutoSkillProxyRuntime:
         }
 
     def import_skills_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run import skills api."""
         user_id = self._resolve_user_id(body=body, headers=headers)
         root_dir = str(body.get("root_dir") or "").strip()
         zip_path = str(body.get("zip_path") or "").strip()
@@ -2003,6 +2051,7 @@ class AutoSkillProxyRuntime:
         }
 
     def vector_status_api(self, *, user_id: str, scope: str) -> Dict[str, Any]:
+        """Run vector status api."""
         store = self._local_store()
         if store is None:
             return {
@@ -2015,6 +2064,7 @@ class AutoSkillProxyRuntime:
         }
 
     def vector_rebuild_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Run vector rebuild api."""
         store = self._local_store()
         if store is None:
             return {
@@ -2042,6 +2092,7 @@ class AutoSkillProxyRuntime:
         }
 
     def delete_skill_api(self, *, path: str, headers: Any) -> Dict[str, Any]:
+        """Run delete skill api."""
         skill_id, tail = self._parse_skill_path(path)
         if not skill_id or tail not in {"", "/"}:
             return {"_status": 400, **_openai_error("Invalid skill delete path", code="invalid_request")}
@@ -2061,6 +2112,7 @@ class AutoSkillProxyRuntime:
         return {"ok": True, "deleted": True, "skill_id": skill_id}
 
     def _parse_skill_path(self, path: str) -> Tuple[str, str]:
+        """Run parse skill path."""
         prefix = "/v1/autoskill/skills/"
         raw = str(path or "")
         if not raw.startswith(prefix):
@@ -2074,6 +2126,7 @@ class AutoSkillProxyRuntime:
         return skill_id.strip(), "/" + tail.strip()
 
     def _skill_owner_guard(self, *, skill: Skill, user_id: str) -> Optional[Dict[str, Any]]:
+        """Run skill owner guard."""
         owner = str(getattr(skill, "user_id", "") or "").strip()
         if _is_library_skill(skill):
             return {"_status": 403, **_openai_error("Library skills are read-only", code="forbidden")}
@@ -2082,6 +2135,7 @@ class AutoSkillProxyRuntime:
         return None
 
     def _record_extraction_event(self, *, user_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Run record extraction event."""
         uid = str(user_id or "").strip() or self.config.user_id
         ev = dict(event or {})
         ev["user_id"] = uid
@@ -2104,6 +2158,7 @@ class AutoSkillProxyRuntime:
         return dict(ev)
 
     def _list_extraction_events(self, *, user_id: str, limit: int) -> List[Dict[str, Any]]:
+        """Run list extraction events."""
         uid = str(user_id or "").strip() or self.config.user_id
         lim = max(1, min(200, int(limit or 20)))
         with self._extract_events_lock:
@@ -2111,6 +2166,7 @@ class AutoSkillProxyRuntime:
         return list(reversed(arr[-lim:]))
 
     def _get_latest_extraction_event(self, *, user_id: str) -> Optional[Dict[str, Any]]:
+        """Run get latest extraction event."""
         uid = str(user_id or "").strip() or self.config.user_id
         with self._extract_events_lock:
             arr = self._extract_events_by_user.get(uid) or []
@@ -2119,6 +2175,7 @@ class AutoSkillProxyRuntime:
             return dict(arr[-1])
 
     def _get_extraction_event_by_job(self, *, job_id: str) -> Optional[Dict[str, Any]]:
+        """Run get extraction event by job."""
         jid = str(job_id or "").strip()
         if not jid:
             return None
@@ -2133,6 +2190,7 @@ class AutoSkillProxyRuntime:
         job_id: str,
         timeout_s: float = 30.0,
     ) -> None:
+        """Run stream extraction events."""
         jid = str(job_id or "").strip()
         if not jid:
             return _json_response(
@@ -2149,6 +2207,7 @@ class AutoSkillProxyRuntime:
         handler.end_headers()
 
         def _send(event: str, payload: Dict[str, Any]) -> None:
+            """Run send."""
             data = json.dumps(payload, ensure_ascii=False)
             handler.wfile.write(f"event: {event}\n".encode("utf-8"))
             handler.wfile.write(f"data: {data}\n\n".encode("utf-8"))
@@ -2180,6 +2239,7 @@ class AutoSkillProxyRuntime:
             return
 
     def _local_store(self) -> Optional[LocalSkillStore]:
+        """Run local store."""
         store = getattr(self.sdk, "store", None)
         if isinstance(store, LocalSkillStore):
             return store
@@ -2214,6 +2274,7 @@ class AutoSkillProxyRuntime:
         retrieval_hits: List[Dict[str, Any]],
         user_id: str,
     ) -> Optional[Dict[str, Any]]:
+        """Run top reference from retrieval hits."""
         if not retrieval_hits:
             return None
         top = retrieval_hits[0] if isinstance(retrieval_hits[0], dict) else None
@@ -2261,6 +2322,7 @@ class AutoSkillProxyRuntime:
         hint: Optional[str] = None,
         retrieval_reference: Optional[Dict[str, Any]] = None,
     ) -> str:
+        """Run schedule extraction job."""
         uid = str(user_id or "").strip() or self.config.user_id
         window = list(messages or [])
         job_id = str(uuid.uuid4())
@@ -2335,6 +2397,7 @@ class AutoSkillProxyRuntime:
         error: str,
         event_time: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Run empty extraction event."""
         return {
             "job_id": str(job_id or ""),
             "trigger": str(trigger or "proxy_extract"),
@@ -2354,6 +2417,7 @@ class AutoSkillProxyRuntime:
         trigger: str,
         event_time: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Run build completed extraction event."""
         event = self._empty_extraction_event(
             job_id=job_id,
             trigger=trigger,
@@ -2399,6 +2463,7 @@ class AutoSkillProxyRuntime:
         return event
 
     def _background_extraction_worker(self, job: _ProxyExtractJob) -> None:
+        """Run background extraction worker."""
         uid = str(getattr(job, "user_id", "") or "").strip() or self.config.user_id
         acquired = False
         current = job
@@ -2479,6 +2544,7 @@ class AutoSkillProxyRuntime:
         max_tokens: Optional[int],
         thinking_mode: Optional[bool] = None,
     ) -> LLM:
+        """Run build chat llm."""
         cfg = dict(self.llm_config)
         if model:
             cfg["model"] = model
@@ -2489,6 +2555,7 @@ class AutoSkillProxyRuntime:
         return build_llm(cfg)
 
     def _build_embeddings_model(self, *, model: str) -> EmbeddingModel:
+        """Run build embeddings model."""
         if not model or str(model).strip() == str(self.embeddings_config.get("model") or "").strip():
             return self._base_embeddings
         cfg = dict(self.embeddings_config)
@@ -2496,6 +2563,7 @@ class AutoSkillProxyRuntime:
         return build_embeddings(cfg)
 
     def _resolve_user_id(self, *, body: Dict[str, Any], headers: Any) -> str:
+        """Run resolve user id."""
         from_body = str(body.get("user") or "").strip()
         if from_body:
             print(f"[proxy] resolved user_id from body user={from_body}", flush=True)
@@ -2517,12 +2585,14 @@ class AutoSkillProxyRuntime:
         return fallback
 
     def _resolve_scope(self, *, headers: Any) -> str:
+        """Run resolve scope."""
         raw = str(headers.get("X-AutoSkill-Scope") or "").strip()
         if not raw:
             return self.config.skill_scope
         return _normalize_scope(raw)
 
     def _normalize_embedding_input(self, inp: Any) -> List[str]:
+        """Run normalize embedding input."""
         if inp is None:
             return []
         if isinstance(inp, str):

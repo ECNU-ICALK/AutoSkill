@@ -15,5 +15,6 @@ class DisabledEmbedding(EmbeddingModel):
     disabled = True
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        """Run embed."""
         raise RuntimeError("Embeddings are disabled (provider=none).")
 

@@ -2,6 +2,10 @@
 
 English | [中文](README.zh-CN.md)
 
+<p align="center">
+  <img src="imgs/AutoSkill_logo.png" alt="AutoSkill Logo" width="320" />
+</p>
+
 AutoSkill is a practical implementation of **Experience-driven Lifelong Learning (ELL)**.
 It learns from real interaction experience (dialogue + behavior/events), automatically creates reusable Skills,
 and continuously evolves existing Skills through merge + version updates.
@@ -13,8 +17,53 @@ and continuously evolves existing Skills through merge + version updates.
 - **2025-02-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
 - **2025-02-04**: **AutoSkill 1.0** released.
 
+## Table of Contents
 
-## 1. Start Here: Web UI
+- [News](#news)
+- [1. Quick Start (Web / Proxy / Docker)](#1-quick-start-web--proxy--docker)
+  - [1.1 Web UI](#11-web-ui)
+  - [1.2 Standard API Proxy](#12-standard-api-proxy)
+  - [1.3 One-click Deploy (Docker Compose)](#13-one-click-deploy-docker-compose)
+  - [1.4 Skill Lifecycle Example (3 Aspects)](#14-skill-lifecycle-example-3-aspects)
+- [2. What Makes AutoSkill Different](#2-what-makes-autoskill-different)
+  - [2.1 Decoupled Connectors and Vector Backends](#21-decoupled-connectors-and-vector-backends)
+- [3. System Workflow](#3-system-workflow)
+  - [3.1 Ingest and Evolve](#31-ingest-and-evolve)
+  - [3.2 Retrieve and Respond](#32-retrieve-and-respond)
+  - [3.3 Interactive Extraction Policy](#33-interactive-extraction-policy)
+  - [3.4 Proxy Serving Flow](#34-proxy-serving-flow)
+- [4. Key Concepts](#4-key-concepts)
+- [5. Storage Layout (Local Store)](#5-storage-layout-local-store)
+- [6. Repository Structure (Readable Map)](#6-repository-structure-readable-map)
+  - [6.1 Top Level](#61-top-level)
+  - [6.2 Core SDK Modules](#62-core-sdk-modules)
+  - [6.3 Skill Management Layer](#63-skill-management-layer)
+  - [6.4 Interactive Layer](#64-interactive-layer)
+  - [6.5 Example Entrypoints](#65-example-entrypoints)
+  - [6.6 Offline Import](#66-offline-import)
+- [7. SDK & Offline Usage](#7-sdk--offline-usage)
+  - [7.1 Import OpenAI Conversations and Auto-Extract Skills](#71-import-openai-conversations-and-auto-extract-skills)
+  - [7.2 Offline Conversation Extraction via CLI](#72-offline-conversation-extraction-via-cli)
+- [8. Provider Setup](#8-provider-setup)
+  - [8.1 DashScope (Example)](#81-dashscope-example)
+  - [8.2 GLM (BigModel)](#82-glm-bigmodel)
+  - [8.3 OpenAI / Anthropic](#83-openai--anthropic)
+  - [8.4 InternLM (Intern-S1 Pro)](#84-internlm-intern-s1-pro)
+  - [8.5 Generic URL-based Backends (LLM + Embeddings)](#85-generic-url-based-backends-llm--embeddings)
+- [9. Runtime Workflows & APIs](#9-runtime-workflows--apis)
+  - [9.1 Interactive Chat (retrieve every turn)](#91-interactive-chat-retrieve-every-turn)
+  - [9.2 Web UI](#92-web-ui)
+  - [9.3 Startup Offline Maintenance (Auto)](#93-startup-offline-maintenance-auto)
+  - [9.4 OpenAI-Compatible Proxy API](#94-openai-compatible-proxy-api)
+  - [9.5 Auto Evaluation Script](#95-auto-evaluation-script)
+  - [9.6 OpenClaw Plugin (autoskill)](#96-openclaw-plugin-autoskill)
+- [10. Why This Matters](#10-why-this-matters)
+- [11. Citation](#11-citation)
+- [12. Contributions and Acknowledgments](#12-contributions-and-acknowledgments)
+
+## 1. Quick Start (Web / Proxy / Docker)
+
+### 1.1 Web UI
 
 ```bash
 python3 -m pip install -e .
@@ -37,7 +86,7 @@ python3 -m examples.web_ui \
 
 Open `http://127.0.0.1:8000`.
 
-## 1.1 Standard API Proxy
+### 1.2 Standard API Proxy
 
 AutoSkill can also be deployed as a reverse proxy that exposes OpenAI-compatible endpoints while transparently applying:
 - skill retrieval/injection for each chat request
@@ -98,7 +147,7 @@ If proxy auth is enabled (`--proxy-api-key`), add:
 -H "Authorization: Bearer $AUTOSKILL_PROXY_API_KEY"
 ```
 
-## 1.2 One-click Deploy (Docker Compose)
+### 1.3 One-click Deploy (Docker Compose)
 
 ```bash
 cp .env.example .env
@@ -124,7 +173,7 @@ Both share persistent local storage:
 - host: `./SkillBank`
 - container: `/data/SkillBank`
 
-## 1.3 Skill Lifecycle Example (3 Aspects)
+### 1.4 Skill Lifecycle Example (3 Aspects)
 
 ### A) Auto Decision + Feedback-triggered Extraction & Skill Management (v0.1.0)
 
@@ -166,7 +215,7 @@ to generate outputs aligned with user expectations.
 
 - **Experience-driven continuous skill evolution**: extracts reusable capabilities directly from real user interactions and behavior traces, then continuously maintains versioned skills so the system better aligns with user needs over time.
 - **Universal skill format**: uses the Agent Skill artifact (`SKILL.md`) with clear explainability and editability: the structure is transparent, content is reviewable, and humans can revise it as needed; this also enables both importing existing skills and migrating extracted skills to other systems.
-- **Standard API service integration**: integrates into existing LLM stacks in a plug-in style; with an OpenAI-compatible proxy, AutoSkill can be adopted without changing business-side calling patterns.
+- **Offline skill extraction from completed chats**: once a chat is finished, there is no need to replay it with the model; directly import the existing conversation logs (OpenAI-format `.json/.jsonl`) and run offline extraction to produce reusable skills.
 
 ## 2.1 Decoupled Connectors and Vector Backends
 
@@ -278,6 +327,8 @@ Notes:
 - `Users/<user_id>`: user-specific skills.
 - `Common/`: shared library skills (read-only in normal interactive usage).
 - `vectors/`: persistent vector cache keyed by embedding signature, so switching embedding models will build/use separate indexes.
+- Offline skills extracted from WildChat 1M are available under `SkillBank/Users` in:
+  `chinese_gpt3.5_8`, `english_gpt3.5_8`, `chinese_gpt4_8`, and `english_gpt4_8`.
 
 ## 6. Repository Structure (Readable Map)
 
@@ -364,7 +415,7 @@ python3 -m autoskill.offline.trajectory.extract \
   --include-tool-events 1
 ```
 
-## 7. Quick SDK Usage
+## 7. SDK & Offline Usage
 
 ```python
 from autoskill import AutoSkill, AutoSkillConfig
@@ -435,6 +486,7 @@ python3 -m autoskill.offline.conversation.extract \
 
 Behavior:
 - `--file` accepts one OpenAI-format `.json`/`.jsonl` file or a directory containing multiple files.
+- If a single `.json` file contains multiple conversations, the loader iterates all conversations and extracts skills per conversation unit.
 - The runner prints per-file progress in real time, including file name and extracted skill names.
 
 ## 8. Provider Setup
@@ -483,7 +535,7 @@ export AUTOSKILL_GENERIC_API_KEY=""
 python3 -m examples.interactive_chat --llm-provider generic --embeddings-provider generic
 ```
 
-## 9. Common Workflows
+## 9. Runtime Workflows & APIs
 
 ### 9.1 Interactive Chat (retrieve every turn)
 
