@@ -14,6 +14,7 @@ and continuously evolves existing Skills through merge + version updates.
 
 ## News
 
+- **2026-03-01**: Added offline skill extraction from archived conversations.
 - **2025-02-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
 - **2025-02-04**: **AutoSkill 1.0** released.
 
