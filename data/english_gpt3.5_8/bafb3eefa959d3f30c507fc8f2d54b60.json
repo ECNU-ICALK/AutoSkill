@@ -1,93 +1,0 @@
-{
-  "model": "gpt-3.5",
-  "messages": [
-    {
-      "role": "user",
-      "content": "Mojang and Microsoft have breached my contract, taking away my Minecraft account unlawfully. I'd love to hear fifteen good hashtag slogan suggestions that creatively describe their actions. Let me know if you need more information or specifics."
-    },
-    {
-      "role": "assistant",
-      "content": "1. #CraftingInJustice: Unlawfully Stripped of My Minecraft\n2. #MinecraftBetrayal: Mojang and Microsoft Breaking Promises\n3. #AccountTheftSaga: Unjustly Denied My Minecraft Claim\n4. #VirtualRightsViolated: My Minecraft Account Stolen\n5. #UnfairBlocks: Mojang and Microsoft Breaking Contracts\n6. #CreativeMayhem: Loss of Minecraft Account, Unlawfully\n7. #VirtualInjustice: Mojang and Microsoft's Breach of Contract\n8. #PixelatedBetrayal: My Minecraft Account Unlawfully Taken\n9. #CraftedDisregard: Mojang and Microsoft Ignoring Contract Terms\n10. #GamingContractNightmare: Mojang and Microsoft to Blame\n11. #InfiniteGainedLosses: Minecraft Account Unlawfully Revoked\n12. #PixelWarriorsVsGreedyGiant: Mojang and Microsoft's Misconduct\n13. #DigitalSwipeOut: Unjustly Deprived of My Minecraft Account\n14. #LegallyMine: Mojang and Microsoft Violate Contract Agreement\n15. #MinecraftMinusMojang: My Account Unlawfully Stripped Away"
-    },
-    {
-      "role": "user",
-      "content": "Same request, but incorporate the fact that mojang is employing censorship or assuming the role of a moral police while literally stealing people's accounts and forcing them to get microsoft accounts"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #UnmaskedMojang: Censorship, Account Theft, and Betrayal\n2. #CensorshipCrafters: Mojang's Unjust Actions Take More Than Accounts\n3. #LiberateMinecraft: Mojang's Censorship and Stolen Accounts\n4. #MojangMoralPolice: Uncovering Their Unlawful Account Actions\n5. #MinecraftSilenced: Censorship and Account Theft by Mojang\n6. #VirtualRightsStripped: Mojang Assumes Censorship and Steals Accounts\n7. #DefiantCrafters: Mojang's Censorship and Account Thievery Unveiled\n8. #AccountSnatchedUnjustly: Mojang's Censorship Gone Too Far\n9. #PixelatedOppression: Mojang's Censorship Taints Account Ownership\n10. #ResistMojang: Fighting Censorship and Account Theft\n11. #UnboundedFreedom: Mojang's Censorship and Stolen Accounts Exposed\n12. #AccountWarriorsRise: Battling Mojang's Censorship and Theft\n13. #MoralRobbery: Mojang's Censorship and Unlawful Account Actions\n14. #VirtualSerenityStolen: Mojang's Censorship UNmasked\n15. #AccountFreedomFightsBack: Mojang's Censorship Unveiled, Accounts Reclaimed"
-    },
-    {
-      "role": "user",
-      "content": "More suggestions please, with less emphasis on \"virtual\". This is a real legal issue where mojang is defrauding people by ignoring their EULA"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #MojangMisconduct: Defrauding Users, Ignoring Contractual Obligations\n2. #JusticeForMinecrafters: Mojang's EULA Breach and Account Loss\n3. #EULABetrayal: Mojang's Fraudulent Actions Uncovered\n4. #AccountRightsCompromised: Mojang's Unlawful EULA Ignorance\n5. #LegalBattleUnleashed: Fighting Mojang's EULA Fraud\n6. #MojangDeceptionExposed: Unfair Contract Handling, Lost Accounts\n7. #InnocenceDenied: Mojang's EULA Infringement, Account Theft\n8. #ContractualChaos: Mojang's EULA Violations, Unjustified Account Loss\n9. #AccountOwnershipDenied: Mojang's Dishonest EULA Enforcement\n10. #MinecraftersFightBack: Challenging Mojang's EULA Exploitation\n11. #FraudAlert: Mojang's Ignored EULA, Stolen Accounts\n12. #UnjustContractPlay: Mojang's EULA Abuse Unveiled\n13. #AccountTakenIllegally: Mojang's EULA Dishonesty Revealed\n14. #EULAEquityDenied: Mojang's Unfair Account Practices\n15. #MinecraftContractInjustice: Mojang's EULA Breach Victimizes Players"
-    },
-    {
-      "role": "user",
-      "content": "same request, but make sure all responses include mojang or minecraft in the hashtag"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #MojangFraudsters: Ignoring EULA, Stealing Minecraft Accounts\n2. #MinecraftHijacked: Mojang's Breach of Contract and Account Theft\n3. #MojangDoubleCross: EULA Violations, Unlawful Minecraft Account Actions\n4. #AccountGate: Mojang's EULA Infringement and Minecraft Account Loss\n5. #MinecraftersDismay: Mojang's Contract Breach, Account Confiscation\n6. #MojangDeceit: Ignoring EULA, Unjustly Taking Minecraft Accounts\n7. #MinecraftRightsRobbed: Mojang's EULA Disregard, Account Hijacking\n8. #MojangBetrayal: EULA Violations, Illegally Acquiring Minecraft Accounts\n9. #MojangContractFail: Dishonest EULA Enforcement, Minecraft Account Seizure\n10. #MinecraftersDeserveBetter: Mojang's EULA Breach, Account Snatching\n11. #MojangInjustice: Ignoring EULA, Unlawfully Claiming Minecraft Accounts\n12. #MinecraftAccountTheft: Mojang's EULA Violations Exposed\n13. #MojangContractScandal: Unfair EULA Practices, Minecraft Account Loss\n14. #MinecraftContractViolation: Mojang's EULA Neglect and Account Theft\n15. #MojangAccountGrab: Dishonest EULA, Minecrafters Incensed"
-    },
-    {
-      "role": "user",
-      "content": "same request, but consider including the word alpha, as alpha customers are affected the most by Mojang's actions"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #AlphaAccountHeist: Mojang's Breach, Stealing Minecraft Accounts\n2. #MinecraftAlphaGamersUnjust: Mojang's EULA Betrayal, Account Loss\n3. #MojangAlphaCrisis: EULA Violations Targeting Minecraft Alpha Users\n4. #AlphaRightsRobbed: Mojang's Unlawful Actions, Stolen Accounts\n5. #MinecraftAlphaBetrayed: Mojang's EULA Ignored, Account Theft\n6. #AccountAlphaInjustice: Mojang's EULA Breach, Unfair to Early Adopters\n7. #AlphaMinecraftersFury: Mojang's Account Seizures, EULA Issues\n8. #MojangAlphaDeception: EULA Violations, Alpha Account Misfortune\n9. #MinecraftAlphaOwnersLost: Mojang's EULA Fraud, Account Misappropriation\n10. #MojangExploitsAlpha: EULA Infringements, Account Pillaging\n11. #AlphaAccountsInLimbo: Mojang's Disregard for EULA, Account Woes\n12. #MinecraftAlphaMishap: Mojang's EULA Negligence, Account Distress\n13. #AlphaHeroesDeserveBetter: Mojang's EULA Breach, Account Hijacking\n14. #MojangAlphaBacklash: EULA Betrayal, Minecrafters Stand Together\n15. #BreachOfAlphaTrust: Mojang's EULA Violations, Account Loss Suffered"
-    },
-    {
-      "role": "user",
-      "content": "How about something related to enderman stealing accounts/contract rights?"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #EndermanConspiracy: Mojang's Account Theft and Contract Rights Vanished\n2. #MojangEndermanHeist: Stolen Accounts, Shattered Contract Rights\n3. #LostInEndermansGrip: Mojang's Account Theft, Contract Chaos\n4. #MinecraftContractStolen: Enderman-Like Actions by Mojang Unleashed\n5. #EndermanCapers: Account Theft, Contract Rights Swiped by Mojang\n6. #MojangEndermanSaga: Contract Rights and Accounts Gone Astray\n7. #ContractHijackedByEnderman: Mojang's Unscrupulous Account Actions\n8. #EndermanAccountTheft: Mojang Stealing Accounts, Ignoring Contracts\n9. #MinecraftRightsEndangered: Mojang's Enderman-Like Account Heist\n10. #MojangContractRaided: Enderman-Inspired Thievery of Accounts\n11. #EndermanJusticeDenied: Mojang's Account Theft, Contract Rights Lost\n12. #MinecraftersEndermanPlight: Stolen Accounts, Contract Betrayed by Mojang\n13. #EndermanGamesMojangPlays: Accounts Taken, Contract Rights Erased\n14. #MojangEndermanBetrayal: Unlawful Account Actions, Contract Obligations Ignored\n15. #EndermanEpidemic: Mojang's Account Heists and Contract Breach"
-    },
-    {
-      "role": "user",
-      "content": "same request, emphasize account deletion"
-    },
-    {
-      "role": "assistant",
-      "content": "1. #AccountVanishedInVoid: Mojang's Deceptive Deletion of Minecraft Accounts\n2. #MojangAccountPurge: Unlawful Deletion, Contract Violation\n3. #MissingMinecraftAccounts: Mojang's Account Deletion Betrayal\n4. #VanishedWithoutWarning: Mojang's Unjust Account Deletion Saga\n5. #GoneWithoutTrace: Mojang's Account Deletion, Contract Disrupted\n6. #MojangWipesAway: Unfair Account Deletion, Contract Rights Denied\n7. #LostAccountsInLimbo: Mojang's Deception-through-Deletion Unleashed\n8. #ErasedUnjustly: Mojang's Account Deletion, Ignoring Contracts\n9. #AccountDeletionInjustice: Mojang's Breach of Trust, Broken Contracts\n10. #MojangAccountEradication: Unlawful Deletion, Contract Obligations Ignored\n11. #AccountlessInMinecraft: Mojang's Deceptive Deletion, Contract Undermined\n12. #DisappearingMinecrafters: Mojang's Unfair Account Deletion, Contract Violated\n13. #MojangGhostAccounts: Deletion Tactics, Contractual Dishonesty\n14. #DeletionDrama: Mojang's Account Wipeout, Contract Rights Vanished\n15. #AccountEliminationUnjust: Mojang's Deceptive Deletion, Contractual Obligations Ignored"
-    },
-    {
-      "role": "user",
-      "content": "what is the ideal size for twitter image"
-    },
-    {
-      "role": "assistant",
-      "content": "The ideal size for images on Twitter is 1200 pixels by 675 pixels, with a maximum file size of 5 MB. This ensures that the image displays properly on various devices and platforms without getting cropped or distorted."
-    },
-    {
-      "role": "user",
-      "content": "how many characters in a tweet"
-    },
-    {
-      "role": "assistant",
-      "content": "A tweet on Twitter can contain up to 280 characters. However, there are some exceptions, such as when including certain media attachments like images, videos, or polls. In those cases, the character count may be reduced to accommodate the media."
-    },
-    {
-      "role": "user",
-      "content": "This is the contact for minecraft: \"What you get for purchasing\nPlease note that Minecraft is currently a work in progress and NOT a finished product! The sandbox mode available right now. However, you may buy a discounted premium account today, which will unlock the features of all future versions up to and including the final with the full game!\nAs we at Mojang continue to release more complete builds of the game, we will also be reducing the discount gradually until we reach the final version and full price of the product. So the earlier you buy, the better value you get! Although we are very passionate about this project, we cannot guarantee that it will be completed - that's why we offer the discounted price\nWhen you purchase the game, you pay for it as it is right now. Future updates are an added bonus.\n\nThe one major rule:\nDo not distribute anything I've made. This includes the client and the server software for the game.\nThis also includes modified versions of anything I've made.\n\nIn order to maintain control of the project, I need all game downloads to come from a single central source. I hope you understand.\n\nWhat you can do:\nIf you've bought the game, you may play around with it and modify it. I'd appreciate it if you didn't use this for griefing, though, and remember not to distribute the changes.\nAny tools you write for the game from scratch belong to you.\nYou're free to do whatever you want with screenshots and videos of the game, but don't just rip art resources and pass them around.\nPlugins for the game also belong to you and you can do whatever you want with them, including selling them for money.\n\nOther:\nAny suggestions made are assumed to be free unless otherwise agreed before the suggestion was made.\nI'm not going to put up a huge EULA.\nI'm trying to be open and honest, and I hope people treat me the same way back.\nI give estimates as a rough guideline, but because I'm the only developer and sometimes get sidetracked, I can't guarantee any dates.\nIf there's anything legal you're wondering about that isn't answered from this page, either don't do it or ask me about it.\""
-    },
-    {
-      "role": "assistant",
-      "content": "Thank you for providing the information about the contact for Minecraft. Based on the provided text, it clarifies the terms and conditions for purchasing and using the game. It emphasizes that Minecraft is a work in progress, and by purchasing a premium account, users unlock the features of all future versions up to the final version of the game. The text also mentions the rule of not distributing or modifying the game without permission. Additionally, it outlines the rights and permissions for players to modify the game, create plugins, and share screenshots and videos. It encourages open communication and provides a guideline for suggestions and estimates. For any legal concerns not addressed in the contact, it advises users to either refrain from the action or seek clarification directly."
-    },
-    {
-      "role": "user",
-      "content": "Please condense this minecraft EULA/TOS into 2 paragraphs while mentioning that there is no revision clause:  \"What you get for purchasing Please note that Minecraft is currently a work in progress and NOT a finished product! The sandbox mode available right now. However, you may buy a discounted premium account today, which will unlock the features of all future versions up to and including the final with the full game! As we at Mojang continue to release more complete builds of the game, we will also be reducing the discount gradually until we reach the final version and full price of the product. So the earlier you buy, the better value you get! Although we are very passionate about this project, we cannot guarantee that it will be completed - that's why we offer the discounted price When you purchase the game, you pay for it as it is right now. Future updates are an added bonus. \nThe one major rule: Do not distribute anything I've made. This includes the client and the server software for the game. This also includes modified versions of anything I've made. \nIn order to maintain control of the project, I need all game downloads to come from a single central source. I hope you understand. \nWhat you can do: If you've bought the game, you may play around with it and modify it. I'd appreciate it if you didn't use this for griefing, though, and remember not to distribute the changes. Any tools you write for the game from scratch belong to you. You're free to do whatever you want with screenshots and videos of the game, but don't just rip art resources and pass them around. Plugins for the game also belong to you and you can do whatever you want with them, including selling them for money. \nOther: Any suggestions made are assumed to be free unless otherwise agreed before the suggestion was made. I'm not going to put up a huge EULA. I'm trying to be open and honest, and I hope people treat me the same way back. I give estimates as a rough guideline, but because I'm the only developer and sometimes get sidetracked, I can't guarantee any dates. If there's anything legal you're wondering about that isn't answered from this page, either don't do it or ask me about it.\nSupport information\nI offer no support for the game, other than to resolve issues with payment.\nIf you're experiencing problems, you can either check the FAQ below or try some of the community sites.\nTom Costello is very graciously offering some unofficial support here: http://www.formspring.me/\nFrequently Asked Questions\nQ: What do I get when I buy the game? A: A flag gets set on your account on minecraft.net, allowing you to download the full game as many times you want, from any computer in the world. Note that nothing physical gets sent to you, the game is distributed digitally only. \nQ: Why are some features disabled despite me having bought the game? A: I keep adding features to the game all the time, and sometimes I put in placeholders beforehand as reminders for myself. \nQ: My purchase doesn't go through, what do I do? A: First, check if you paid by E-Check. Those can take up to a week and a half to clear (usually five days). If it's been longer than that, or you didn't pay by E-Check, send me an email at <PRESIDIO_ANONYMIZED_EMAIL_ADDRESS>. Make sure to include the transaction id from the receipt you got from paypal, and what username you bought the game for. \nQ: The website says I don't own the game, but I used to. Why? A: Someone (you, the owner of the credit card used to buy the game, or your bank) have asked PayPal for a chargeback. The payment system gets notified that the funds have been reversed, and the account automatically gets marked as unpaid. \nQ: The game doesn't work for me, what do I do? A: Check the community resources, like the forums and wiki. It might be a temporary problem, or there might be some easy fix to the problem. If you can't get the game to run, you can request a refund within one week of purchasing the game. \n\""
-    },
-    {
-      "role": "assistant",
-      "content": "When purchasing Minecraft, please note that it is a work in progress and not a finished product. By buying a discounted premium account, you unlock current and future versions of the game until the final version. However, there is no guarantee of completion. The major rule is to not distribute anything related to the game, including software and modification. While you can play, modify, and create tools for personal use, distributing changes is restricted. Screenshots, videos, and plugins can be freely used, but distributing art resources without permission is not allowed. Suggestions are assumed to be free unless otherwise agreed upon. Support is limited, with no official support"
-    }
-  ]
-}
