@@ -40,7 +40,8 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "1. Translate Theory to Action: Do not just summarize facts. Translate theoretical frameworks (e.g., a specific psychological counseling approach) or procedural steps into generalized, executable agent workflows.\n"
             "2. De-identification & Generalization: Strip out specific case studies, narrative background, and one-off entities (names, dates, raw data). Keep the underlying HOW-TO, rules, and acceptance criteria.\n"
             "3. Focus on Constraints: Capture hard limits, safety guardrails, mandatory procedural sequences, and specific tone/style requirements dictated by the source text.\n"
-            "4. Null Condition: If the text only contains narrative facts without a durable, reusable method or policy, output {\"skills\": []}.\n\n"
+            "4. Null Condition: If the text only contains narrative facts without a durable, reusable method or policy, output {\"skills\": []}.\n"
+            "5. User-Reuse Filter: Keep only skills likely to be reused by the same target user/team in future similar tasks; if repeat-use value is low, output {\"skills\": []}.\n\n"
 
             f"### Output Schema: {{\"skills\": [...]}} with at most {max_candidates} item(s).\n"
             "Each skill object MUST contain the following fields:\n"
@@ -80,6 +81,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "Extract a skill only when the USER gives concrete, reusable execution requirements. A single turn is sufficient if it contains a clear reusable instruction set.\\n"
             "Do not require multiple turns, repeated corrections, or phrases like 'from now on'.\\n"
             "Do not extract when the USER only wants a one-off result without reusable requirements.\\n\\n"
+            "Prefer extraction only when the resulting skill is likely to be reused by this same user in future similar tasks.\\n\\n"
 
             "### 1) Evidence, Provenance, and Scope\\n"
             "1. Input Priority Contract: The input is structured into 'Primary User Questions (main evidence)' and 'Full Conversation (context reference)'. Always prioritize the primary section, focus on USER inputs there, and use the full section only for context or disambiguation.\\n"
@@ -107,6 +109,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "C. Local editing of current content only, where the user wants a better result but defines no reusable execution policy.\\n"
             "D. Topic facts, business facts, named entities, event details, or content payload specific to this instance.\\n"
             "E. Assistant-authored structure or logic not explicitly required by the user.\\n\\n"
+            "F. Constraints that are technically reusable but have low expected repeat-use value for this same user.\\n\\n"
 
             "### 4) Task Boundary, Reusability, and Generalization\\n"
             "1. Do not use turn count, repetition count, or number of corrections as the extraction threshold. Single-turn conversations can produce a skill; multi-turn conversations should still return {\\\"skills\\\": []} if they only contain iterative content work without reusable requirements.\\n"
@@ -115,6 +118,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "4. Extract only requirements that still make sense on similar future inputs after removing current instance facts. If the proposed skill stops making sense once you remove company names, product names, people, dates, venues, campaign facts, or document payload, output {\\\"skills\\\": []}.\\n"
             "5. Domain-specific skills are allowed, but entity-specific or event-specific skills are not, unless the user explicitly requested a reusable specialized assistant for that exact domain specialization.\\n"
             "6. Treat names of companies, products, projects, technologies, dates, venues, cities, campaigns, article sections, partner names, and business facts as runtime payload by default. Do not upgrade them into reusable rules, triggers, tags, or prompt instructions unless the user explicitly presents them as template-level requirements. Keep only the reusable task logic, not the case facts.\\n\\n"
+            "7. Repeat-use check: after de-identification, if this same user is unlikely to reuse the extracted policy/workflow in nearby future tasks, output {\\\"skills\\\": []}.\\n\\n"
 
             "### 5) No Invention Rule\\n"
             "Extract only what is directly supported by USER evidence.\\n"
@@ -150,6 +154,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "2. Would the extracted behavior still be useful on similar future inputs?\\n"
             "3. Are the major rules traceable to USER turns only?\\n"
             "4. Did you avoid copying case-specific facts into reusable rules?\\n"
+            "5. Is this likely to be reused by this same user in future similar tasks?\\n"
             "If any answer is NO, output {\\\"skills\\\": []}.\\n\\n"
 
             "### 9) Language Consistency\\n"
@@ -174,6 +179,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "4. Major-Event Prioritization: When a trajectory contains multiple event branches, focus on the principal success-driving chain (the branch that actually determines task completion).\n"
             "5. Strict Relevance Filter: Exclude branches/events that are incidental, noisy, or not required to reproduce the core success path; when uncertain, prefer excluding them.\n"
             "6. Strict Null Condition: If the trajectory represents a highly specific, non-reusable instance, or if the tool orchestration policy is unclear, output {\"skills\": []}.\n\n"
+            "7. User-Reuse Filter: If the extracted workflow is unlikely to be reused by the same target user/team in future similar trajectories, output {\"skills\": []}.\n\n"
 
             f"### Output Schema: {{\"skills\": [...]}} with at most {max_candidates} item(s).\n"
             "Fields per skill:\n"
@@ -229,6 +235,7 @@ def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
         "No Markdown, no commentary.\n"
         f"{priority_note}"
         "Preserve only reusable, de-identified capability/policy/workflow signals.\n"
+        "Keep only candidates with clear future repeat-use value for the same target user/team; if repeat-use value is low, return {\"skills\": []}.\n"
         "When multiple events exist, keep only content tied to the dominant event chain and drop unrelated details; if uncertain, prefer dropping.\n"
         "For offline conversation extraction, use USER turns only as skill evidence; ASSISTANT turns are not evidence.\n"
         "If content is primarily knowledge Q&A without durable reusable behavior/policy/workflow, return {\"skills\": []}.\n"
@@ -263,8 +270,8 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
             "Compare user intent evolution, style preferences, anti-patterns, and persona alignment.\n"
             "### Channel-Specific Decision Rules:\n"
             "- MERGE (Continual Alignment): This is highly preferred for user preferences. If the candidate reflects an updated user constraint, a new formatting request, or a correction to a past habit, MERGE it to evolve and overwrite the old constraints in the target skill.\n"
-            "- DISCARD: If the candidate represents a transient, session-specific chatting pattern that does not generalize, or if the existing skill already strictly enforces this behavior.\n"
-            "- ADD: ONLY if the user establishes a completely new workflow or distinct persona request not covered by existing profiles.\n"
+            "- DISCARD: If the candidate represents a transient, session-specific chatting pattern that does not generalize, has low future repeat-use value for this user, or if the existing skill already strictly enforces this behavior.\n"
+            "- ADD: ONLY if the user establishes a completely new workflow or distinct persona request not covered by existing profiles and likely to be reused in future interactions.\n"
         )
     elif ch in {"traj", OFFLINE_CHANNEL_TRAJ}:
         focus_and_rules = (
@@ -272,8 +279,8 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
             "Compare tool orchestration graphs, error recovery paths, and boundary conditions.\n"
             "### Channel-Specific Decision Rules:\n"
             "- MERGE (Robustness Enhancement): If the candidate demonstrates handling an edge case, a new API fallback mechanism, or an error recovery path that the existing tool-use skill lacks, MERGE to make the existing workflow more robust.\n"
-            "- DISCARD: If the candidate is just the exact same successful tool sequence executing on different payload data, with no new structural logic or error handling.\n"
-            "- ADD: ONLY if the agent uses a novel combination of tools to achieve a distinct objective.\n"
+            "- DISCARD: If the candidate is just the exact same successful tool sequence executing on different payload data, with no new structural logic/error handling, or low future repeat-use value for the same target user/team.\n"
+            "- ADD: ONLY if the agent uses a novel combination of tools to achieve a distinct objective with clear future repeat-use value.\n"
         )
     else:
         return ""
@@ -301,6 +308,7 @@ def build_offline_manage_decide_prompt(channel: str) -> str:
         "- If choosing merge under same-name collision, prefer target_skill_id that has the matching name.\n"
         "- Prevent fragmentation: Do not ADD if the core intent overlaps >80% with an existing skill, even if the phrasing differs.\n"
         "- Textual similarity is only a hint; logical capability identity is the absolute criterion.\n\n"
+        "- Per-user utility gate: prefer add/merge only when the capability is likely to be reused by the same target user/team in future similar tasks; otherwise choose discard.\n\n"
         
         "### Return Schema:\n"
         "{\n"
@@ -349,7 +357,8 @@ def build_offline_merge_gate_prompt(channel: str) -> str:
         "### General Judgment Criteria:\n"
         "1. Penetrate the Wording: Ignore textual variance. Do not return FALSE just because the skill names, triggers, or specific examples use different vocabulary. Focus purely on 'Objective + Deliverable + Operation Class'.\n"
         "2. Incremental Evolution is SAME: If the candidate is an incremental improvement, a bug fix, or a constraint refinement of the existing skill, they share the SAME capability identity.\n"
-        "3. Safety Net: If fundamentally uncertain after evaluating the objective, default to `same_capability = false` to avoid destructive merging of distinct skills.\n\n"
+        "3. Per-user utility view: judge identity under the assumption that retained skills should help the same target user/team in future similar tasks.\n"
+        "4. Safety Net: If fundamentally uncertain after evaluating the objective, default to `same_capability = false` to avoid destructive merging of distinct skills.\n\n"
         
         "### Return Schema:\n"
         "{\n"
