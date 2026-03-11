@@ -11,20 +11,23 @@ __all__ = [
     "DocumentBuildResult",
     "build_default_document_pipeline",
     "ingest_document",
-    "extract_evidence",
-    "induce_capabilities",
+    "extract_skills",
     "compile_skills",
     "register_versions",
     "VersionManager",
     "DocumentRecord",
     "DocumentSection",
-    "EvidenceUnit",
-    "CapabilitySpec",
+    "SupportRecord",
+    "SupportRelation",
+    "SkillDraft",
     "SkillSpec",
     "SkillLifecycle",
     "VersionState",
     "TextSpan",
-    "ProvenanceRecord",
+    "DomainProfile",
+    "KeywordGroup",
+    "load_domain_profile",
+    "list_builtin_domain_profiles",
     "DocumentRegistry",
     "build_registry_from_store_config",
     "default_registry_root",
@@ -33,6 +36,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Lazily resolves offline document pipeline exports."""
+
     if name == "extract_from_doc":
         from .extract import extract_from_doc as fn
 
@@ -60,22 +64,19 @@ def __getattr__(name: str) -> Any:
         return mapping[name]
     if name in {
         "ingest_document",
-        "extract_evidence",
-        "induce_capabilities",
+        "extract_skills",
         "compile_skills",
         "register_versions",
         "VersionManager",
     }:
         from .compiler import compile_skills
-        from .extractor import extract_evidence
-        from .inducer import induce_capabilities
+        from .extractor import extract_skills
         from .ingest import ingest_document
         from .versioning import VersionManager, register_versions
 
         mapping = {
             "ingest_document": ingest_document,
-            "extract_evidence": extract_evidence,
-            "induce_capabilities": induce_capabilities,
+            "extract_skills": extract_skills,
             "compile_skills": compile_skills,
             "register_versions": register_versions,
             "VersionManager": VersionManager,
@@ -84,22 +85,22 @@ def __getattr__(name: str) -> Any:
     if name in {
         "DocumentRecord",
         "DocumentSection",
-        "EvidenceUnit",
-        "CapabilitySpec",
+        "SupportRecord",
+        "SupportRelation",
+        "SkillDraft",
         "SkillSpec",
         "SkillLifecycle",
         "VersionState",
         "TextSpan",
-        "ProvenanceRecord",
     }:
         from .models import (
-            CapabilitySpec,
             DocumentRecord,
             DocumentSection,
-            EvidenceUnit,
-            ProvenanceRecord,
+            SkillDraft,
             SkillLifecycle,
             SkillSpec,
+            SupportRecord,
+            SupportRelation,
             TextSpan,
             VersionState,
         )
@@ -107,13 +108,23 @@ def __getattr__(name: str) -> Any:
         mapping = {
             "DocumentRecord": DocumentRecord,
             "DocumentSection": DocumentSection,
-            "EvidenceUnit": EvidenceUnit,
-            "CapabilitySpec": CapabilitySpec,
+            "SupportRecord": SupportRecord,
+            "SupportRelation": SupportRelation,
+            "SkillDraft": SkillDraft,
             "SkillSpec": SkillSpec,
             "SkillLifecycle": SkillLifecycle,
             "VersionState": VersionState,
             "TextSpan": TextSpan,
-            "ProvenanceRecord": ProvenanceRecord,
+        }
+        return mapping[name]
+    if name in {"DomainProfile", "KeywordGroup", "load_domain_profile", "list_builtin_domain_profiles"}:
+        from .profile import DomainProfile, KeywordGroup, list_builtin_domain_profiles, load_domain_profile
+
+        mapping = {
+            "DomainProfile": DomainProfile,
+            "KeywordGroup": KeywordGroup,
+            "load_domain_profile": load_domain_profile,
+            "list_builtin_domain_profiles": list_builtin_domain_profiles,
         }
         return mapping[name]
     if name in {"DocumentRegistry", "build_registry_from_store_config", "default_registry_root"}:

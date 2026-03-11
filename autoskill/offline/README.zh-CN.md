@@ -11,7 +11,7 @@
 
 - `conversation`：从 OpenAI 格式的历史对话 JSON/JSONL 中抽取技能
 - `trajectory`：从 agent 执行轨迹和事件日志中抽取技能
-- `document`：将文档编译为 `document -> evidence -> capability -> skill`，再注册版本
+- `document`：将文档编译为 `document -> support record -> skill draft -> skill`，再注册版本
 
 三条流程都会复用现有的 AutoSkill 存储与技能维护层。
 差别主要在于，在产出 skill 之前，各自保留了多少中间结构。
@@ -34,32 +34,32 @@ trajectory data
 
 document data
   -> DocumentRecord
-  -> EvidenceUnit
-  -> CapabilitySpec
-  -> SkillSpec
-  -> registry + SkillBank
+  -> SupportRecord[]
+  -> SkillDraft[]
+  -> SkillSpec[]
+  -> registry + SkillBank/DocSkill
 ```
 
-文档 pipeline 之所以更重，是因为文档生成的 skill 不应该成为唯一真相层。
+文档 pipeline 仍然保留 provenance，但默认主路径已经改成 skill-first。
+它会保留源文档和轻量 support links，而不是强制每份语料都先编译出一层重 capability。
 
 ## 为什么 Document Pipeline 单独分层
 
-对于文档类输入，`Skill` 只是执行输出层。
-document pipeline 明确区分四层：
+对于文档类输入，document pipeline 现在明确区分四层：
 
 1. `DocumentRecord`
-2. `EvidenceUnit`
-3. `CapabilitySpec`
+2. `SupportRecord`
+3. `SkillDraft`
 4. `SkillSpec`
 
 这四层的职责分别是：
 
 - document：原始输入
-- evidence：可追踪的证据/论断
-- capability：可复用的能力抽象
+- support record：把文档片段和 skill 关联起来的轻量支持记录，可表示 support/conflict/constraint/case-variant
+- skill draft：抽取后、合并前的候选 skill
 - skill：面向执行的输出
 
-因此版本管理是基于 capability 语义的，而不是只比较 skill 文本。
+因此版本管理不再只比较 `SKILL.md` 文本，而是比较归一化后的 skill 结构和 support 历史。
 
 ## 当前 Document 流程
 
@@ -68,11 +68,10 @@ document pipeline 明确区分四层：
 ```text
 document
   -> ingest_document
-  -> extract_evidence
-  -> induce_capabilities
+  -> extract_skills
   -> compile_skills
   -> register_versions
-  -> registry + SkillBank
+  -> registry + SkillBank/DocSkill
 ```
 
 当前实现具备这些特性：
@@ -80,7 +79,7 @@ document
 - 基于 content hash 的增量导入
 - 支持 dry-run
 - 支持分阶段单独重跑
-- 版本变化保留 provenance
+- 版本变化保留来自 document/support 的 provenance
 - 支持生命周期状态：`candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
 - 跨 domain 设计，不把 psychology 写死
 
@@ -95,8 +94,7 @@ document
 其中保存的一级对象包括：
 
 - documents
-- evidence
-- capabilities
+- supports
 - skills
 - lifecycles
 - version history
@@ -115,7 +113,6 @@ document pipeline 已经接入顶层 CLI：
 python3 -m autoskill offline document build --file ./paper.md --dry-run
 python3 -m autoskill offline document ingest --file ./docs/
 python3 -m autoskill offline document extract --file ./paper.md --json
-python3 -m autoskill offline document induce --file ./paper.md --json
 python3 -m autoskill offline document compile --file ./paper.md --json
 ```
 
@@ -160,7 +157,7 @@ result = extract_from_doc(
 )
 ```
 
-如果调用方需要单独重跑某个阶段，也可以直接使用 `DocumentBuildPipeline`，按阶段执行 ingestion、evidence extraction、capability induction 或 version registration。
+如果调用方需要单独重跑某个阶段，也可以直接使用 `DocumentBuildPipeline`，按阶段执行 ingestion、skill extraction、skill compilation 或 version registration。
 
 ## 包结构
 
@@ -176,10 +173,9 @@ autoskill/offline/
 
 - `models.py`：离线文档核心数据模型
 - `ingest.py`：文档归一化和增量检测
-- `extractor.py`：`DocumentRecord -> EvidenceUnit`
-- `inducer.py`：`EvidenceUnit -> CapabilitySpec`
-- `compiler.py`：`CapabilitySpec -> SkillSpec`
-- `versioning.py`：基于 capability 的版本和生命周期管理
+- `extractor.py`：`DocumentRecord -> SupportRecord[] + SkillDraft[]`
+- `compiler.py`：`SkillDraft[] -> SkillSpec[]`
+- `versioning.py`：基于 skill identity 和 support provenance 的版本与生命周期管理
 - `registry.py`：离线 document side-car 持久化
 - `pipeline.py`：分阶段 orchestration
 - `extract.py`：API + CLI 入口
@@ -190,16 +186,13 @@ document pipeline 目前已经按接口化设计，方便后续替换。
 
 当前预留的扩展点包括：
 
-- `DocumentIngestor`
-- `EvidenceExtractor`
-- `CapabilityInducer`
+- `DocumentSkillExtractor`
 - `SkillCompiler`
 - `VersionManager`
 
 因此后续可以继续接入：
 
-- LLM evidence extractor
-- LLM capability inducer
+- LLM document skill extractor
 - 更强的相似度比较器
 - 离线评测与评分器
 
@@ -209,11 +202,13 @@ document pipeline 目前已经按接口化设计，方便后续替换。
 
 - 最小可运行的 staged document pipeline
 - 带 registry 的版本管理，支持 `create / strengthen / revise / split / merge / deprecate`
+- 每次 skill 更新都保留 support-backed provenance
 - 支持 dry-run 和阶段级 CLI 调试
 - 覆盖 document/versioning 关键路径的测试
 
 目前仍然保持轻量的部分：
 
+- support 抽取与 skill 对齐目前优先用清晰的 heuristic，不追求复杂算法
 - split/merge/deprecate 还是清晰可维护的 heuristic，不是复杂算法
 - conversation 和 trajectory 还没有统一接入顶层 `autoskill offline ...` CLI
 - LLM 抽取器、评测器、比较器目前仍是接口预留，而不是默认实现
@@ -223,7 +218,7 @@ document pipeline 目前已经按接口化设计，方便后续替换。
 offline 当前遵循这些原则：
 
 - 优先最小可运行版本
-- 保持 document / evidence / capability / skill 职责清晰
-- 版本管理以 capability 为中心
+- 保持 document / support / skill 职责清晰
+- 版本管理基于归一化 skill 结构和 support provenance，而不是只看 skill 文本
 - 保持跨 domain 通用性
 - 尽量复用现有 store、config、prompt runtime、CLI 风格

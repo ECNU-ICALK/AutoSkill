@@ -222,12 +222,17 @@ def _render_frontmatter(
 
     if examples:
         lines.append("examples:")
-        for ex in examples[:8]:
-            lines.append(f"  - input: {_q((ex.input or '').strip())}")
-            if ex.output:
-                lines.append(f"    output: {_q(str(ex.output).strip())}")
-            if ex.notes:
-                lines.append(f"    notes: {_q(str(ex.notes).strip())}")
+        for example in examples[:5]:
+            input_text = str(getattr(example, "input", "") or "").strip()
+            output_text = str(getattr(example, "output", "") or "").strip()
+            notes_text = str(getattr(example, "notes", "") or "").strip()
+            if not input_text:
+                continue
+            lines.append(f"  - input: {_q(input_text)}")
+            if output_text:
+                lines.append(f"    output: {_q(output_text)}")
+            if notes_text:
+                lines.append(f"    notes: {_q(notes_text)}")
 
     return "\n".join(lines).strip()
 

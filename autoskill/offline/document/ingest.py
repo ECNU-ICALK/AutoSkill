@@ -209,6 +209,7 @@ class DocumentIngestor(Protocol):
         registry: Optional[DocumentRegistry],
         continue_on_error: bool,
         dry_run: bool,
+        max_documents: int,
         logger: StageLogger,
     ) -> DocumentIngestResult:
         """Runs the ingestion stage and returns normalized document records."""
@@ -229,6 +230,7 @@ class HeuristicDocumentIngestor:
         registry: Optional[DocumentRegistry],
         continue_on_error: bool,
         dry_run: bool,
+        max_documents: int,
         logger: StageLogger,
     ) -> DocumentIngestResult:
         """Normalizes input into DocumentRecord objects and performs incremental skipping."""
@@ -237,7 +239,7 @@ class HeuristicDocumentIngestor:
         if data is not None:
             units = _structured_units_from_data(data, title=title)
         elif str(file_path or "").strip():
-            units, abs_input = load_file_units(str(file_path))
+            units, abs_input = load_file_units(str(file_path), max_files=int(max_documents or 0))
         else:
             raise ValueError("ingest_document requires data or file_path")
 
@@ -352,6 +354,7 @@ def ingest_document(
     ingestor: Optional[DocumentIngestor] = None,
     continue_on_error: bool = True,
     dry_run: bool = False,
+    max_documents: int = 0,
     logger: StageLogger = None,
 ) -> DocumentIngestResult:
     """Public functional wrapper for the document ingestion stage."""
@@ -367,5 +370,6 @@ def ingest_document(
         registry=registry,
         continue_on_error=continue_on_error,
         dry_run=bool(dry_run),
+        max_documents=int(max_documents or 0),
         logger=logger,
     )

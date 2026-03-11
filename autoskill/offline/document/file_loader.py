@@ -14,7 +14,7 @@ import subprocess
 from typing import Any, Dict, List, Tuple
 
 
-def load_file_units(path: str) -> Tuple[List[Dict[str, str]], str]:
+def load_file_units(path: str, *, max_files: int = 0) -> Tuple[List[Dict[str, str]], str]:
     """
     Returns (units, abs_input_path), where each unit has:
     - title: display name (relative path if directory)
@@ -49,6 +49,8 @@ def load_file_units(path: str) -> Tuple[List[Dict[str, str]], str]:
             if os.path.isfile(p):
                 files.append(p)
     files.sort()
+    if int(max_files or 0) > 0:
+        files = files[: int(max_files)]
 
     out: List[Dict[str, str]] = []
     for p in files:

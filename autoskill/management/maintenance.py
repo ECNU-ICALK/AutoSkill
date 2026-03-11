@@ -29,9 +29,14 @@ from .identity import (
     normalize_identity_text,
 )
 from ..llm.factory import build_llm
-from ..models import Skill, SkillExample
+from ..models import Skill
 from .stores.base import SkillStore
 from ..utils.json import json_from_llm_text
+from ..utils.skill_resources import (
+    extract_resource_paths_from_files,
+    extract_skill_resource_paths,
+    normalize_resource_rel_path,
+)
 from ..utils.time import now_iso
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
@@ -187,6 +192,9 @@ def _judge_merge_with_llm(
         "### Decision Principles\n"
         "- same_capability=true only when both skills solve the same job-to-be-done and candidate is mainly an iteration/refinement.\n"
         "- same_capability=false when deliverable objective, target audience, or evaluation criteria differ materially.\n"
+        "- resource_paths are auxiliary capability signals, not standalone identity proof.\n"
+        "- Reusable tool/reference additions for the same job-to-be-done should favor same_capability=true.\n"
+        "- One-off file names or case-specific assets should not force same_capability=true.\n"
         "- Judge with user-future-reuse perspective: same_capability should reflect a reusable pattern this user is likely to invoke again, not a one-off coincidence.\n"
         "- Hard split: if primary deliverable class changes (artifact/form/channel), treat as different capability.\n"
         "- Hard split: if intended audience or acceptance criteria change materially, treat as different capability.\n"
@@ -363,6 +371,7 @@ def _hit_for_llm(hit) -> Dict:
         "prompt": str(skill.instructions),
         "triggers": list(skill.triggers or []),
         "tags": list(skill.tags or []),
+        "resource_paths": extract_skill_resource_paths(skill, max_items=24),
         "version": str(skill.version),
     }
 
@@ -545,7 +554,10 @@ class SkillMaintainer:
             )
             if self._config.store_sources and cand.source:
                 merged.source = cand.source
-            merged.files = _merge_files(target.files, build_agent_skill_files(merged))
+            cand_files = _candidate_resource_files(cand)
+            merged_files = _merge_files(target.files, cand_files)
+            merged_for_md = replace(merged, files=merged_files)
+            merged.files = _merge_files(merged_files, build_agent_skill_files(merged_for_md))
             self._store.upsert(merged, raw=_skill_to_raw(merged))
             self._record_last_upserted_skill_id(user_id=user_id, skill_id=merged.id)
             return merged
@@ -667,7 +679,9 @@ class SkillMaintainer:
                 created_at=now_iso(),
                 updated_at=now_iso(),
             )
-            created.files = build_agent_skill_files(created)
+            cand_files = _candidate_resource_files(cand)
+            created_for_md = replace(created, files=cand_files)
+            created.files = _merge_files(cand_files, build_agent_skill_files(created_for_md))
             self._store.upsert(created, raw=_skill_to_raw(created))
             self._record_last_upserted_skill_id(user_id=user_id, skill_id=created.id)
             return created
@@ -813,6 +827,7 @@ def _decide_candidate_action_with_llm(
         "- Evaluate candidate portability after removing instance-specific details.\n"
         "- Candidate is derived from recent conversation rounds; existing skills reflect older accumulated memory.\n"
         "- Historical context should mainly help determine whether the topic continues or switches.\n"
+        "- resource_paths indicate optional scripts/references/assets; treat them as capability support signals, not as standalone novelty.\n"
         "\n"
         "### Output Action (choose one)\n"
         "- add: store the candidate as a new user skill\n"
@@ -825,6 +840,7 @@ def _decide_candidate_action_with_llm(
         "- Under same-capability overlap, choose only merge or discard.\n"
         "- If same-capability overlap is with a USER skill, prefer merge to that user skill.\n"
         "- If overlap is only with shared/library skill and candidate adds no durable user-specific improvement, choose discard.\n"
+        "- Do not choose add only because resource file names/paths differ while capability stays the same.\n"
         "0.1) Name-collision hard gate\n"
         "- Normalize names (trim + lowercase; ignore minor whitespace/punctuation variance) before comparison.\n"
         "- If candidate.name matches any existing skill name after normalization, action MUST NOT be add.\n"
@@ -863,6 +879,8 @@ def _decide_candidate_action_with_llm(
         "- If SAME capability with any user skill: choose merge to the best matching target_skill_id; do not choose add.\n"
         "- If candidate is mostly an iteration (clearer prompt, stronger checks, extra constraints, better metadata), choose merge.\n"
         "- If candidate adds reusable implementation/output policy for the same job-to-be-done, choose merge rather than discard.\n"
+        "- If candidate adds reusable scripts/references/assets for the same job-to-be-done, prefer merge over add.\n"
+        "- If added resources are one-off payload files without reusable value, prefer discard.\n"
         "- If differences are mostly topic/entity substitution but the method and quality bar are the same, choose merge.\n"
         "- Require continuity of ongoing work item before merge; otherwise choose add.\n"
         "- If topic continuity is broken (new objective/deliverable/audience in recent intent), choose add.\n"
@@ -907,7 +925,17 @@ def _decide_candidate_action_with_llm(
 def _candidate_to_query(cand: SkillCandidate) -> str:
     """Builds a retrieval query string from candidate fields."""
 
-    return f"{cand.name}\n{cand.description}\n{cand.instructions}"
+    resource_paths = extract_resource_paths_from_files(
+        dict(getattr(cand, "files", {}) or {}),
+        max_items=24,
+    )
+    resources = "\n".join(resource_paths)
+    return (
+        f"{cand.name}\n"
+        f"{cand.description}\n"
+        f"{cand.instructions}\n"
+        f"Resources:\n{resources}"
+    )
 
 
 def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
@@ -966,7 +994,7 @@ def _merge(existing: Skill, cand: SkillCandidate) -> Skill:
         instructions=instructions,
         triggers=_dedupe(existing.triggers + list(cand.triggers or [])),
         tags=_dedupe(existing.tags + list(cand.tags or [])),
-        examples=_merge_examples(existing.examples, cand.examples),
+        examples=list(existing.examples or []),
         version=_bump_patch(existing.version),
     )
     return merged
@@ -987,12 +1015,13 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "Quality-first: keep existing core stable and merge only candidate additions that are clearly reusable.\n"
             "\n"
             "IMPORTANT: Follow the SAME requirements as the Skill Extractor. Do NOT invent a new format.\n"
-            "Only output the required fields: {name, description, prompt, triggers, tags, examples}.\n"
+            "Only output the required fields: {name, description, prompt, triggers, tags}.\n"
             "\n"
             "### 1) Merge Principles\n"
             "- Shared intent: keep the same capability (do not change the skill's purpose).\n"
             "- Diff-aware: merge unique, non-conflicting constraints and improvements from BOTH skills.\n"
             "- Field merge operator: perform semantic union, NOT concatenation.\n"
+            "- Treat resource_paths as optional support context: merge reusable tooling/reference intent, ignore one-off payload artifacts.\n"
             "- Recency/topic guard: keep constraints aligned with the candidate's recent-topic intent; do not import stale constraints from unrelated old topics.\n"
             "- Constraints over content: keep reusable rules and constraints; do not expand topic-specific details.\n"
             "- Avoid regressions: do NOT drop important constraints/checks from existing_skill unless they are clearly wrong or overly specific.\n"
@@ -1000,7 +1029,7 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "\n"
             "### 2) Anti-Duplication (CRITICAL)\n"
             "- Never duplicate section headers or blocks in any field.\n"
-            "- Never copy markdown section labels into list fields (triggers/tags/examples).\n"
+            "- Never copy markdown section labels into list fields (triggers/tags).\n"
             "- For near-duplicate phrases, keep only one clearer canonical phrasing.\n"
             "- Preserve signal density: shorter, cleaner, non-redundant output is preferred.\n"
             "\n"
@@ -1029,6 +1058,7 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "     - If steps are merely document sections, they belong in Constraints & Style, NOT Workflow.\n"
             "  - Content strategy: keep only user-specific requirements; do NOT add new rules.\n"
             "  - Resources: if reusable scripts/references are implied, mention 'Execute script: scripts/...' or 'Read reference: references/...'.\n"
+            "  - Mention resource references at most once per distinct resource intent; avoid repeated path variants.\n"
             "  - Forbidden in prompt: '## Prompt', '## Triggers', '## Tags', '## Examples', frontmatter blocks, repeated title blocks.\n"
             "  - Ensure prompt appears exactly once as a single body, not nested/duplicated.\n"
             "- triggers: 3-5 short, concrete phrases representing user intent.\n"
@@ -1038,8 +1068,6 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
             "- tags: 1-6 keywords.\n"
             "  - Build by semantic union, keep canonical tags only, remove synonyms/redundant variants.\n"
             "  - Keep domain/platform tags when they materially affect usage/retrieval; do not duplicate equivalent platform aliases.\n"
-            "- examples: 0-3 short, de-identified inputs.\n"
-            "  - Keep only distinct examples; merge overlapping ones into one clearer example.\n"
             "\n"
             "### 7) Generalization and Final Self-Checks\n"
             "- De-identify aggressively: remove instance details; only keep stable reusable constraints/procedures.\n"
@@ -1074,34 +1102,9 @@ def _merge_with_llm(llm, existing: Skill, cand: SkillCandidate) -> Skill:
         merged.tags = _dedupe(
             [str(t).strip() for t in (obj.get("tags") or []) if str(t).strip()]
         ) or merged.tags
-        merged.examples = _merge_examples(
-            merged.examples,
-            _examples_from_obj(obj.get("examples")),
-        )
         return merged
     except Exception:
         return _merge(existing, cand)
-
-
-def _examples_from_obj(obj) -> List[SkillExample]:
-    """Run examples from obj."""
-    if not isinstance(obj, list):
-        return []
-    out: List[SkillExample] = []
-    for e in obj[:8]:
-        if not isinstance(e, dict):
-            continue
-        inp = str(e.get("input") or "").strip()
-        if not inp:
-            continue
-        out.append(
-            SkillExample(
-                input=inp,
-                output=(str(e.get("output")).strip() if e.get("output") else None),
-                notes=(str(e.get("notes")).strip() if e.get("notes") else None),
-            )
-        )
-    return out
 
 
 def _dedupe(items: List[str]) -> List[str]:
@@ -1118,19 +1121,6 @@ def _dedupe(items: List[str]) -> List[str]:
         seen.add(key)
         out.append(s)
     return out
-
-
-def _merge_examples(old: List[SkillExample], new: List[SkillExample]) -> List[SkillExample]:
-    """Run merge examples."""
-    out: List[SkillExample] = []
-    seen = set()
-    for e in (old or []) + (new or []):
-        key = (e.input or "").strip().lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        out.append(e)
-    return out[:8]
 
 
 def _bump_patch(version: str) -> str:
@@ -1203,19 +1193,33 @@ def _append_version_snapshot(metadata: Dict, skill: Skill) -> Dict:
     return out
 
 
+def _candidate_resource_files(cand: SkillCandidate) -> Dict[str, str]:
+    """Extracts candidate-provided resource files (excluding SKILL.md)."""
+
+    files = dict(getattr(cand, "files", {}) or {})
+    out: Dict[str, str] = {}
+    for path, content in files.items():
+        key = normalize_resource_rel_path(str(path or ""))
+        if not key:
+            continue
+        out[key] = str(content or "")
+    return out
+
+
 def _candidate_to_raw(cand: SkillCandidate) -> Dict:
     """Serializes a candidate for logging/LLM decision payloads."""
 
+    file_paths = extract_resource_paths_from_files(
+        _candidate_resource_files(cand),
+        max_items=24,
+    )
     return {
         "name": cand.name,
         "description": cand.description,
         "instructions": cand.instructions,
         "triggers": list(cand.triggers or []),
         "tags": list(cand.tags or []),
-        "examples": [
-            {"input": e.input, "output": e.output, "notes": e.notes}
-            for e in (cand.examples or [])
-        ],
+        "resource_paths": file_paths,
         "confidence": cand.confidence,
     }
 
@@ -1232,10 +1236,6 @@ def _skill_to_raw(skill: Skill) -> Dict:
         "files": dict(skill.files or {}),
         "triggers": list(skill.triggers or []),
         "tags": list(skill.tags or []),
-        "examples": [
-            {"input": e.input, "output": e.output, "notes": e.notes}
-            for e in (skill.examples or [])
-        ],
         "version": skill.version,
         "status": skill.status.value,
         "metadata": dict(skill.metadata or {}),
@@ -1248,16 +1248,14 @@ def _skill_to_raw(skill: Skill) -> Dict:
 def _skill_for_llm(skill: Skill) -> Dict:
     """Serializes only LLM-relevant fields used in merge prompts."""
 
+    resource_paths = extract_skill_resource_paths(skill, max_items=24)
     return {
         "name": skill.name,
         "description": skill.description,
         "prompt": skill.instructions,
         "triggers": list(skill.triggers or []),
         "tags": list(skill.tags or []),
-        "examples": [
-            {"input": e.input, "output": e.output, "notes": e.notes}
-            for e in (skill.examples or [])
-        ],
+        "resource_paths": resource_paths,
         "version": skill.version,
     }
 

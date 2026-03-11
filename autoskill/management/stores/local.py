@@ -37,6 +37,7 @@ from ...embeddings.base import EmbeddingModel
 from ..formats.agent_skill import load_agent_skill_dir, upsert_skill_md_id
 from ..identity import META_IDENTITY_DESC_NORM, identity_desc_norm_from_fields, normalize_identity_text
 from ...models import Skill, SkillHit, SkillStatus
+from ...utils.skill_resources import extract_skill_resource_paths
 from ..vectors import FlatFileVectorIndex, VectorIndex
 from .bm25_index import PersistentBM25Index
 from .hybrid_rank import blend_scores, bm25_normalized_scores
@@ -52,14 +53,18 @@ def _dot(a: List[float], b: List[float]) -> float:
 
 def _skill_to_text(skill: Skill) -> str:
     """Run skill to text."""
+    # Keep retrieval text concise and stable; examples are intentionally excluded.
     triggers = "\n".join(skill.triggers or [])
     tags = " ".join(skill.tags or [])
+    resource_paths = extract_skill_resource_paths(skill, max_items=32)
+    resources = "\n".join(resource_paths)
     return (
         f"Name: {skill.name}\n"
         f"Description: {skill.description}\n"
         f"Instructions: {skill.instructions}\n"
         f"Triggers:\n{triggers}\n"
         f"Tags: {tags}\n"
+        f"Resources:\n{resources}\n"
     )
 
 

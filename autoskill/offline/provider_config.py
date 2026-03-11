@@ -103,6 +103,7 @@ def build_llm_config(provider: str, *, model: Optional[str]) -> Dict[str, Any]:
             "model": model or env("DASHSCOPE_MODEL", "qwen-plus"),
             "api_key": _require_key("DASHSCOPE_API_KEY"),
             "base_url": env("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode"),
+            "max_tokens": int(env("DASHSCOPE_MAX_TOKENS", "16384")),
             "timeout_s": timeout_s,
         }
 

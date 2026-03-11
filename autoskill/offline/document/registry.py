@@ -1,11 +1,16 @@
 """
-Minimal registry for document offline pipeline entities.
+Minimal registry for the skill-first offline document pipeline.
 
-The main skill store persists compiled `SKILL.md` artifacts, but evidence and
-capability objects must remain first-class source-of-truth records. This module
-stores those objects under a side-car registry rooted at:
-
-<store_root>/.autoskill/document_registry/
+The main skill store persists compiled `SKILL.md` artifacts. This registry keeps
+the document-side source of truth needed for incremental compilation and dynamic
+maintenance:
+- documents
+- support records
+- canonical skills
+- lifecycle events
+- change logs
+- provenance links
+- version history
 """
 
 from __future__ import annotations
@@ -14,19 +19,14 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from .models import (
-    CapabilitySpec,
-    DocumentRecord,
-    EvidenceUnit,
-    SkillLifecycle,
-    SkillSpec,
-)
+from autoskill.config import default_document_store_path
 from autoskill.utils.time import now_iso
+
+from .models import DocumentRecord, SkillLifecycle, SkillSpec, SupportRecord
 
 _ENTITY_LAYOUT = {
     "documents": "documents",
-    "evidence": "evidence",
-    "capabilities": "capabilities",
+    "supports": "supports",
     "skills": "skills",
     "lifecycles": "lifecycles",
     "change_logs": "change_logs",
@@ -38,7 +38,9 @@ _ENTITY_LAYOUT = {
 def default_registry_root(store_path: str) -> str:
     """Builds the default document registry path under an AutoSkill store root."""
 
-    root = os.path.abspath(os.path.expanduser(str(store_path or "").strip() or "SkillBank"))
+    root = os.path.abspath(
+        os.path.expanduser(str(store_path or "").strip() or default_document_store_path())
+    )
     return os.path.join(root, ".autoskill", "document_registry")
 
 
@@ -46,13 +48,13 @@ def build_registry_from_store_config(store_config: Dict[str, Any]) -> "DocumentR
     """Constructs a registry from an AutoSkill store config dict."""
 
     cfg = dict(store_config or {})
-    root = default_registry_root(str(cfg.get("path") or "SkillBank"))
+    root = default_registry_root(str(cfg.get("path") or "").strip())
     return DocumentRegistry(root_dir=root)
 
 
 class DocumentRegistry:
     """
-    Filesystem registry for document, evidence, capability, skill, and lifecycle entities.
+    Filesystem registry for document inputs, support records, and canonical skills.
 
     Storage format:
     - one JSON file per entity
@@ -76,15 +78,10 @@ class DocumentRegistry:
 
         self._write_entity("documents", record.doc_id, record.to_dict())
 
-    def upsert_evidence(self, unit: EvidenceUnit) -> None:
-        """Persists one EvidenceUnit to the registry."""
+    def upsert_support(self, support: SupportRecord) -> None:
+        """Persists one SupportRecord to the registry."""
 
-        self._write_entity("evidence", unit.evidence_id, unit.to_dict())
-
-    def upsert_capability(self, spec: CapabilitySpec) -> None:
-        """Persists one CapabilitySpec to the registry."""
-
-        self._write_entity("capabilities", spec.capability_id, spec.to_dict())
+        self._write_entity("supports", support.support_id, support.to_dict())
 
     def upsert_skill(self, spec: SkillSpec) -> None:
         """Persists one SkillSpec to the registry."""
@@ -125,7 +122,11 @@ class DocumentRegistry:
         key = self._compound_key(entity_type=entity_type, entity_id=entity_id)
         current = self.get_version_history(entity_type=entity_type, entity_id=entity_id)
         current.append(dict(entry or {}))
-        self._write_entity("version_history", key, {"entity_type": entity_type, "entity_id": entity_id, "entries": current})
+        self._write_entity(
+            "version_history",
+            key,
+            {"entity_type": entity_type, "entity_id": entity_id, "entries": current},
+        )
 
     def get_document(self, doc_id: str) -> Optional[DocumentRecord]:
         """Loads one DocumentRecord by id."""
@@ -133,17 +134,11 @@ class DocumentRegistry:
         obj = self._read_entity("documents", doc_id)
         return DocumentRecord.from_dict(obj) if obj is not None else None
 
-    def get_evidence(self, evidence_id: str) -> Optional[EvidenceUnit]:
-        """Loads one EvidenceUnit by id."""
+    def get_support(self, support_id: str) -> Optional[SupportRecord]:
+        """Loads one SupportRecord by id."""
 
-        obj = self._read_entity("evidence", evidence_id)
-        return EvidenceUnit.from_dict(obj) if obj is not None else None
-
-    def get_capability(self, capability_id: str) -> Optional[CapabilitySpec]:
-        """Loads one CapabilitySpec by id."""
-
-        obj = self._read_entity("capabilities", capability_id)
-        return CapabilitySpec.from_dict(obj) if obj is not None else None
+        obj = self._read_entity("supports", support_id)
+        return SupportRecord.from_dict(obj) if obj is not None else None
 
     def get_skill(self, skill_id: str) -> Optional[SkillSpec]:
         """Loads one SkillSpec by id."""
@@ -179,15 +174,10 @@ class DocumentRegistry:
 
         return self._list_entities("documents", DocumentRecord)
 
-    def list_evidence(self) -> List[EvidenceUnit]:
-        """Lists all persisted EvidenceUnit objects."""
+    def list_supports(self) -> List[SupportRecord]:
+        """Lists all persisted SupportRecord objects."""
 
-        return self._list_entities("evidence", EvidenceUnit)
-
-    def list_capabilities(self) -> List[CapabilitySpec]:
-        """Lists all persisted CapabilitySpec objects."""
-
-        return self._list_entities("capabilities", CapabilitySpec)
+        return self._list_entities("supports", SupportRecord)
 
     def list_skills(self) -> List[SkillSpec]:
         """Lists all persisted SkillSpec objects."""
@@ -198,6 +188,18 @@ class DocumentRegistry:
         """Lists all persisted SkillLifecycle objects."""
 
         return self._list_entities("lifecycles", SkillLifecycle)
+
+    def list_supports_by_skill_id(self, skill_id: str) -> List[SupportRecord]:
+        """Lists support records currently attached to one skill id."""
+
+        skill_id_s = str(skill_id or "").strip()
+        if not skill_id_s:
+            return []
+        return [
+            support
+            for support in self.list_supports()
+            if str(getattr(support, "skill_id", "") or "").strip() == skill_id_s
+        ]
 
     def list_change_logs(
         self,
@@ -264,144 +266,111 @@ class DocumentRegistry:
             return doc
         return None
 
-    def list_skills_by_capability_id(self, capability_id: str) -> List[SkillSpec]:
-        """Lists persisted SkillSpec records associated with one capability id."""
-
-        cap_id = str(capability_id or "").strip()
-        if not cap_id:
-            return []
-        return [
-            skill
-            for skill in self.list_skills()
-            if str(getattr(skill, "capability_id", "") or "").strip() == cap_id
-        ]
-
     def manifest(self) -> Dict[str, Any]:
         """Loads the last saved manifest from disk."""
 
         path = os.path.join(self.index_dir, "manifest.json")
         if not os.path.isfile(path):
-            return {}
+            return {"generated_at": now_iso(), "entities": {}}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {"generated_at": now_iso(), "entities": {}}
+        except Exception:
+            return {"generated_at": now_iso(), "entities": {}}
+
+    def _write_entity(self, kind: str, entity_id: str, payload: Dict[str, Any]) -> None:
+        """Writes one entity JSON file and refreshes the manifest."""
+
+        if kind not in _ENTITY_LAYOUT:
+            raise ValueError(f"unsupported registry entity kind: {kind}")
+        entity_id_s = str(entity_id or "").strip()
+        if not entity_id_s:
+            raise ValueError(f"{kind} entity_id must not be empty")
+        dir_path = os.path.join(self.root_dir, _ENTITY_LAYOUT[kind])
+        os.makedirs(dir_path, exist_ok=True)
+        path = os.path.join(dir_path, f"{entity_id_s}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dict(payload or {}), f, ensure_ascii=False, indent=2, sort_keys=False)
+        self._refresh_manifest()
+
+    def _read_entity(self, kind: str, entity_id: str) -> Optional[Dict[str, Any]]:
+        """Reads one JSON entity payload from disk."""
+
+        if kind not in _ENTITY_LAYOUT:
+            raise ValueError(f"unsupported registry entity kind: {kind}")
+        entity_id_s = str(entity_id or "").strip()
+        if not entity_id_s:
+            return None
+        path = os.path.join(self.root_dir, _ENTITY_LAYOUT[kind], f"{entity_id_s}.json")
+        if not os.path.isfile(path):
+            return None
         try:
             with open(path, "r", encoding="utf-8") as f:
                 obj = json.load(f)
+            return obj if isinstance(obj, dict) else None
         except Exception:
-            return {}
-        return dict(obj) if isinstance(obj, dict) else {}
+            return None
 
-    def rebuild_indexes(self) -> Dict[str, Any]:
-        """Rebuilds the manifest and returns the new summary."""
+    def _list_entities(self, kind: str, cls: Any) -> List[Any]:
+        """Lists typed registry entities from one directory."""
 
-        return self._refresh_manifest()
+        out: List[Any] = []
+        dir_path = os.path.join(self.root_dir, _ENTITY_LAYOUT[kind])
+        if not os.path.isdir(dir_path):
+            return out
+        for name in sorted(os.listdir(dir_path)):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(dir_path, name)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    obj = json.load(f)
+                if isinstance(obj, dict):
+                    out.append(cls.from_dict(obj))
+            except Exception:
+                continue
+        return out
 
-    def _entity_dir(self, kind: str) -> str:
-        """Returns one entity directory from a logical kind."""
+    def _list_plain_entities(self, kind: str) -> List[Dict[str, Any]]:
+        """Lists raw registry JSON payloads for non-modeled entities."""
 
-        dirname = _ENTITY_LAYOUT.get(str(kind or "").strip())
-        if not dirname:
-            raise ValueError(f"unsupported registry kind: {kind}")
-        return os.path.join(self.root_dir, dirname)
+        out: List[Dict[str, Any]] = []
+        dir_path = os.path.join(self.root_dir, _ENTITY_LAYOUT[kind])
+        if not os.path.isdir(dir_path):
+            return out
+        for name in sorted(os.listdir(dir_path)):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(dir_path, name)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    obj = json.load(f)
+                if isinstance(obj, dict):
+                    out.append(obj)
+            except Exception:
+                continue
+        return out
 
-    def _entity_path(self, kind: str, entity_id: str) -> str:
-        """Builds the path for one entity file."""
+    def _refresh_manifest(self) -> None:
+        """Rebuilds a small registry manifest with entity counts."""
 
-        safe_id = str(entity_id or "").strip().replace("/", "_")
-        if not safe_id:
-            raise ValueError("entity_id must not be empty")
-        return os.path.join(self._entity_dir(kind), f"{safe_id}.json")
+        manifest = {"generated_at": now_iso(), "entities": {}}
+        for kind, dirname in _ENTITY_LAYOUT.items():
+            dir_path = os.path.join(self.root_dir, dirname)
+            count = 0
+            if os.path.isdir(dir_path):
+                count = sum(1 for name in os.listdir(dir_path) if name.endswith(".json"))
+            manifest["entities"][kind] = {"count": count}
+        path = os.path.join(self.index_dir, "manifest.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2, sort_keys=False)
 
     def _compound_key(self, *, entity_type: str, entity_id: str) -> str:
-        """Builds a stable compound key for sidecar registry objects."""
+        """Builds a filesystem-safe key for non-primary registries."""
 
         entity_type_s = str(entity_type or "").strip()
         entity_id_s = str(entity_id or "").strip()
         if not entity_type_s or not entity_id_s:
             raise ValueError("entity_type and entity_id must not be empty")
         return f"{entity_type_s}__{entity_id_s}"
-
-    def _write_entity(self, kind: str, entity_id: str, payload: Dict[str, Any]) -> None:
-        """Writes one entity atomically and refreshes the manifest."""
-
-        path = self._entity_path(kind, entity_id)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
-        os.replace(tmp, path)
-        self._refresh_manifest()
-
-    def _read_entity(self, kind: str, entity_id: str) -> Optional[Dict[str, Any]]:
-        """Reads one entity file if present."""
-
-        path = self._entity_path(kind, entity_id)
-        if not os.path.isfile(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                obj = json.load(f)
-        except Exception:
-            return None
-        return dict(obj) if isinstance(obj, dict) else None
-
-    def _list_entities(self, kind: str, model_cls: Any) -> List[Any]:
-        """Loads all entity JSON files for one registry kind."""
-
-        root = self._entity_dir(kind)
-        out: List[Any] = []
-        for name in sorted(os.listdir(root)):
-            if not name.endswith(".json"):
-                continue
-            path = os.path.join(root, name)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    obj = json.load(f)
-            except Exception:
-                continue
-            if isinstance(obj, dict):
-                try:
-                    out.append(model_cls.from_dict(obj))
-                except Exception:
-                    continue
-        return out
-
-    def _list_plain_entities(self, kind: str) -> List[Dict[str, Any]]:
-        """Loads all plain JSON objects for one registry kind."""
-
-        root = self._entity_dir(kind)
-        out: List[Dict[str, Any]] = []
-        for name in sorted(os.listdir(root)):
-            if not name.endswith(".json"):
-                continue
-            path = os.path.join(root, name)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    obj = json.load(f)
-            except Exception:
-                continue
-            if isinstance(obj, dict):
-                out.append(dict(obj))
-        return out
-
-    def _refresh_manifest(self) -> Dict[str, Any]:
-        """Recomputes and saves a lightweight registry manifest."""
-
-        entities: Dict[str, Dict[str, Any]] = {}
-        for kind in _ENTITY_LAYOUT:
-            root = self._entity_dir(kind)
-            ids = sorted(
-                name[:-5]
-                for name in os.listdir(root)
-                if name.endswith(".json") and os.path.isfile(os.path.join(root, name))
-            )
-            entities[kind] = {"count": len(ids), "ids": ids}
-
-        manifest = {
-            "saved_at": now_iso(),
-            "root_dir": self.root_dir,
-            "entities": entities,
-        }
-        path = os.path.join(self.index_dir, "manifest.json")
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2, sort_keys=False)
-        os.replace(tmp, path)
-        return manifest

@@ -11,7 +11,7 @@ The offline package currently contains three pipelines:
 
 - `conversation`: extract skills from archived OpenAI-format conversation JSON/JSONL files
 - `trajectory`: extract skills from agent execution traces and event logs
-- `document`: compile documents into `document -> evidence -> capability -> skill`, then register versions
+- `document`: compile documents into `document -> support record -> skill draft -> skill`, then register versions
 
 All three reuse the existing AutoSkill store and maintenance layer.
 They differ in how much intermediate structure they preserve before a skill is produced.
@@ -34,32 +34,33 @@ trajectory data
 
 document data
   -> DocumentRecord
-  -> EvidenceUnit
-  -> CapabilitySpec
-  -> SkillSpec
-  -> registry + SkillBank
+  -> SupportRecord[]
+  -> SkillDraft[]
+  -> SkillSpec[]
+  -> registry + SkillBank/DocSkill
 ```
 
-The document pipeline is intentionally more structured because a document-derived skill should not become the only source of truth.
+The document pipeline is still provenance-aware, but the default path is now skill-first.
+It keeps source documents and lightweight support links, instead of forcing a heavy capability compilation step for every corpus.
 
 ## Why The Document Pipeline Is Different
 
-For document corpora, a skill is only the execution-facing output.
-The pipeline keeps four layers separate:
+For document corpora, the pipeline now keeps four layers separate:
 
 1. `DocumentRecord`
-2. `EvidenceUnit`
-3. `CapabilitySpec`
+2. `SupportRecord`
+3. `SkillDraft`
 4. `SkillSpec`
 
 This separation keeps responsibilities clear:
 
 - document: raw input
-- evidence: traceable claims
-- capability: reusable ability abstraction
+- support record: traceable support/conflict/constraint/case-variant links from document spans into a skill
+- skill draft: extracted candidate skill before reconciliation
 - skill: execution output
 
-Versioning is capability-centric, not skill-text-centric.
+Versioning is not done by raw `SKILL.md` text diff alone.
+It compares normalized skill structure plus support history.
 
 ## Current Document Flow
 
@@ -68,11 +69,10 @@ The staged document pipeline lives under [`autoskill/offline/document/`](./docum
 ```text
 document
   -> ingest_document
-  -> extract_evidence
-  -> induce_capabilities
+  -> extract_skills
   -> compile_skills
   -> register_versions
-  -> registry + SkillBank
+  -> registry + SkillBank/DocSkill
 ```
 
 Current properties:
@@ -80,7 +80,7 @@ Current properties:
 - incremental ingestion via content hash
 - dry-run support
 - stage-by-stage rerun support
-- provenance links from documents and evidence into version changes
+- provenance links from documents and support records into version changes
 - lifecycle-aware versioning: `candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
 - cross-domain design with no psychology-specific schema assumptions
 
@@ -95,8 +95,7 @@ The document pipeline uses a side-car registry under:
 It stores first-class records for:
 
 - documents
-- evidence
-- capabilities
+- supports
 - skills
 - lifecycles
 - version history
@@ -115,7 +114,6 @@ The document pipeline is available through the top-level CLI:
 python3 -m autoskill offline document build --file ./paper.md --dry-run
 python3 -m autoskill offline document ingest --file ./docs/
 python3 -m autoskill offline document extract --file ./paper.md --json
-python3 -m autoskill offline document induce --file ./paper.md --json
 python3 -m autoskill offline document compile --file ./paper.md --json
 ```
 
@@ -160,7 +158,7 @@ result = extract_from_doc(
 )
 ```
 
-The document pipeline can also be used stage-by-stage through `DocumentBuildPipeline` when a caller needs to rerun only ingestion, evidence extraction, capability induction, or registration.
+The document pipeline can also be used stage-by-stage through `DocumentBuildPipeline` when a caller needs to rerun only ingestion, extraction, compilation, or registration.
 
 ## Package Layout
 
@@ -176,10 +174,9 @@ Document-specific modules:
 
 - `models.py`: core offline document data models
 - `ingest.py`: document normalization and incremental checks
-- `extractor.py`: `DocumentRecord -> EvidenceUnit`
-- `inducer.py`: `EvidenceUnit -> CapabilitySpec`
-- `compiler.py`: `CapabilitySpec -> SkillSpec`
-- `versioning.py`: capability-centric version and lifecycle management
+- `extractor.py`: `DocumentRecord -> SupportRecord[] + SkillDraft[]`
+- `compiler.py`: `SkillDraft[] -> SkillSpec[]`
+- `versioning.py`: skill-centric version and lifecycle management backed by support links
 - `registry.py`: side-car persistence for offline document entities
 - `pipeline.py`: staged orchestration
 - `extract.py`: API + CLI entrypoint
@@ -190,16 +187,13 @@ The document pipeline is intentionally built around replaceable interfaces.
 
 Current extension points:
 
-- `DocumentIngestor`
-- `EvidenceExtractor`
-- `CapabilityInducer`
+- `DocumentSkillExtractor`
 - `SkillCompiler`
 - `VersionManager`
 
 This keeps room for future:
 
-- LLM-backed evidence extraction
-- LLM-backed capability induction
+- LLM-backed document skill extraction
 - stronger similarity comparators
 - offline evaluation and scoring
 
@@ -209,11 +203,13 @@ What exists now:
 
 - minimal working staged document pipeline
 - registry-backed versioning with `create / strengthen / revise / split / merge / deprecate`
+- support-backed provenance for each skill update
 - CLI access for stage-level debugging and dry runs
 - tests for core document paths and versioning scenarios
 
 What is still intentionally lightweight:
 
+- support extraction and reconciliation use clear heuristics first; they are not intended to be final algorithms
 - split/merge/deprecate heuristics are simple and clear, not algorithmically heavy
 - conversation and trajectory are not yet routed through the top-level `autoskill offline ...` CLI
 - LLM extractors, evaluators, and comparators are extension hooks, not the default implementation
@@ -223,7 +219,7 @@ What is still intentionally lightweight:
 The offline package follows these constraints:
 
 - prefer minimal working implementations first
-- keep document/evidence/capability/skill responsibilities separate
-- version using capability semantics, not only skill text diffs
+- keep document/support/skill responsibilities separate
+- version using normalized skill structure plus support provenance, not only skill text diffs
 - stay domain-agnostic
 - reuse existing store, config, prompt runtime, and CLI patterns when possible

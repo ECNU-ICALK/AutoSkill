@@ -34,6 +34,17 @@ def default_store_path() -> str:
     return _default_store_path()
 
 
+def default_document_store_path() -> str:
+    """
+    Returns the canonical default local store path for document-extracted skills.
+
+    Target location:
+    - <repo_root>/SkillBank/DocSkill
+    """
+
+    return os.path.join(default_store_path(), "DocSkill")
+
+
 def _default_store() -> Dict[str, Any]:
     """Run default store."""
     return {"provider": "local", "path": default_store_path()}

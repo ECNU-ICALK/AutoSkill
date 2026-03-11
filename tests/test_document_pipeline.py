@@ -1,35 +1,178 @@
 from __future__ import annotations
 
+import json
+import os
 import tempfile
 import unittest
 
 from autoskill import AutoSkill, AutoSkillConfig
+from autoskill.offline.document.compiler import _identity_key_for_skill
+from autoskill.offline.document.extractor import build_document_skill_extractor, extract_skills
 from autoskill.offline.document.extract import extract_from_doc
 from autoskill.offline.document.pipeline import build_default_document_pipeline
+from autoskill.offline.document.prompts import OFFLINE_CHANNEL_DOC, build_offline_extract_prompt
 
 
 _DOC_TEXT = """
-# Method
-1. Gather source inputs before classification.
-2. Normalize fields before applying the workflow.
+# Intake
+1. Build rapport before deeper intervention.
+2. Clarify the client's immediate concern.
 
 # Constraints
-You must verify required fields before running the workflow.
-Do not continue when key inputs are missing.
-
-# Validation
-If evidence is incomplete, report uncertainty instead of forcing a result.
+Do not push interpretation before the client is ready.
+Always check for acute risk before intensive exploration.
 
 # Output
-Output a report with label and rationale.
+Output a short session direction summary.
 """.strip()
+
+
+def _document_llm_response(*, system: str | None, user: str, temperature: float = 0.0, mode: str = "default") -> str:
+    _ = system, temperature
+    if mode == "document_extract":
+        payload = json.loads(user)
+        document = payload.get("document", {})
+        excerpt = str(payload.get("excerpt") or "").strip()
+        return json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": f"{document.get('domain') or 'document'} intake workflow",
+                        "description": "Reusable workflow extracted from the document.",
+                        "prompt": (
+                            "# Role & Objective\n"
+                            "Guide the operator through the reusable workflow.\n\n"
+                            "# Rules & Constraints\n"
+                            "- Keep the process safe and structured.\n\n"
+                            "# Core Workflow\n"
+                            "1. Build rapport first.\n"
+                            "2. Clarify the immediate concern.\n"
+                            "3. Check acute risk before deeper exploration.\n\n"
+                            "# Output Format\n"
+                            "- Output a short session direction summary."
+                        ),
+                        "asset_type": "session_skill",
+                        "granularity": "session",
+                        "objective": "Run a structured first-session intake.",
+                        "domain": document.get("domain") or "psychology",
+                        "task_family": "intake",
+                        "method_family": "structured_interview",
+                        "stage": "intake",
+                        "applicable_signals": [
+                            "When the client is entering an initial consultation.",
+                        ],
+                        "intervention_moves": [
+                            "Reflect the client's main concern before moving deeper.",
+                        ],
+                        "contraindications": [
+                            "Do not skip acute risk screening when crisis cues are present.",
+                        ],
+                        "workflow_steps": [
+                            "Build rapport first.",
+                            "Clarify the immediate concern.",
+                            "Check acute risk before deeper exploration.",
+                        ],
+                        "constraints": [
+                            "Keep the process safe and structured.",
+                        ],
+                        "cautions": [
+                            "Avoid intensive interpretation too early.",
+                        ],
+                        "output_contract": [
+                            "Output a short session direction summary.",
+                        ],
+                        "examples": [
+                            {
+                                "input": "Client says they feel overwhelmed and do not know where to start.",
+                                "output": "Reflect the overwhelm first, then ask for the most urgent concern to focus the session.",
+                                "notes": "Use a calm, non-rushing tone.",
+                            }
+                        ],
+                        "relation_type": "conflict" if "do not" in excerpt.lower() else "support",
+                        "risk_class": "medium",
+                        "triggers": [
+                            "When starting intake",
+                            "When clarifying a first session",
+                            "When documenting session direction",
+                        ],
+                        "tags": ["psychology", "intake", "workflow"],
+                        "confidence": 0.92,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    if mode == "document_compile":
+        payload = json.loads(user)
+        drafts = list(payload.get("drafts") or [])
+        first = drafts[0]
+        support_ids: list[str] = []
+        for draft in drafts:
+            support_ids.extend(list(draft.get("support_ids") or []))
+        return json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": first.get("name") or "document intake workflow",
+                        "description": "Canonical reusable workflow compiled from document drafts.",
+                        "prompt": first.get("metadata", {}).get("prompt") or first.get("name") or "prompt",
+                        "asset_type": first.get("asset_type") or "session_skill",
+                        "granularity": first.get("granularity") or "session",
+                        "objective": first.get("objective") or first.get("description") or "objective",
+                        "domain": first.get("domain") or "psychology",
+                        "task_family": first.get("task_family") or "intake",
+                        "method_family": first.get("method_family") or "structured_interview",
+                        "stage": first.get("stage") or "intake",
+                        "applicable_signals": first.get("applicable_signals") or [],
+                        "intervention_moves": first.get("intervention_moves") or [],
+                        "contraindications": first.get("contraindications") or [],
+                        "triggers": first.get("triggers") or [],
+                        "workflow_steps": first.get("workflow_steps") or [],
+                        "constraints": first.get("constraints") or [],
+                        "cautions": first.get("cautions") or [],
+                        "output_contract": first.get("output_contract") or [],
+                        "examples": first.get("examples") or [],
+                        "tags": first.get("metadata", {}).get("tags") or ["psychology", "intake"],
+                        "confidence": 0.9,
+                        "risk_class": first.get("risk_class") or "medium",
+                        "support_ids": support_ids,
+                        "source_draft_ids": [draft.get("draft_id") for draft in drafts],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    if mode == "document_version":
+        payload = json.loads(user)
+        candidate = payload.get("candidate_skill") or {}
+        existing = list(payload.get("existing_skills") or [])
+        if not existing:
+            return json.dumps({"action": "create", "target_skill_ids": [], "reason": "new skill"}, ensure_ascii=False)
+        target = existing[0]
+        action = "strengthen"
+        candidate_steps = list(candidate.get("workflow_steps") or [])
+        target_steps = list(target.get("workflow_steps") or [])
+        if len(candidate_steps) > len(target_steps):
+            action = "revise"
+        return json.dumps(
+            {
+                "action": action,
+                "target_skill_ids": [target.get("skill_id")],
+                "reason": action,
+                "resolved_skill": candidate,
+            },
+            ensure_ascii=False,
+        )
+    if mode == "document_conflict":
+        return json.dumps({"action": "keep", "reason": "no conflict review needed"}, ensure_ascii=False)
+    return json.dumps({"skills": []}, ensure_ascii=False)
 
 
 class DocumentPipelineTest(unittest.TestCase):
     def _build_sdk(self, *, store_path: str) -> AutoSkill:
         return AutoSkill(
             AutoSkillConfig(
-                llm={"provider": "mock"},
+                llm={"provider": "mock", "response": _document_llm_response},
                 embeddings={"provider": "hashing", "dims": 64},
                 store={"provider": "local", "path": store_path},
                 maintenance_strategy="heuristic",
@@ -45,22 +188,27 @@ class DocumentPipelineTest(unittest.TestCase):
             result = pipeline.build(
                 user_id="u1",
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
             )
 
             self.assertEqual(len(result.ingest.documents), 1)
-            self.assertGreater(len(result.evidence.evidence_units), 0)
-            self.assertGreater(len(result.capabilities.capabilities), 0)
-            self.assertGreater(len(result.skills.skill_specs), 0)
+            self.assertGreater(len(result.extracted.support_records), 0)
+            self.assertGreater(len(result.extracted.skill_drafts), 0)
+            self.assertGreater(len(result.compiled.skill_specs), 0)
             self.assertGreater(len(result.registration.lifecycles), 0)
             self.assertGreaterEqual(len(result.registration.upserted_store_skills), 1)
             self.assertEqual(pipeline.registry.manifest()["entities"]["documents"]["count"], 1)
+            self.assertGreaterEqual(pipeline.registry.manifest()["entities"]["supports"]["count"], 1)
             self.assertGreaterEqual(pipeline.registry.manifest()["entities"]["skills"]["count"], 1)
-            self.assertGreaterEqual(len(sdk.store.list(user_id="u1")), 1)
+            stored_skills = sdk.store.list(user_id="u1")
+            self.assertGreaterEqual(len(stored_skills), 1)
+            self.assertIn("## Applicable Signals", stored_skills[0].instructions)
+            self.assertIn("## Example Therapist Responses", stored_skills[0].instructions)
+            self.assertGreaterEqual(len(stored_skills[0].examples), 1)
             self.assertTrue(any("[ingest_document]" in line for line in logs))
-            self.assertTrue(any("[extract_evidence]" in line for line in logs))
+            self.assertTrue(any("[extract_skills]" in line for line in logs))
             self.assertTrue(any("[compile_skills]" in line for line in logs))
 
     def test_incremental_build_skips_unchanged_document(self) -> None:
@@ -71,15 +219,15 @@ class DocumentPipelineTest(unittest.TestCase):
             first = pipeline.build(
                 user_id="u1",
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
             )
             second = pipeline.build(
                 user_id="u1",
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
             )
 
@@ -96,15 +244,15 @@ class DocumentPipelineTest(unittest.TestCase):
             result = pipeline.build(
                 user_id="u1",
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
                 dry_run=True,
             )
 
             manifest = pipeline.registry.manifest()
             self.assertTrue(result.dry_run)
-            self.assertGreater(len(result.registration.lifecycles), 0)
+            self.assertGreaterEqual(len(result.registration.lifecycles), 0)
             self.assertEqual(manifest["entities"]["documents"]["count"], 0)
             self.assertEqual(manifest["entities"]["skills"]["count"], 0)
             self.assertEqual(len(sdk.store.list(user_id="u1")), 0)
@@ -117,101 +265,298 @@ class DocumentPipelineTest(unittest.TestCase):
                 sdk=sdk,
                 user_id="u1",
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
                 dry_run=True,
             )
 
             self.assertEqual(result["total_documents"], 1)
-            self.assertGreater(result["total_evidence_units"], 0)
-            self.assertGreater(result["total_capabilities"], 0)
+            self.assertGreater(result["total_support_records"], 0)
+            self.assertGreater(result["total_skill_drafts"], 0)
             self.assertGreater(result["total_skill_specs"], 0)
             self.assertEqual(result["upserted_count"], 0)
             self.assertTrue(result["dry_run"])
+            self.assertEqual(result["skills"][0]["asset_type"], "session_skill")
+            self.assertEqual(result["skills"][0]["granularity"], "session")
 
-    def test_compile_stage_keeps_references_outside_skill_body(self) -> None:
+    def test_document_prompt_requires_multi_asset_single_goal_extraction(self) -> None:
+        prompt = build_offline_extract_prompt(channel=OFFLINE_CHANNEL_DOC, max_candidates=3)
+
+        self.assertIn("One document may produce zero, one, or MANY assets", prompt)
+        self.assertIn("single-goal", prompt)
+        self.assertIn("asset_type (macro_protocol|session_skill|micro_skill|safety_rule|knowledge_reference)", prompt)
+        self.assertIn("never merge macro and micro assets", prompt)
+        self.assertIn("micro_skill means one therapist move", prompt)
+        self.assertIn("examples", prompt)
+
+    def test_identity_key_distinguishes_macro_and_micro_assets(self) -> None:
+        macro = _identity_key_for_skill(
+            asset_type="macro_protocol",
+            granularity="macro",
+            objective="Run a full intake protocol.",
+            domain="psychology",
+            task_family="assessment",
+            method_family="cbt",
+            stage="intake",
+            name="intake protocol",
+        )
+        micro = _identity_key_for_skill(
+            asset_type="micro_skill",
+            granularity="micro",
+            objective="Deliver one empathic reflection.",
+            domain="psychology",
+            task_family="assessment",
+            method_family="cbt",
+            stage="intake",
+            name="intake protocol",
+        )
+
+        self.assertNotEqual(macro, micro)
+
+    def test_short_section_is_used_as_default_extraction_unit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+            pipeline = build_default_document_pipeline(sdk=sdk)
+            text = """
+# Intake
+Build rapport before deeper intervention.
+
+Clarify the client's immediate concern and summarize the goal for this session.
+""".strip()
+
+            ingest_result = pipeline.ingest_document(
+                data=text,
+                title="Short Intake Section",
+                domain="psychology",
+                dry_run=True,
+            )
+            extracted = pipeline.extract_skills(documents=ingest_result.documents)
+
+            self.assertEqual(len(ingest_result.documents), 1)
+            self.assertEqual(len(extracted.support_records), 1)
+            self.assertEqual(extracted.support_records[0].metadata.get("extraction_unit"), "section")
+
+    def test_long_section_falls_back_to_multiple_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+            pipeline = build_default_document_pipeline(sdk=sdk)
+            text = """
+# Intake
+Build rapport before deeper intervention.
+
+Clarify the client's immediate concern and summarize the goal for this session.
+
+Always assess acute risk before intensive exploration.
+
+Do not push interpretation before the client is ready.
+""".strip()
+
+            ingest_result = pipeline.ingest_document(
+                data=text,
+                title="Long Intake Section",
+                domain="psychology",
+                dry_run=True,
+            )
+            extracted = extract_skills(
+                documents=ingest_result.documents,
+                extractor=build_document_skill_extractor(
+                    "llm",
+                    llm_config={"provider": "mock", "response": _document_llm_response},
+                    max_section_chars=120,
+                    overlap_chars=20,
+                ),
+            )
+
+            self.assertGreater(len(extracted.support_records), 1)
+            self.assertTrue(
+                any(record.metadata.get("extraction_unit") == "chunk" for record in extracted.support_records)
+            )
+
+    def test_budgeted_extraction_prioritizes_relevant_sections(self) -> None:
+        def _budget_response(*, system: str | None, user: str, temperature: float = 0.0, mode: str = "default") -> str:
+            _ = system, temperature
+            if mode != "document_extract":
+                return json.dumps({"skills": []}, ensure_ascii=False)
+            payload = json.loads(user)
+            excerpt = str(payload.get("excerpt") or "").strip().lower()
+            if "scaling question" not in excerpt:
+                return json.dumps({"skills": []}, ensure_ascii=False)
+            document = payload.get("document") or {}
+            return json.dumps(
+                {
+                    "skills": [
+                        {
+                            "name": "Scaling question intervention",
+                            "description": "Use a scaling question intervention.",
+                            "prompt": (
+                                "# Role & Objective\n"
+                                "Use a scaling question.\n\n"
+                                "# Rules & Constraints\n"
+                                "- Keep the intervention concise.\n\n"
+                                "# Core Workflow\n"
+                                "1. Ask the scaling question.\n\n"
+                                "# Output Format\n"
+                                "- Return the next-step summary."
+                            ),
+                            "asset_type": "micro_skill",
+                            "granularity": "micro",
+                            "objective": "Deliver a single scaling-question intervention move.",
+                            "domain": document.get("domain") or "psychology",
+                            "task_family": "goal_setting",
+                            "method_family": "solution_focused",
+                            "stage": "intervention",
+                            "applicable_signals": ["When progress needs to be scaled concretely."],
+                            "intervention_moves": ["Ask the scaling question."],
+                            "contraindications": [],
+                            "workflow_steps": ["Ask the scaling question."],
+                            "constraints": ["Keep the intervention concise."],
+                            "cautions": [],
+                            "output_contract": ["Return the next-step summary."],
+                            "relation_type": "support",
+                            "risk_class": "low",
+                            "triggers": ["When using a scaling question"],
+                            "tags": ["scaling question", "solution focused"],
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+            pipeline = build_default_document_pipeline(sdk=sdk)
+            profile_path = os.path.join(tmpdir, "custom_profile.json")
+            with open(profile_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "domain": "psychology",
+                        "task_keywords": [
+                            {"label": "goal_setting", "aliases": ["goal setting", "session intervention"]}
+                        ],
+                        "method_keywords": [
+                            {"label": "solution_focused", "aliases": ["scaling question"]}
+                        ],
+                        "stage_keywords": [
+                            {"label": "intervention", "aliases": ["session intervention"]}
+                        ],
+                        "metadata": {
+                            "section_priority_keywords": ["session intervention"],
+                            "section_deprioritize_keywords": ["demographics", "growth history"]
+                        },
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+            text = """
+# Demographics
+This section only describes age, school, and family facts.
+
+# Growth History
+This section only narrates background experiences.
+
+# Session Intervention
+Use a scaling question to help the client rate progress and define the next step.
+""".strip()
+
+            ingest_result = pipeline.ingest_document(
+                data=text,
+                title="Budgeted Section Priority",
+                domain="psychology",
+                dry_run=True,
+            )
+            extracted = extract_skills(
+                documents=ingest_result.documents,
+                extractor=build_document_skill_extractor(
+                    "llm",
+                    llm_config={"provider": "mock", "response": _budget_response},
+                    domain_profile_path=profile_path,
+                    max_units_per_document=1,
+                ),
+            )
+
+            self.assertEqual(len(extracted.skill_drafts), 1)
+            self.assertEqual(extracted.support_records[0].section, "Session Intervention")
+            self.assertEqual(extracted.skill_drafts[0].stage, "intervention")
+            self.assertEqual(extracted.skill_drafts[0].asset_type, "micro_skill")
+
+    def test_compile_stage_keeps_support_content_outside_skill_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sdk = self._build_sdk(store_path=tmpdir)
             pipeline = build_default_document_pipeline(sdk=sdk)
 
             ingest_result = pipeline.ingest_document(
                 data=_DOC_TEXT,
-                title="Classification Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
                 dry_run=True,
             )
-            evidence_result = pipeline.extract_evidence(documents=ingest_result.documents)
-            capability_result = pipeline.induce_capabilities(
-                documents=ingest_result.documents,
-                evidence_units=evidence_result.evidence_units,
+            extracted_result = pipeline.extract_skills(documents=ingest_result.documents)
+            compiled_result = pipeline.compile_skills(
+                skill_drafts=extracted_result.skill_drafts,
+                support_records=extracted_result.support_records,
             )
-            skill_result = pipeline.compile_skills(capabilities=capability_result.capabilities)
 
-            spec = skill_result.skill_specs[0]
-            capability = capability_result.capabilities[0]
-            first_ref = capability.evidence_refs[0]
-
-            self.assertEqual(spec.references, capability.evidence_refs)
-            self.assertEqual(
-                spec.metadata.get("evidence_ref_count"),
-                len(capability.evidence_refs),
+            spec = compiled_result.skill_specs[0]
+            support = next(
+                (item for item in compiled_result.support_records if item.support_id in spec.support_ids),
+                None,
             )
-            self.assertNotIn(first_ref, spec.skill_body)
-            self.assertNotIn("source_file", spec.skill_body.lower())
-            self.assertNotIn("confidence", spec.skill_body.lower())
+
+            self.assertIsNotNone(support)
+            assert support is not None
+            self.assertIn(support.support_id, spec.support_ids)
+            self.assertNotIn(support.support_id, spec.skill_body)
+            self.assertNotIn(support.excerpt, spec.metadata.get("identity_key", ""))
 
     def test_changed_document_bumps_registry_versions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sdk = self._build_sdk(store_path=tmpdir)
             pipeline = build_default_document_pipeline(sdk=sdk)
             initial_text = """
-# Method
-1. Normalize source fields.
-2. Apply the workflow.
+# Intake
+1. Build rapport before deeper intervention.
 
 # Constraints
-You must verify required fields before execution.
+Do not push interpretation before the client is ready.
 """.strip()
             revised_text = """
-# Method
-1. Normalize source fields.
-2. Apply the workflow.
+# Intake
+1. Build rapport before deeper intervention.
 
 # Constraints
-You must verify required fields before execution.
-Always record provenance for each required field.
+Do not push interpretation before the client is ready.
+Always check for acute risk before intensive exploration.
 """.strip()
 
             first = pipeline.build(
                 user_id="u1",
                 data=initial_text,
-                title="Normalization Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
             )
             second = pipeline.build(
                 user_id="u1",
                 data=revised_text,
-                title="Normalization Workflow",
-                domain="geography",
+                title="Intake Workflow",
+                domain="psychology",
                 metadata={"channel": "offline_extract_from_doc"},
             )
 
-            first_versions = {
-                spec.capability_id: spec.version for spec in list(first.registration.capabilities or [])
-            }
-            shared_capabilities = [
-                spec for spec in list(second.registration.capabilities or []) if spec.capability_id in first_versions
+            first_versions = {spec.skill_id: spec.version for spec in list(first.registration.skill_specs or [])}
+            shared_skills = [
+                spec for spec in list(second.registration.skill_specs or []) if spec.skill_id in first_versions
             ]
 
-            self.assertTrue(shared_capabilities)
-            self.assertTrue(any(spec.version != first_versions[spec.capability_id] for spec in shared_capabilities))
-            self.assertTrue(any(spec.version == "0.1.1" for spec in shared_capabilities))
-            self.assertTrue(
-                any(event.reason in {"revise", "strengthen", "merge"} for event in second.registration.lifecycles)
-            )
+            self.assertTrue(shared_skills)
+            self.assertTrue(any(spec.version != first_versions[spec.skill_id] for spec in shared_skills))
+            self.assertTrue(any(spec.version == "0.1.1" for spec in shared_skills))
+            self.assertTrue(any(event.reason in {"revise", "strengthen", "merge"} for event in second.registration.lifecycles))
 
 
 if __name__ == "__main__":

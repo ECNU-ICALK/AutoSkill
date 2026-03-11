@@ -1,123 +1,46 @@
 """
-Evidence extraction stage for the offline document pipeline.
-
-This stage converts normalized `DocumentRecord` objects into atomic
-`EvidenceUnit` objects. The extractor interface is intentionally pluggable so
-future LLM-backed implementations can be added without changing the pipeline
-or CLI layer.
+LLM-driven skill extraction stage for the offline document pipeline.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import re
 import uuid
-from typing import Dict, List, Protocol
+from typing import Dict, List, Optional, Protocol, Tuple
+
+from autoskill.llm.base import LLM
+from autoskill.llm.factory import build_llm
+from autoskill.models import SkillExample
 
 from .common import StageLogger, emit_stage_log, normalize_text
-from .models import DocumentRecord, EvidenceUnit, ProvenanceRecord, TextSpan
+from .llm_utils import (
+    clip_confidence,
+    coerce_str_list,
+    compact_text_list,
+    llm_complete_json,
+    maybe_json_dict,
+    section_items_from_prompt,
+)
+from .models import (
+    DocumentRecord,
+    SkillDraft,
+    SupportRecord,
+    SupportRelation,
+    TextSpan,
+)
+from .profile import DomainProfile, load_domain_profile
+from .prompts import OFFLINE_CHANNEL_DOC, maybe_offline_prompt
 
-_TASK_KEYWORDS = [
-    ("classification", ["classify", "classification", "categorize", "taxonomy", "分类"]),
-    ("extraction", ["extract", "extraction", "parse", "pull", "提取", "抽取", "解析"]),
-    ("analysis", ["analyze", "analysis", "assess", "review", "评估", "分析", "审查"]),
-    ("planning", ["plan", "planning", "strategy", "design", "规划", "设计", "策略"]),
-    ("generation", ["generate", "generation", "compose", "write", "draft", "生成", "撰写"]),
-    ("validation", ["validate", "validation", "verify", "test", "check", "验证", "校验", "检查"]),
-    ("monitoring", ["monitor", "monitoring", "observe", "track", "监控", "跟踪"]),
-    ("transformation", ["transform", "convert", "rewrite", "normalize", "转换", "改写", "规范化"]),
-    ("decision", ["decide", "decision", "rule", "branch", "决策", "判断"]),
-]
-
-_METHOD_KEYWORDS = [
-    ("workflow", ["workflow", "procedure", "protocol", "pipeline", "流程", "步骤", "方法"]),
-    ("checklist", ["checklist", "criteria", "rubric", "清单", "标准"]),
-    ("template", ["template", "schema", "format", "contract", "模板", "格式"]),
-    ("heuristic", ["heuristic", "rule-based", "启发式", "规则"]),
-    ("comparison", ["compare", "comparison", "benchmark", "对比", "比较"]),
-    ("scoring", ["score", "scoring", "ranking", "打分", "评分"]),
-    ("observation", ["observe", "observation", "field notes", "观察"]),
-    ("review", ["review", "inspection", "audit", "审阅", "审计"]),
-]
-
-_STAGE_KEYWORDS = [
-    ("intake", ["background", "input", "context", "overview", "summary", "背景", "输入", "概述"]),
-    ("analysis", ["analysis", "assess", "evaluate", "review", "analy", "分析", "评估", "审查"]),
-    ("planning", ["plan", "design", "strategy", "规划", "设计", "策略"]),
-    ("execution", ["method", "procedure", "workflow", "apply", "execute", "实施", "执行", "方法"]),
-    ("validation", ["validate", "check", "monitor", "verify", "test", "验证", "检查", "监控"]),
-    ("reporting", ["output", "report", "result", "summary", "结论", "输出", "结果"]),
-]
-
-_CONSTRAINT_PATTERNS = ["must", "should", "need to", "do not", "avoid", "禁止", "必须", "应当", "不要", "不得"]
-_DECISION_PATTERNS = ["if ", "when ", "unless", "otherwise", "如果", "当", "否则"]
-_FAILURE_PATTERNS = ["fail", "failure", "error", "risk", "warning", "注意", "失败", "错误", "风险"]
-_OUTPUT_PATTERNS = ["output", "return", "report", "deliver", "输出", "结果", "返回", "交付"]
-_TRIGGER_PATTERNS = ["trigger", "when asked", "use when", "适用", "触发", "在.*时"]
 _WORKFLOW_PATTERNS = [r"^\s*[\-\*\u2022]\s+", r"^\s*\d+[\.\)]\s+"]
-_NEGATION_PATTERNS = ["not ", "never", "avoid", "禁止", "不要", "不得", "无须"]
-def _contains_any(text: str, patterns: List[str]) -> bool:
-    """Returns True when a text contains any keyword pattern."""
-
-    low = str(text or "").lower()
-    for pattern in patterns:
-        try:
-            if re.search(pattern, low):
-                return True
-        except re.error:
-            if pattern.lower() in low:
-                return True
-    return False
-
-
-def _infer_family(text: str, mapping: List[tuple[str, List[str]]], *, fallback: str = "general") -> str:
-    """Infers task/method/stage families from generic keyword maps."""
-
-    low = str(text or "").lower()
-    for label, patterns in mapping:
-        for pattern in patterns:
-            if pattern.lower() in low:
-                return label
-    return fallback
-
-
-def _detect_claim_type(text: str) -> str:
-    """Assigns a coarse evidence type using generic structural signals."""
-
-    src = str(text or "")
-    low = src.lower()
-    if any(re.search(pattern, src) for pattern in _WORKFLOW_PATTERNS):
-        return "workflow_step"
-    if _contains_any(low, _FAILURE_PATTERNS):
-        return "failure_mode"
-    if _contains_any(low, _OUTPUT_PATTERNS):
-        return "output_contract"
-    if _contains_any(low, _DECISION_PATTERNS):
-        return "decision_rule"
-    if _contains_any(low, _CONSTRAINT_PATTERNS):
-        return "constraint"
-    if _contains_any(low, _TRIGGER_PATTERNS):
-        return "trigger_condition"
-    return "observation"
-
-
-def _claim_confidence(text: str, claim_type: str) -> float:
-    """Assigns a lightweight confidence score to heuristic evidence units."""
-
-    score = 0.55
-    if claim_type in {"workflow_step", "decision_rule", "constraint"}:
-        score += 0.15
-    if _contains_any(text, _WORKFLOW_PATTERNS):
-        score += 0.1
-    if len(normalize_text(text)) > 40:
-        score += 0.05
-    if _contains_any(text, _FAILURE_PATTERNS + _OUTPUT_PATTERNS + _DECISION_PATTERNS):
-        score += 0.05
-    return min(score, 0.95)
+_DEFAULT_SECTION_CHARS = 2400
+_DEFAULT_CHUNK_OVERLAP_CHARS = 200
+_DEFAULT_MAX_CANDIDATES_PER_UNIT = 3
 
 
 def _split_section_blocks(text: str) -> List[str]:
-    """Splits section text into paragraph-like evidence blocks."""
+    """Splits one section into paragraph-like blocks before fallback chunking."""
 
     src = str(text or "").strip()
     if not src:
@@ -125,11 +48,7 @@ def _split_section_blocks(text: str) -> List[str]:
     blocks: List[str] = []
     for paragraph in [p.strip() for p in src.split("\n\n") if p.strip()]:
         lines = [ln.strip() for ln in paragraph.splitlines() if ln.strip()]
-        bullet_lines = [
-            ln
-            for ln in lines
-            if any(re.search(pattern, ln) for pattern in _WORKFLOW_PATTERNS)
-        ]
+        bullet_lines = [ln for ln in lines if any(re.search(pattern, ln) for pattern in _WORKFLOW_PATTERNS)]
         if bullet_lines and len(bullet_lines) == len(lines):
             blocks.extend(bullet_lines)
             continue
@@ -137,11 +56,11 @@ def _split_section_blocks(text: str) -> List[str]:
     return blocks
 
 
-def _block_span(record: DocumentRecord, *, section_start: int, block: str, cursor: int) -> TextSpan:
-    """Builds a best-effort source span for one extracted evidence block."""
+def _text_span(record: DocumentRecord, *, section_start: int, text: str, cursor: int) -> TextSpan:
+    """Builds a best-effort source span for one extracted text unit."""
 
     raw = str(record.raw_text or "")
-    target = str(block or "").strip()
+    target = str(text or "").strip()
     if not target:
         return TextSpan(start=section_start, end=section_start)
     idx = raw.find(target, max(0, int(cursor)))
@@ -152,146 +71,702 @@ def _block_span(record: DocumentRecord, *, section_start: int, block: str, curso
     return TextSpan(start=idx, end=idx + len(target))
 
 
+def _split_text_windows(text: str, *, max_chars: int, overlap_chars: int) -> List[str]:
+    """Splits a long text into overlapping windows."""
+
+    src = str(text or "").strip()
+    if not src:
+        return []
+    if len(src) <= max_chars:
+        return [src]
+
+    safe_max = max(80, int(max_chars or 0))
+    safe_overlap = max(0, min(int(overlap_chars or 0), safe_max // 3))
+    step = max(40, safe_max - safe_overlap)
+    out: List[str] = []
+    start = 0
+    while start < len(src):
+        end = min(len(src), start + safe_max)
+        chunk = src[start:end].strip()
+        if chunk:
+            out.append(chunk)
+        if end >= len(src):
+            break
+        start = end - safe_overlap
+    return out
+
+
+def _plan_section_units(
+    *,
+    record: DocumentRecord,
+    section_text: str,
+    section_start: int,
+    section_span: TextSpan,
+    max_section_chars: int,
+    overlap_chars: int,
+) -> List[Tuple[str, TextSpan, str]]:
+    """Plans extraction units for one section."""
+
+    src = str(section_text or "").strip()
+    if not src:
+        return []
+    if len(src) <= max_section_chars:
+        return [(src, section_span, "section")]
+
+    blocks = _split_section_blocks(src) or [src]
+    grouped_texts: List[str] = []
+    current_blocks: List[str] = []
+    current_size = 0
+    for raw_block in blocks:
+        block = str(raw_block or "").strip()
+        if not block:
+            continue
+        if len(block) > max_section_chars:
+            if current_blocks:
+                grouped_texts.append("\n\n".join(current_blocks))
+                current_blocks = []
+                current_size = 0
+            grouped_texts.extend(
+                _split_text_windows(
+                    block,
+                    max_chars=max_section_chars,
+                    overlap_chars=overlap_chars,
+                )
+            )
+            continue
+        projected = current_size + (2 if current_blocks else 0) + len(block)
+        if current_blocks and projected > max_section_chars:
+            grouped_texts.append("\n\n".join(current_blocks))
+            current_blocks = [block]
+            current_size = len(block)
+            continue
+        current_blocks.append(block)
+        current_size = projected
+
+    if current_blocks:
+        grouped_texts.append("\n\n".join(current_blocks))
+
+    units: List[Tuple[str, TextSpan, str]] = []
+    cursor = int(section_start or 0)
+    for text in grouped_texts or _split_text_windows(src, max_chars=max_section_chars, overlap_chars=overlap_chars):
+        span = _text_span(record, section_start=section_start, text=text, cursor=cursor)
+        cursor = int(span.end or cursor)
+        units.append((text, span, "chunk"))
+    return units
+
+
+def _profile_section_priority_terms(profile: DomainProfile, *, key: str) -> List[str]:
+    """Returns normalized section-priority terms from profile metadata."""
+
+    metadata = dict(profile.metadata or {})
+    raw = metadata.get(key)
+    return compact_text_list(coerce_str_list(raw), limit=64)
+
+
+def _section_priority_score(
+    *,
+    heading: str,
+    text: str,
+    priority_terms: List[str],
+    deprioritize_terms: List[str],
+) -> int:
+    """Scores a section heading/body for budget-aware extraction ordering."""
+
+    heading_text = normalize_text(str(heading or ""), lower=True)
+    preview_text = normalize_text(str(text or "")[:600], lower=True)
+    score = 0
+    for term in priority_terms:
+        token = normalize_text(term, lower=True)
+        if not token:
+            continue
+        if token in heading_text:
+            score += 6
+        elif token in preview_text:
+            score += 2
+    for term in deprioritize_terms:
+        token = normalize_text(term, lower=True)
+        if not token:
+            continue
+        if token in heading_text:
+            score -= 6
+        elif token in preview_text:
+            score -= 2
+    return score
+
+
+def _ordered_sections_for_budget(record: DocumentRecord, *, profile: DomainProfile, max_units_per_document: int) -> List[object]:
+    """Reorders sections when a unit budget is active so higher-value sections go first."""
+
+    sections = list(record.sections or [])
+    if max_units_per_document <= 0 or not sections:
+        return sections
+    priority_terms = _profile_section_priority_terms(profile, key="section_priority_keywords")
+    deprioritize_terms = _profile_section_priority_terms(profile, key="section_deprioritize_keywords")
+    if not priority_terms and not deprioritize_terms:
+        return sections
+    ranked: List[Tuple[int, int, object]] = []
+    for idx, section in enumerate(sections):
+        score = _section_priority_score(
+            heading=getattr(section, "heading", ""),
+            text=getattr(section, "text", ""),
+            priority_terms=priority_terms,
+            deprioritize_terms=deprioritize_terms,
+        )
+        ranked.append((score, idx, section))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [section for _, _, section in ranked]
+
+
+def _coerce_relation(value: str) -> SupportRelation:
+    """Coerces a model relation label into a supported enum."""
+
+    raw = str(value or "").strip().lower()
+    if raw == SupportRelation.CONFLICT.value:
+        return SupportRelation.CONFLICT
+    if raw == SupportRelation.CONSTRAINT.value:
+        return SupportRelation.CONSTRAINT
+    if raw == SupportRelation.CASE_VARIANT.value:
+        return SupportRelation.CASE_VARIANT
+    return SupportRelation.SUPPORT
+
+
+def _coerce_risk_class(value: str) -> str:
+    """Normalizes the risk class label."""
+
+    raw = str(value or "").strip().lower()
+    return raw if raw in {"low", "medium", "high"} else "low"
+
+
+def _objective_from_item(item: Dict[str, object], prompt: str, description: str) -> str:
+    """Builds a single-goal objective with prompt fallback."""
+
+    explicit = str(item.get("objective") or "").strip()
+    if explicit:
+        return explicit
+    extracted = section_items_from_prompt(
+        prompt,
+        [
+            "goal",
+            "objective",
+            "role & objective",
+            "target",
+            "目标",
+            "目的",
+        ],
+    )
+    if extracted:
+        return str(extracted[0] or "").strip()
+    return str(description or "").strip()
+
+
+def _applicable_signals_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds applicable client/context signals with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("applicable_signals")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "applicable signals",
+            "signals",
+            "when to use",
+            "indications",
+            "适用信号",
+            "适用情形",
+            "使用时机",
+        ],
+    )
+
+
+def _contraindications_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds contraindications with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("contraindications")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "contraindications",
+            "do not use when",
+            "avoid when",
+            "not for",
+            "禁忌",
+            "不适用",
+        ],
+    )
+
+
+def _intervention_moves_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds therapist intervention moves with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("intervention_moves")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "intervention moves",
+            "micro skills",
+            "techniques",
+            "response moves",
+            "intervention",
+            "干预动作",
+            "微技能",
+            "技术要点",
+        ],
+    )
+
+
+def _workflow_steps_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds workflow steps with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("workflow_steps")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "workflow",
+            "core workflow",
+            "step-by-step",
+            "步骤",
+            "流程",
+            "核心流程",
+        ],
+    )
+
+
+def _constraint_items_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds constraint items with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("constraints")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "rules",
+            "constraints",
+            "rules & constraints",
+            "约束",
+            "规则",
+            "限制",
+        ],
+    )
+
+
+def _caution_items_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds caution items with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("cautions")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "cautions",
+            "anti-patterns",
+            "warnings",
+            "注意",
+            "风险",
+            "禁忌",
+        ],
+    )
+
+
+def _output_contract_from_item(item: Dict[str, object], prompt: str) -> List[str]:
+    """Builds output requirements with prompt-based fallback."""
+
+    explicit = compact_text_list(coerce_str_list(item.get("output_contract")), limit=12)
+    if explicit:
+        return explicit
+    return section_items_from_prompt(
+        prompt,
+        [
+            "output",
+            "output format",
+            "deliverable",
+            "输出",
+            "输出格式",
+            "交付",
+        ],
+    )
+
+
+def _examples_from_item(item: Dict[str, object]) -> List[SkillExample]:
+    """Builds short therapist-response examples from the model payload."""
+
+    raw = item.get("examples")
+    if raw is None:
+        return []
+    items = list(raw) if isinstance(raw, list) else [raw]
+    out: List[SkillExample] = []
+    for entry in items[:3]:
+        if isinstance(entry, SkillExample):
+            out.append(entry)
+            continue
+        if not isinstance(entry, dict):
+            continue
+        input_text = str(entry.get("input") or entry.get("client") or entry.get("scenario") or "").strip()
+        output_text = str(entry.get("output") or entry.get("therapist") or "").strip()
+        notes_text = str(entry.get("notes") or "").strip()
+        if not input_text or not output_text:
+            continue
+        out.append(
+            SkillExample(
+                input=input_text,
+                output=output_text,
+                notes=notes_text or None,
+            )
+        )
+    return out
+
+
+def _draft_identity_seed(*, doc_id: str, section: str, name: str, prompt: str) -> str:
+    """Builds a stable UUID seed for one extracted draft."""
+
+    normalized = "|".join(
+        [
+            str(doc_id or "").strip(),
+            normalize_text(section, lower=True),
+            normalize_text(name, lower=True),
+            normalize_text(prompt, lower=True),
+        ]
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"autoskill-document-draft:{normalized}"))
+
+
 @dataclass
-class EvidenceExtractionResult:
-    """Output of the evidence extraction stage."""
+class SkillExtractionResult:
+    """Output of the direct skill extraction stage."""
 
     documents: List[DocumentRecord] = field(default_factory=list)
-    evidence_units: List[EvidenceUnit] = field(default_factory=list)
+    support_records: List[SupportRecord] = field(default_factory=list)
+    skill_drafts: List[SkillDraft] = field(default_factory=list)
     errors: List[Dict[str, str]] = field(default_factory=list)
-    extractor_name: str = "heuristic"
+    extractor_name: str = "llm"
 
 
-class EvidenceExtractor(Protocol):
-    """Pluggable evidence extractor interface."""
-
-    def extract(
-        self,
-        *,
-        documents: List[DocumentRecord],
-        logger: StageLogger,
-    ) -> EvidenceExtractionResult:
-        """Extracts evidence units from normalized document records."""
-
-
-class HeuristicEvidenceExtractor:
-    """Rule-based evidence extractor used by the MVP pipeline."""
+class DocumentSkillExtractor(Protocol):
+    """Pluggable document-to-skill extractor interface."""
 
     def extract(
         self,
         *,
         documents: List[DocumentRecord],
         logger: StageLogger,
-    ) -> EvidenceExtractionResult:
-        """Extracts atomic evidence units using generic textual heuristics."""
+    ) -> SkillExtractionResult:
+        """Extracts support records and skill drafts from normalized documents."""
 
-        result = EvidenceExtractionResult(documents=list(documents or []), extractor_name="heuristic")
-        for record in documents or []:
-            try:
-                units = self._extract_from_document(record)
-                result.evidence_units.extend(units)
-                emit_stage_log(logger, f"[extract_evidence] doc={record.doc_id} evidence={len(units)}")
-            except Exception as e:
-                result.errors.append({"doc_id": record.doc_id, "error": str(e)})
-                emit_stage_log(logger, f"[extract_evidence] error doc={record.doc_id}: {e}")
-        return result
 
-    def _extract_from_document(self, record: DocumentRecord) -> List[EvidenceUnit]:
-        """Extracts evidence units from one document record."""
+class LLMDocumentSkillExtractor:
+    """Model-driven document-to-skill extractor."""
 
-        out: List[EvidenceUnit] = []
-        sections = list(record.sections or [])
-        if not sections and str(record.raw_text or "").strip():
-            sections = []
-        for section in sections or []:
-            cursor = int(section.span.start or 0)
+    def __init__(
+        self,
+        *,
+        llm: Optional[LLM] = None,
+        llm_config: Optional[Dict[str, object]] = None,
+        max_section_chars: int = _DEFAULT_SECTION_CHARS,
+        overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
+        domain_profile_path: str = "",
+        max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
+        max_units_per_document: int = 0,
+    ) -> None:
+        self._llm = llm or build_llm(dict(llm_config or {"provider": "mock"}))
+        self.max_section_chars = max(200, int(max_section_chars or _DEFAULT_SECTION_CHARS))
+        self.overlap_chars = max(0, int(overlap_chars or 0))
+        self.domain_profile_path = str(domain_profile_path or "").strip()
+        self.max_candidates_per_unit = max(1, int(max_candidates_per_unit or _DEFAULT_MAX_CANDIDATES_PER_UNIT))
+        self.max_units_per_document = max(0, int(max_units_per_document or 0))
+        self._profile_cache: Dict[str, DomainProfile] = {}
+
+    def _profile_for_domain(self, domain: str) -> DomainProfile:
+        key = str(domain or "").strip().lower() or "default"
+        cached = self._profile_cache.get(key)
+        if cached is not None:
+            return cached
+        profile = load_domain_profile(domain=key, profile_path=self.domain_profile_path)
+        self._profile_cache[key] = profile
+        return profile
+
+    def _extract_unit_skills(
+        self,
+        *,
+        record: DocumentRecord,
+        section_heading: str,
+        section_level: int,
+        span: TextSpan,
+        unit_text: str,
+        unit_type: str,
+        profile: DomainProfile,
+    ) -> List[Dict[str, object]]:
+        payload = {
+            "document": {
+                "doc_id": record.doc_id,
+                "title": record.title,
+                "domain": record.domain,
+                "source_type": record.source_type,
+                "authors": list(record.authors or []),
+                "year": record.year,
+                "metadata": dict(record.metadata or {}),
+            },
+            "section": {
+                "heading": section_heading,
+                "level": section_level,
+                "span": span.to_dict(),
+                "unit_type": unit_type,
+            },
+            "excerpt": str(unit_text or "").strip(),
+            "domain_profile": profile.to_dict(),
+            "max_candidates": self.max_candidates_per_unit,
+        }
+        system = maybe_offline_prompt(
+            channel=OFFLINE_CHANNEL_DOC,
+            kind="extract",
+            max_candidates=self.max_candidates_per_unit,
+        )
+        repair_system = maybe_offline_prompt(
+            channel=OFFLINE_CHANNEL_DOC,
+            kind="repair",
+            max_candidates=self.max_candidates_per_unit,
+        )
+        repaired_payload = (
+            f"DATA:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            f"DRAFT:\n__DRAFT__"
+        )
+        parsed = llm_complete_json(
+            llm=self._llm,
+            system=system,
+            payload=payload,
+            repair_system=repair_system,
+            repair_payload=repaired_payload,
+        )
+        obj = maybe_json_dict(parsed)
+        raw_skills = obj.get("skills") if isinstance(obj.get("skills"), list) else parsed
+        if not isinstance(raw_skills, list):
+            return []
+        return [maybe_json_dict(item) for item in raw_skills if isinstance(item, dict)]
+
+    def _build_support_and_draft(
+        self,
+        *,
+        record: DocumentRecord,
+        section_heading: str,
+        span: TextSpan,
+        unit_text: str,
+        unit_type: str,
+        profile: DomainProfile,
+        item: Dict[str, object],
+    ) -> Tuple[Optional[SupportRecord], Optional[SkillDraft]]:
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or "").strip()
+        prompt = str(item.get("prompt") or item.get("skill_body") or "").strip()
+        if not name or not description or not prompt:
+            return None, None
+
+        objective = _objective_from_item(item, prompt, description)
+        applicable_signals = _applicable_signals_from_item(item, prompt)
+        contraindications = _contraindications_from_item(item, prompt)
+        intervention_moves = _intervention_moves_from_item(item, prompt)
+        workflow_steps = _workflow_steps_from_item(item, prompt)
+        constraints = _constraint_items_from_item(item, prompt)
+        cautions = _caution_items_from_item(item, prompt)
+        output_contract = _output_contract_from_item(item, prompt)
+        examples = _examples_from_item(item)
+        if not workflow_steps and not intervention_moves and not constraints and not cautions:
+            return None, None
+
+        support_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"autoskill-document-support:{record.doc_id}:{section_heading}:{span.start}:{span.end}:{name}:{normalize_text(unit_text, lower=True)}",
+            )
+        )
+        tags = compact_text_list(coerce_str_list(item.get("tags")), limit=6)
+        triggers = compact_text_list(coerce_str_list(item.get("triggers")), limit=5)
+        draft = SkillDraft(
+            draft_id=_draft_identity_seed(
+                doc_id=record.doc_id,
+                section=section_heading,
+                name=name,
+                prompt=prompt,
+            ),
+            doc_id=record.doc_id,
+            name=name,
+            description=description,
+            asset_type=str(item.get("asset_type") or "").strip(),
+            granularity=str(item.get("granularity") or "").strip(),
+            objective=objective,
+            domain=str(item.get("domain") or record.domain or "").strip(),
+            task_family=str(item.get("task_family") or "").strip(),
+            method_family=str(item.get("method_family") or "").strip(),
+            stage=str(item.get("stage") or "").strip(),
+            applicable_signals=applicable_signals,
+            contraindications=contraindications,
+            intervention_moves=intervention_moves,
+            workflow_steps=workflow_steps,
+            triggers=triggers,
+            constraints=constraints,
+            cautions=cautions,
+            output_contract=output_contract,
+            examples=examples,
+            risk_class=_coerce_risk_class(str(item.get("risk_class") or "")),
+            confidence=clip_confidence(item.get("confidence"), default=0.75),
+            support_ids=[support_id],
+            metadata={
+                "prompt": prompt,
+                "tags": tags,
+                "files": maybe_json_dict(item.get("files")),
+                "resources": maybe_json_dict(item.get("resources")),
+                "domain_profile": profile.domain,
+                "source_sections": [section_heading],
+                "extraction_unit": unit_type,
+            },
+        )
+        relation_type = _coerce_relation(str(item.get("relation_type") or "support"))
+        support = SupportRecord(
+            support_id=support_id,
+            doc_id=record.doc_id,
+            source_file=str((record.metadata or {}).get("source_file") or ""),
+            section=section_heading,
+            span=span,
+            excerpt=str(unit_text or "").strip(),
+            relation_type=relation_type,
+            confidence=clip_confidence(item.get("confidence"), default=0.75),
+            metadata={
+                "document_title": record.title,
+                "domain": record.domain,
+                "domain_profile": profile.domain,
+                "extraction_unit": unit_type,
+                "skill_name": name,
+                "asset_type": draft.asset_type,
+                "granularity": draft.granularity,
+                "objective": draft.objective,
+                "task_family": draft.task_family,
+                "method_family": draft.method_family,
+                "stage": draft.stage,
+            },
+        )
+        return support, draft
+
+    def _extract_from_document(self, record: DocumentRecord) -> Tuple[List[SupportRecord], List[SkillDraft]]:
+        supports: List[SupportRecord] = []
+        drafts: List[SkillDraft] = []
+        profile = self._profile_for_domain(str(record.domain or ""))
+        units_seen = 0
+        ordered_sections = _ordered_sections_for_budget(
+            record,
+            profile=profile,
+            max_units_per_document=self.max_units_per_document,
+        )
+        for section in ordered_sections:
             section_text = str(section.text or "").strip()
             if not section_text:
                 continue
-            for block in _split_section_blocks(section_text):
-                normalized = normalize_text(block)
-                if len(normalized) < 12:
-                    continue
-                signal_text = f"{section.heading}\n{normalized}".strip()
-                claim_type = _detect_claim_type(signal_text)
-                method_family = _infer_family(signal_text, _METHOD_KEYWORDS)
-                task_family = _infer_family(signal_text, _TASK_KEYWORDS)
-                span = _block_span(record, section_start=section.span.start, block=block, cursor=cursor)
-                cursor = int(span.end or cursor)
-                evidence_id = str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"autoskill-evidence:{record.doc_id}:{section.heading}:{claim_type}:{normalized}",
-                    )
-                )
-                out.append(
-                    EvidenceUnit(
-                        evidence_id=evidence_id,
-                        doc_id=record.doc_id,
-                        claim_type=claim_type,
-                        section=section.heading,
-                        span=span,
-                        normalized_claim=normalized,
-                        verbatim_excerpt=str(block or "").strip(),
-                        method_family=method_family,
-                        task_family=task_family,
-                        confidence=_claim_confidence(signal_text, claim_type),
-                        provenance=ProvenanceRecord(
-                            source_type=record.source_type,
-                            source_file=str((record.metadata or {}).get("source_file") or ""),
-                            section=section.heading,
-                            span=span,
-                            metadata={
-                                "document_title": record.title,
-                                "domain": record.domain,
-                                "section_level": section.level,
-                            },
-                        ),
-                    )
-                )
-        if not out and str(record.raw_text or "").strip():
-            block = normalize_text(record.raw_text)
-            evidence_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"autoskill-evidence:{record.doc_id}:{block}"))
-            out.append(
-                EvidenceUnit(
-                    evidence_id=evidence_id,
-                    doc_id=record.doc_id,
-                    claim_type="observation",
-                    section=record.title,
-                    span=TextSpan(start=0, end=len(record.raw_text)),
-                    normalized_claim=block,
-                    verbatim_excerpt=record.raw_text.strip(),
-                    method_family=_infer_family(block, _METHOD_KEYWORDS),
-                    task_family=_infer_family(block, _TASK_KEYWORDS),
-                    confidence=0.5,
-                    provenance=ProvenanceRecord(
-                        source_type=record.source_type,
-                        source_file=str((record.metadata or {}).get("source_file") or ""),
-                        section=record.title,
-                        span=TextSpan(start=0, end=len(record.raw_text)),
-                        metadata={"document_title": record.title, "domain": record.domain},
-                    ),
-                )
+            extraction_units = _plan_section_units(
+                record=record,
+                section_text=section_text,
+                section_start=int(section.span.start or 0),
+                section_span=section.span,
+                max_section_chars=self.max_section_chars,
+                overlap_chars=self.overlap_chars,
             )
-        return out
+            for unit_text, span, unit_type in extraction_units:
+                if self.max_units_per_document > 0 and units_seen >= self.max_units_per_document:
+                    break
+                units_seen += 1
+                raw_skills = self._extract_unit_skills(
+                    record=record,
+                    section_heading=section.heading,
+                    section_level=section.level,
+                    span=span,
+                    unit_text=unit_text,
+                    unit_type=unit_type,
+                    profile=profile,
+                )
+                for item in raw_skills:
+                    support, draft = self._build_support_and_draft(
+                        record=record,
+                        section_heading=section.heading,
+                        span=span,
+                        unit_text=unit_text,
+                        unit_type=unit_type,
+                        profile=profile,
+                        item=item,
+                    )
+                    if support is None or draft is None:
+                        continue
+                    supports.append(support)
+                    drafts.append(draft)
+            if self.max_units_per_document > 0 and units_seen >= self.max_units_per_document:
+                break
+
+        deduped_supports = {support.support_id: support for support in supports}
+        deduped_drafts = {draft.draft_id: draft for draft in drafts}
+        return list(deduped_supports.values()), list(deduped_drafts.values())
+
+    def extract(
+        self,
+        *,
+        documents: List[DocumentRecord],
+        logger: StageLogger,
+    ) -> SkillExtractionResult:
+        result = SkillExtractionResult(documents=list(documents or []), extractor_name="llm")
+        for record in documents or []:
+            try:
+                supports, drafts = self._extract_from_document(record)
+                result.support_records.extend(supports)
+                result.skill_drafts.extend(drafts)
+                emit_stage_log(
+                    logger,
+                    f"[extract_skills] doc={record.doc_id} supports={len(supports)} drafts={len(drafts)}",
+                )
+            except Exception as e:
+                result.errors.append({"doc_id": record.doc_id, "error": str(e)})
+                emit_stage_log(logger, f"[extract_skills] error doc={record.doc_id}: {e}")
+        return result
 
 
-def build_evidence_extractor(kind: str = "heuristic") -> EvidenceExtractor:
-    """Builds a concrete evidence extractor implementation."""
-
-    name = str(kind or "").strip().lower() or "heuristic"
-    if name in {"heuristic", "stub", "rule-based", "rule_based"}:
-        return HeuristicEvidenceExtractor()
-    raise ValueError(f"unsupported evidence extractor: {kind}")
+HeuristicDocumentSkillExtractor = LLMDocumentSkillExtractor
 
 
-def extract_evidence(
+def build_document_skill_extractor(
+    kind: str = "llm",
+    *,
+    llm: Optional[LLM] = None,
+    llm_config: Optional[Dict[str, object]] = None,
+    max_section_chars: int = _DEFAULT_SECTION_CHARS,
+    overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
+    domain_profile_path: str = "",
+    max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
+    max_units_per_document: int = 0,
+) -> DocumentSkillExtractor:
+    """Builds a concrete document-to-skill extractor implementation."""
+
+    name = str(kind or "").strip().lower() or "llm"
+    if name in {"llm", "heuristic", "stub", "rule-based", "rule_based"}:
+        return LLMDocumentSkillExtractor(
+            llm=llm,
+            llm_config=llm_config,
+            max_section_chars=max_section_chars,
+            overlap_chars=overlap_chars,
+            domain_profile_path=domain_profile_path,
+            max_candidates_per_unit=max_candidates_per_unit,
+            max_units_per_document=max_units_per_document,
+        )
+    raise ValueError(f"unsupported document skill extractor: {kind}")
+
+
+def extract_skills(
     *,
     documents: List[DocumentRecord],
-    extractor: Optional[EvidenceExtractor] = None,
+    extractor: DocumentSkillExtractor | None = None,
     logger: StageLogger = None,
-) -> EvidenceExtractionResult:
-    """Public functional wrapper for the evidence extraction stage."""
+) -> SkillExtractionResult:
+    """Public functional wrapper for the direct skill extraction stage."""
 
-    impl = extractor or HeuristicEvidenceExtractor()
+    impl = extractor or LLMDocumentSkillExtractor()
     return impl.extract(documents=list(documents or []), logger=logger)

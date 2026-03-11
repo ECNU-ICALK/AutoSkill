@@ -107,7 +107,7 @@ def list_llm_connectors() -> List[str]:
 
 def _build_mock(config: Dict[str, Any]) -> LLM:
     """Run build mock."""
-    return MockLLM(response=str(config.get("response") or '{"skills": []}'))
+    return MockLLM(response=config.get("response") or '{"skills": []}')
 
 
 def _build_openai(config: Dict[str, Any]) -> LLM:
@@ -238,4 +238,3 @@ def build_llm(config: Dict[str, Any]) -> LLM:
             f"Available: {', '.join(list_llm_connectors())}"
         )
     return builder(cfg)
-

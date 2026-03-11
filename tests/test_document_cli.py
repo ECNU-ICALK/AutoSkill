@@ -8,21 +8,75 @@ import tempfile
 import unittest
 
 from autoskill.cli import main as autoskill_main
-from autoskill.offline.document.extract import main
+from autoskill.config import default_document_store_path
+from autoskill.offline.document.extract import _build_sdk_from_args, build_parser, main
 
 
 _DOC_TEXT = """
-# Method
-1. Gather source inputs before classification.
-2. Normalize fields before applying the workflow.
+# Intake
+1. Build rapport before deeper intervention.
+2. Clarify the client's immediate concern.
 
 # Constraints
-You must verify required fields before running the workflow.
-Do not continue when key inputs are missing.
+Do not push interpretation before the client is ready.
 """.strip()
 
 
 class DocumentCliTest(unittest.TestCase):
+    def _mock_response(self) -> str:
+        return json.dumps(
+            {
+                "document_extract": {
+                    "skills": [
+                        {
+                            "name": "document intake workflow",
+                            "description": "Reusable workflow extracted from the document.",
+                            "prompt": "# Role & Objective\nGuide the workflow.\n\n# Rules & Constraints\n- Keep the process safe.\n\n# Core Workflow\n1. Build rapport first.\n2. Clarify the immediate concern.\n\n# Output Format\n- Output a short summary.",
+                            "domain": "psychology",
+                            "task_family": "intake",
+                            "method_family": "structured_interview",
+                            "stage": "intake",
+                            "workflow_steps": ["Build rapport first.", "Clarify the immediate concern."],
+                            "constraints": ["Keep the process safe."],
+                            "cautions": ["Avoid premature interpretation."],
+                            "output_contract": ["Output a short summary."],
+                            "relation_type": "support",
+                            "risk_class": "medium",
+                            "triggers": ["When starting intake"],
+                            "tags": ["psychology", "intake"],
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+                "document_compile": {
+                    "skills": [
+                        {
+                            "name": "document intake workflow",
+                            "description": "Reusable workflow extracted from the document.",
+                            "prompt": "# Role & Objective\nGuide the workflow.\n\n# Rules & Constraints\n- Keep the process safe.\n\n# Core Workflow\n1. Build rapport first.\n2. Clarify the immediate concern.\n\n# Output Format\n- Output a short summary.",
+                            "domain": "psychology",
+                            "task_family": "intake",
+                            "method_family": "structured_interview",
+                            "stage": "intake",
+                            "workflow_steps": ["Build rapport first.", "Clarify the immediate concern."],
+                            "constraints": ["Keep the process safe."],
+                            "cautions": ["Avoid premature interpretation."],
+                            "output_contract": ["Output a short summary."],
+                            "tags": ["psychology", "intake"],
+                            "confidence": 0.9,
+                            "risk_class": "medium",
+                        }
+                    ]
+                },
+                "document_version": {
+                    "action": "create",
+                    "target_skill_ids": [],
+                    "reason": "create"
+                }
+            },
+            ensure_ascii=False,
+        )
+
     def _write_doc(self, *, root: str) -> str:
         path = os.path.join(root, "document.md")
         with open(path, "w", encoding="utf-8") as f:
@@ -59,19 +113,21 @@ class DocumentCliTest(unittest.TestCase):
                     "--json",
                     "--llm-provider",
                     "mock",
+                    "--llm-response",
+                    self._mock_response(),
                     "--maintenance-strategy",
-                    "heuristic",
+                    "llm",
                     "--store-path",
                     tmpdir,
                 ]
             )
 
             self.assertEqual(payload["total_documents"], 1)
-            self.assertGreater(payload["total_evidence_units"], 0)
-            self.assertGreater(payload["total_capabilities"], 0)
+            self.assertGreater(payload["total_support_records"], 0)
+            self.assertGreater(payload["total_skill_drafts"], 0)
             self.assertGreater(payload["total_skill_specs"], 0)
 
-    def test_extract_command_returns_evidence_units(self) -> None:
+    def test_extract_command_returns_support_records_and_drafts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             doc_path = self._write_doc(root=tmpdir)
             payload = self._run_main_json(
@@ -84,23 +140,26 @@ class DocumentCliTest(unittest.TestCase):
                     "--json",
                     "--llm-provider",
                     "mock",
+                    "--llm-response",
+                    self._mock_response(),
                     "--maintenance-strategy",
-                    "heuristic",
+                    "llm",
                     "--store-path",
                     tmpdir,
                 ]
             )
 
             self.assertEqual(len(payload["documents"]), 1)
-            self.assertGreater(len(payload["evidence_units"]), 0)
-            self.assertIn("claim_type", payload["evidence_units"][0])
+            self.assertGreater(len(payload["support_records"]), 0)
+            self.assertGreater(len(payload["skill_drafts"]), 0)
+            self.assertIn("relation_type", payload["support_records"][0])
 
-    def test_induce_command_returns_capabilities(self) -> None:
+    def test_compile_command_returns_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             doc_path = self._write_doc(root=tmpdir)
             payload = self._run_main_json(
                 [
-                    "induce",
+                    "compile",
                     "--file",
                     doc_path,
                     "--dry-run",
@@ -108,16 +167,19 @@ class DocumentCliTest(unittest.TestCase):
                     "--json",
                     "--llm-provider",
                     "mock",
+                    "--llm-response",
+                    self._mock_response(),
                     "--maintenance-strategy",
-                    "heuristic",
+                    "llm",
                     "--store-path",
                     tmpdir,
                 ]
             )
 
             self.assertEqual(len(payload["documents"]), 1)
-            self.assertGreater(len(payload["capabilities"]), 0)
-            self.assertIn("capability_id", payload["capabilities"][0])
+            self.assertGreater(len(payload["support_records"]), 0)
+            self.assertGreater(len(payload["skill_drafts"]), 0)
+            self.assertGreater(len(payload["skills"]), 0)
 
     def test_top_level_cli_routes_to_document_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -136,8 +198,10 @@ class DocumentCliTest(unittest.TestCase):
                         "--json",
                         "--llm-provider",
                         "mock",
+                        "--llm-response",
+                        self._mock_response(),
                         "--maintenance-strategy",
-                        "heuristic",
+                        "llm",
                         "--store-path",
                         tmpdir,
                     ]
@@ -145,8 +209,8 @@ class DocumentCliTest(unittest.TestCase):
             payload = json.loads(buf.getvalue().strip())
 
             self.assertEqual(len(payload["documents"]), 1)
-            self.assertGreater(len(payload["evidence_units"]), 0)
-            self.assertGreater(len(payload["capabilities"]), 0)
+            self.assertGreater(len(payload["support_records"]), 0)
+            self.assertGreater(len(payload["skill_drafts"]), 0)
             self.assertGreater(len(payload["skills"]), 0)
 
     def test_top_level_document_help_shows_document_subcommands(self) -> None:
@@ -155,7 +219,6 @@ class DocumentCliTest(unittest.TestCase):
         self.assertIn("build", output)
         self.assertIn("ingest", output)
         self.assertIn("extract", output)
-        self.assertIn("induce", output)
         self.assertIn("compile", output)
 
     def test_build_help_includes_examples_and_registry_help(self) -> None:
@@ -164,6 +227,12 @@ class DocumentCliTest(unittest.TestCase):
         self.assertIn("Examples:", output)
         self.assertIn("--registry-root", output)
         self.assertIn("document registry root", output)
+
+    def test_document_cli_defaults_store_path_to_docskill(self) -> None:
+        args = build_parser().parse_args(["build", "--file", "/tmp/paper.md"])
+        sdk = _build_sdk_from_args(args)
+
+        self.assertEqual(sdk.config.store.get("path"), default_document_store_path())
 
 
 if __name__ == "__main__":
