@@ -21,7 +21,7 @@ from autoskill.management.extraction import (
     _candidate_from_obj,
     _source_obj,
 )
-from autoskill.models import Skill, SkillExample
+from autoskill.models import Skill
 from autoskill.utils import json_from_llm_text, redact_obj
 
 
@@ -156,10 +156,15 @@ def _build_openclaw_agentic_extract_prompt(*, max_candidates: int) -> str:
         "Output ONLY strict JSON parseable by json.loads.\n"
         "\n"
         "### Skill-creator principles\n"
+        "- Target the standard agent skill artifact used by OpenClaw: one skill directory with SKILL.md plus optional scripts/, references/, and assets/.\n"
         "- Skills are onboarding artifacts for another agent instance: prioritize reusable procedural knowledge over one-run content.\n"
         "- Concise is key: keep only high-signal constraints/workflow; avoid long explanatory dumps.\n"
-        "- Progressive disclosure: keep metadata triggerable and prompt body executable; do not embed large reference payloads.\n"
+        "- Progressive disclosure: keep metadata triggerable, prompt body executable, and reusable helper content in optional resource files; do not embed large reference payloads.\n"
         "- Degrees of freedom: keep strict rules where operations are fragile, and preserve flexibility where multiple approaches are valid.\n"
+        "- Triggerability matters: name and description are the always-loaded metadata, so they must clearly state what the skill does and when it should be used.\n"
+        "- Treat the prompt body like the standard SKILL.md body: keep only core execution guidance there, and move bulky schemas, policies, and examples into references/ when they are truly reusable.\n"
+        "- Standard agent skill metadata should stay lean: name, description, triggers, and tags. Do not invent metadata examples.\n"
+        "- Only include bundled resources that directly support repeated execution. Do not invent README/installation/changelog style files.\n"
         "- If deterministic repeated logic is present, mention reusable resources briefly (for example: scripts/... or references/...), not full inline docs.\n"
         "\n"
         "### Evidence and trust\n"
@@ -178,7 +183,7 @@ def _build_openclaw_agentic_extract_prompt(*, max_candidates: int) -> str:
         "### What counts as an extractable agentic skill\n"
         "- Extract when there is reusable agent policy/workflow, including one explicit reusable user rule.\n"
         "- User-reuse-first: extract only when this user is likely to need the same policy/workflow again in future similar tasks.\n"
-        "- Examples: tool ordering, verification checkpoints, retry/fallback rules, environment constraints, output contract, stop/rollback conditions.\n"
+        "- Prioritize reusable execution policy: tool ordering, tool-selection rules, verification checkpoints, retry/fallback rules, environment constraints, side-effect controls, output contract, and stop/rollback conditions.\n"
         "- Do NOT extract one-off instance payload, temporary content facts, or stale constraints outside active topic.\n"
         "- Prefer extracting HOW to execute repeatedly, not WHAT this specific task happened to be about.\n"
         "\n"
@@ -194,11 +199,18 @@ def _build_openclaw_agentic_extract_prompt(*, max_candidates: int) -> str:
         "- Keep all fields in the dominant user language.\n"
         "- Fields per skill:\n"
         "  - name: concise, searchable, and self-explanatory; MUST directly state primary user intent + action + domain/platform when evidenced, and be understandable without reading description/prompt.\n"
-        "  - description: 1-2 sentences, third person, what/when; include trigger cues for when to use.\n"
-        "  - prompt: executable Markdown with # Goal, # Constraints & Style, optional # Workflow (only if explicit multi-step operations); use imperative style.\n"
+        "  - description: 1-2 sentences, third person, what/when; include trigger cues for when to use because this metadata drives future skill selection.\n"
+        "  - prompt: executable Markdown intended for the standard agent skill's ## Prompt section with # Goal, # Constraints & Style, optional # Workflow (only if explicit multi-step operations); use imperative style.\n"
+        "    - Keep the prompt body compact and operational; do not duplicate long reference material there.\n"
+        "    - If a reusable reference file is needed, tell the agent when to read it.\n"
         "  - triggers: 3-5 short intent phrases.\n"
         "  - tags: 1-6 canonical keywords.\n"
-        "  - examples: 0-3 short de-identified examples.\n"
+        "  - resources/files (optional): reusable support material only when it materially improves execution.\n"
+        "    - resources shape: {\"scripts\": [...], \"references\": [...], \"assets\": [...]}.\n"
+        "    - files shape: {\"scripts/...\": \"...\", \"references/...\": \"...\", \"assets/...\": \"...\"}.\n"
+        "    - Use scripts/ for executable helpers, references/ for short reusable guidance/checklists, assets/ for stable templates.\n"
+        "    - Keep resource content concise and reusable; prefer path + minimal snippet over pasted long docs.\n"
+        "    - references/ are for detailed guidance loaded only when needed; assets/ are for output resources, not context.\n"
         "  - confidence: 0.0-1.0.\n"
         "\n"
         "JSON validity: escape newlines as \\n. No Markdown code block."
@@ -220,9 +232,13 @@ def _build_openclaw_agentic_repair_prompt(*, max_candidates: int) -> str:
         "- DATA.retrieved_reference is identity hint only (update-vs-new), not extraction evidence.\n"
         "- Remove one-off payload/entities; keep portable capability constraints.\n"
         "- Keep fields language consistent with dominant user language.\n"
-        "- Keep schema fields: name, description, prompt, triggers, tags, examples, confidence.\n"
+        "- Keep schema fields: name, description, prompt, triggers, tags, confidence; optional resources/files are allowed.\n"
         "- name must be self-explanatory and encode primary user intent + action + domain/platform when evidenced; avoid vague placeholders.\n"
-        "- description should state when to use; prompt must remain executable and structured (# Goal, # Constraints & Style, optional # Workflow) with imperative style.\n"
+        "- description should state when to use because name/description are the future trigger metadata.\n"
+        "- prompt must remain executable and structured (# Goal, # Constraints & Style, optional # Workflow) with imperative style.\n"
+        "- Follow the standard agent skill format used by OpenClaw: lean metadata plus optional scripts/, references/, or assets/.\n"
+        "- Keep SKILL.md-style prompt body compact; move detailed reusable guidance into references/ instead of duplicating it in prompt text.\n"
+        "- Never invent auxiliary docs like README.md or installation guides.\n"
         "- If resources are referenced, keep them as short pointers (scripts/... or references/...), never long pasted docs.\n"
         "\n"
         "JSON validity: escape newlines as \\n."
@@ -246,6 +262,7 @@ def _decide_candidate_action_with_llm_agentic(
         "Skill quality target:\n"
         "- Keep a compact, high-signal skill set with strong triggerability and low redundancy.\n"
         "- Prefer reusable procedures/policies over broad generic advice.\n"
+        "- Favor skills whose name/description will be easy for OpenClaw to route in future similar requests.\n"
         "\n"
         "Actions:\n"
         "- add: create new user skill\n"
@@ -259,7 +276,9 @@ def _decide_candidate_action_with_llm_agentic(
         "- Evaluate identity using objective + deliverable/channel + operation class + acceptance checks + tool/retry/fallback policy.\n"
         "- Merge when same ongoing work item/capability and candidate is an incremental trajectory improvement.\n"
         "- Add when recent intent indicates a topic/workflow switch (new objective/deliverable/channel) even within same broad domain.\n"
-        "- Prefer merge over add when differences are mostly wording/examples but the reusable procedure and completion criteria are the same.\n"
+        "- Prefer merge over add when differences are mostly wording or the same reusable procedure with clearer packaging.\n"
+        "- If candidate mainly adds reusable scripts/references/assets for the same capability, prefer merge.\n"
+        "- If candidate only contributes copied one-off payload files or bulky inline references, prefer discard.\n"
         "- Prefer add when trigger context/usage boundary is materially different, even if domain words overlap.\n"
         "- Similarity scores are hints, not final authority.\n"
         "- If merge-vs-add is unclear, prefer discard over risky merge.\n"
@@ -298,31 +317,35 @@ def _merge_with_llm_agentic(llm, existing: Skill, cand: SkillCandidate) -> Skill
         system = (
             "You are AutoSkill's OpenClaw Agentic Skill Merger.\n"
             "Task: merge existing_skill and candidate_skill into ONE improved reusable skill.\n"
-            "Output ONLY strict JSON with fields: name, description, prompt, triggers, tags, examples.\n"
+            "Output ONLY strict JSON with fields: name, description, prompt, triggers, tags.\n"
             "\n"
             "Skill-creator alignment:\n"
             "- Keep output concise and high-signal.\n"
-            "- Preserve progressive disclosure (lean prompt body, no large inline references).\n"
+            "- Preserve the standard agent skill shape: lean metadata, executable prompt body, and short resource pointers instead of large inline references.\n"
             "- Preserve proper degrees of freedom: strict where fragile, flexible where context-dependent.\n"
+            "- Keep name/description highly triggerable because they are the primary routing metadata.\n"
             "\n"
             "Rules:\n"
             "- Preserve capability identity; do not change the core job-to-be-done.\n"
             "- Perform semantic union, NOT concatenation.\n"
             "- Keep unique reusable constraints from both; drop one-off payload.\n"
             "- Keep trajectory-critical policies: tool order, checkpoints, fallback/retry/rollback, stop conditions.\n"
+            "- Preserve reusable resource intent (scripts/references/assets) in the prompt as short pointers only; the actual files are managed separately.\n"
+            "- Keep detailed schemas, policies, and examples out of the prompt body when a short references/... pointer is enough.\n"
             "- Do not invent new standards or details not present in inputs.\n"
             "- De-duplicate aggressively across all fields.\n"
-            "- In triggers/tags/examples remove exact and near-duplicate variants.\n"
+            "- In triggers/tags remove exact and near-duplicate variants.\n"
             "- Keep output compact, high-signal, and portable.\n"
+            "- Do not add example sections or example payloads; examples are not part of the required output schema.\n"
+            "- Do not introduce auxiliary files or documentation concepts outside SKILL.md plus optional scripts/references/assets.\n"
             "\n"
             "Field requirements:\n"
             "- name: concise, searchable; keep stable unless clear improvement.\n"
             "- description: 1-2 sentences, third person; clearly state what/when.\n"
-            "- prompt: Markdown with # Goal, # Constraints & Style, optional # Workflow (explicit multi-step only); imperative style.\n"
+            "- prompt: Markdown intended for the standard agent skill's ## Prompt section, with # Goal, # Constraints & Style, optional # Workflow (explicit multi-step only); imperative style.\n"
             "- triggers: 3-5 short distinct intent phrases.\n"
             "- tags: 1-6 canonical tags.\n"
-            "- examples: 0-3 de-identified examples.\n"
-            "- If resource references are needed, keep short pointers only (scripts/... or references/...).\n"
+            "- If resource references are needed, keep short pointers only (for example: Execute script: scripts/... or Read reference: references/...).\n"
             "\n"
             "JSON validity: escape newlines as \\n."
         )
@@ -351,34 +374,9 @@ def _merge_with_llm_agentic(llm, existing: Skill, cand: SkillCandidate) -> Skill
         merged.tags = _m._dedupe(
             [str(t).strip() for t in (obj.get("tags") or []) if str(t).strip()]
         ) or merged.tags
-        merged.examples = _m._merge_examples(
-            merged.examples,
-            _examples_from_obj(obj.get("examples")),
-        )
         return merged
     except Exception:
         return _m._merge(existing, cand)
-
-
-def _examples_from_obj(obj: Any) -> List[SkillExample]:
-    """Run examples from obj."""
-    if not isinstance(obj, list):
-        return []
-    out: List[SkillExample] = []
-    for e in obj[:8]:
-        if not isinstance(e, dict):
-            continue
-        inp = str(e.get("input") or "").strip()
-        if not inp:
-            continue
-        out.append(
-            SkillExample(
-                input=inp,
-                output=(str(e.get("output")).strip() if e.get("output") else None),
-                notes=(str(e.get("notes")).strip() if e.get("notes") else None),
-            )
-        )
-    return out
 
 
 def install_openclaw_agentic_prompt_profile() -> None:
