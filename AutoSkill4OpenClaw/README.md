@@ -207,6 +207,7 @@ If the prompt pack is missing or invalid, both runtimes fail open and fall back 
 
 - SkillBank: `~/.openclaw/autoskill/SkillBank`
 - Embedded session archive: `~/.openclaw/autoskill/embedded_sessions`
+- Embedded live session snapshot (updated every incoming turn): `~/.openclaw/autoskill/embedded_sessions/<user>/<session>.latest.json`
 - Mirrored OpenClaw local skills: `~/.openclaw/workspace/skills`
 - Sidecar conversation archive (`runtimeMode=sidecar`): `~/.openclaw/autoskill/conversations`
 

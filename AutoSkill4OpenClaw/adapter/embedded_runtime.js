@@ -933,6 +933,11 @@ function appendJsonl(filePath, obj) {
   fs.appendFileSync(filePath, `${JSON.stringify(obj)}\n`, "utf8");
 }
 
+function writeJson(filePath, obj) {
+  ensureDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, `${JSON.stringify(obj, null, 2)}\n`, "utf8");
+}
+
 function readJsonl(filePath) {
   if (!fs.existsSync(filePath)) return [];
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
@@ -951,6 +956,18 @@ function readJsonl(filePath) {
 }
 
 function finalizeSessionFile(filePath, reason) {
+  if (!fs.existsSync(filePath)) return "";
+  const parsed = path.parse(filePath);
+  const dst = path.join(parsed.dir, `${parsed.name}.${nowMs()}.${slug(reason, "closed")}${parsed.ext}`);
+  try {
+    fs.renameSync(filePath, dst);
+    return dst;
+  } catch (_) {
+    return filePath;
+  }
+}
+
+function finalizeSnapshotFile(filePath, reason) {
   if (!fs.existsSync(filePath)) return "";
   const parsed = path.parse(filePath);
   const dst = path.join(parsed.dir, `${parsed.name}.${nowMs()}.${slug(reason, "closed")}${parsed.ext}`);
@@ -1435,6 +1452,7 @@ function isDuplicateCandidate(existing, candidate) {
 export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
   const state = {
     activeSessionByUser: new Map(),
+    liveSessionByKey: new Map(),
     internalDepth: 0,
   };
   const invokeModel =
@@ -1447,36 +1465,98 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
     return path.join(root, slug(userId || "default", "default"), `${slug(sessionId, "session")}.jsonl`);
   }
 
+  function sessionSnapshotPath(userId, sessionId) {
+    const root = path.resolve(cfg.embedded.sessionArchiveDir);
+    return path.join(root, slug(userId || "default", "default"), `${slug(sessionId, "session")}.latest.json`);
+  }
+
+  function sessionKey(userId, sessionId) {
+    return `${userId}::${sessionId}`;
+  }
+
   function appendSession(payload) {
     const uid = slug(payload.user || "default", "default");
     const sid = trimmed(payload.session_id);
     if (!sid) {
-      return { ended: [], reason: "missing_session_id", path: "" };
+      return { ended: [], reason: "missing_session_id", path: "", snapshot_path: "" };
     }
     const ended = [];
+    const now = nowMs();
+    const turnType = trimmed(payload.turn_type).toLowerCase();
+    const success = Boolean(payload.success);
+    const incomingMessages = sanitizeMessages(payload.messages);
     const prev = state.activeSessionByUser.get(uid);
     if (prev && prev !== sid) {
       const prevPath = sessionFilePath(uid, prev);
+      const prevSnapshotPath = sessionSnapshotPath(uid, prev);
       const closedPrev = finalizeSessionFile(prevPath, "session_id_changed");
-      if (closedPrev) ended.push({ user: uid, session_id: prev, path: closedPrev, reason: "session_id_changed" });
+      const closedPrevSnapshot = finalizeSnapshotFile(prevSnapshotPath, "session_id_changed");
+      state.liveSessionByKey.delete(sessionKey(uid, prev));
+      if (closedPrev) {
+        ended.push({
+          user: uid,
+          session_id: prev,
+          path: closedPrev,
+          snapshot_path: closedPrevSnapshot,
+          reason: "session_id_changed",
+        });
+      }
     }
     const currentPath = sessionFilePath(uid, sid);
+    const currentSnapshotPath = sessionSnapshotPath(uid, sid);
     appendJsonl(currentPath, {
-      event_time: nowMs(),
+      event_time: now,
       user_id: uid,
       session_id: sid,
-      turn_type: trimmed(payload.turn_type).toLowerCase(),
+      turn_type: turnType,
       session_done: Boolean(payload.session_done),
-      success: Boolean(payload.success),
-      messages: sanitizeMessages(payload.messages),
+      success,
+      messages: incomingMessages,
     });
+
+    const key = sessionKey(uid, sid);
+    const live =
+      state.liveSessionByKey.get(key) ||
+      {
+        user_id: uid,
+        session_id: sid,
+        updated_at: 0,
+        turn_count: 0,
+        has_main: false,
+        has_main_success: false,
+        session_done: false,
+        last_turn_type: "",
+        messages: [],
+      };
+    live.updated_at = now;
+    live.turn_count = Number(live.turn_count || 0) + 1;
+    live.last_turn_type = turnType;
+    live.session_done = Boolean(payload.session_done);
+    if (turnType === "main") {
+      live.has_main = true;
+      if (success) live.has_main_success = true;
+    }
+    live.messages = mergeMessagesWithOverlap(live.messages, incomingMessages);
+    state.liveSessionByKey.set(key, live);
+    writeJson(currentSnapshotPath, live);
+
     state.activeSessionByUser.set(uid, sid);
     if (Boolean(payload.session_done)) {
       const closedCurrent = finalizeSessionFile(currentPath, "session_done");
-      if (closedCurrent) ended.push({ user: uid, session_id: sid, path: closedCurrent, reason: "session_done" });
+      const closedSnapshot = finalizeSnapshotFile(currentSnapshotPath, "session_done");
+      if (closedCurrent) {
+        ended.push({
+          user: uid,
+          session_id: sid,
+          path: closedCurrent,
+          snapshot_path: closedSnapshot,
+          reason: "session_done",
+        });
+      }
       state.activeSessionByUser.delete(uid);
+      state.liveSessionByKey.delete(key);
     }
-    return { ended, reason: "", path: currentPath };
+    return { ended, reason: "", path: currentPath, snapshot_path: currentSnapshotPath };
   }
 
   function loadClosedSession(item) {
@@ -1606,7 +1686,12 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
     }
     const staged = appendSession(payload);
     if (!staged.ended.length) {
-      return { status: "skipped", reason: staged.reason || "session_not_finished", session_path: staged.path };
+      return {
+        status: "skipped",
+        reason: staged.reason || "session_not_finished",
+        session_path: staged.path,
+        session_snapshot_path: staged.snapshot_path,
+      };
     }
 
     const modelHint = detectModelHint(event, ctx);

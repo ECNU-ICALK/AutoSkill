@@ -800,3 +800,43 @@
 ### Residual Suggestions
 - Parser/runtime consistency still uses two lightweight implementations (Python + JS) over one shared pack format.
 - Current risk is low and covered by tests, but future work can factor a tiny formal schema test corpus (golden render cases) consumed by both test suites to further reduce parser drift risk.
+
+## 2026-03-13 - Round 16 (embedded live session snapshot persistence)
+
+### Scope
+- Target area: embedded session archival behavior.
+- Objective: persist session data locally in real time per incoming turn (without waiting for session end), while keeping extraction trigger at session close.
+
+### Changes Applied
+- `AutoSkill4OpenClaw/adapter/embedded_runtime.js`
+  - Added live snapshot writer:
+    - active snapshot path: `<session>.latest.json` under `embedded.sessionArchiveDir/<user>/`
+    - updated on every `handle(payload, ...)` call after appending JSONL event row
+  - Added in-memory rolling state (`liveSessionByKey`) to avoid expensive full-file rescans for each live snapshot update.
+  - Added snapshot finalization on session close/session switch:
+    - renames `.latest.json` to timestamped closed file, aligned with JSONL close semantics.
+  - Extended non-closed return payload with `session_snapshot_path` for observability.
+- Existing extraction behavior remains unchanged:
+  - extraction still runs only on closed sessions with successful `turn_type=main` evidence.
+
+### Tests Added
+- `AutoSkill4OpenClaw/adapter/embedded_runtime.test.mjs`
+  - `embedded runtime persists live session snapshot before session end`
+  - verifies:
+    - no extraction call before session close
+    - `.latest.json` exists and updates turn_count/messages incrementally
+    - `session_snapshot_path` is returned in no-end response
+
+### Documentation
+- Updated storage section:
+  - `AutoSkill4OpenClaw/README.md`
+  - `AutoSkill4OpenClaw/README.zh-CN.md`
+  - now includes embedded live snapshot path.
+
+### Validation
+- `cd AutoSkill4OpenClaw/adapter && npm test` (pass)
+- `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -p 'test_*.py'` (pass)
+
+### Risk Notes
+- Write frequency increases in embedded mode (one extra small JSON write per turn). This is intentional for real-time local visibility.
+- Fail-open behavior unchanged; extraction/memory/tool/provider paths are not coupled to snapshot write success logic.

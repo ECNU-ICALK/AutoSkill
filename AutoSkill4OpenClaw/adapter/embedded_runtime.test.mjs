@@ -181,6 +181,75 @@ function makeInvokeModelWithMultilineMetadata() {
   };
 }
 
+test("embedded runtime persists live session snapshot before session end", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  let invokeCount = 0;
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    async invokeModel() {
+      invokeCount += 1;
+      return JSON.stringify({});
+    },
+  });
+
+  const first = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-live",
+      turn_type: "main",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "user", content: "Need reusable release plan." },
+        { role: "assistant", content: "Use checklist and rollback gate." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(first.status, "skipped");
+  assert.equal(first.reason, "session_not_finished");
+  assert.equal(invokeCount, 0);
+  assert.ok(first.session_path);
+  assert.ok(first.session_snapshot_path);
+  assert.equal(fs.existsSync(String(first.session_path)), true);
+  assert.equal(fs.existsSync(String(first.session_snapshot_path)), true);
+
+  const snap1 = JSON.parse(fs.readFileSync(String(first.session_snapshot_path), "utf8"));
+  assert.equal(snap1.session_id, "sess-live");
+  assert.equal(snap1.turn_count, 1);
+  assert.equal(snap1.has_main, true);
+  assert.equal(snap1.has_main_success, true);
+  assert.equal(snap1.session_done, false);
+  assert.equal(Array.isArray(snap1.messages), true);
+  assert.equal(snap1.messages.length, 2);
+
+  const second = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-live",
+      turn_type: "side",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "assistant", content: "Use checklist and rollback gate." },
+        { role: "tool", content: "workspace: clean" },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(second.status, "skipped");
+  assert.equal(second.reason, "session_not_finished");
+  assert.equal(invokeCount, 0);
+  const snap2 = JSON.parse(fs.readFileSync(String(second.session_snapshot_path), "utf8"));
+  assert.equal(snap2.turn_count, 2);
+  assert.equal(snap2.session_done, false);
+  assert(snap2.messages.some((m) => m.role === "tool" && /workspace: clean/.test(m.content)));
+});
+
 test("embedded runtime reads shared prompt pack templates for extraction and maintenance", async () => {
   const paths = makeSandbox();
   const logger = makeLogger();

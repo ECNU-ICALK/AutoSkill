@@ -207,6 +207,7 @@ AUTOSKILL_OPENCLAW_PROMPT_PACK_PATH=/abs/path/to/openclaw_prompt_pack.txt
 
 - SkillBank：`~/.openclaw/autoskill/SkillBank`
 - embedded 会话归档：`~/.openclaw/autoskill/embedded_sessions`
+- embedded 实时会话快照（每次收到 turn 都会更新）：`~/.openclaw/autoskill/embedded_sessions/<user>/<session>.latest.json`
 - OpenClaw 本地技能镜像：`~/.openclaw/workspace/skills`
 - sidecar 对话归档（`runtimeMode=sidecar`）：`~/.openclaw/autoskill/conversations`
 
