@@ -342,7 +342,32 @@ function resolveSessionId(event, ctx, messages) {
   return inferSessionToken(event, ctx, messages);
 }
 
-function resolveTurnType(event, ctx) {
+function inferTurnTypeByMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let hasUser = false;
+  let hasAssistant = false;
+  let hasToolOnly = false;
+  for (const item of list) {
+    const role = asString(item?.role).trim().toLowerCase();
+    if (role === "user") {
+      hasUser = true;
+      continue;
+    }
+    if (role === "assistant") {
+      hasAssistant = true;
+      continue;
+    }
+    if (role === "tool" || role === "environment") {
+      hasToolOnly = true;
+    }
+  }
+  if (hasUser) return "main";
+  if (hasAssistant && !hasToolOnly) return "main";
+  if (!hasUser && !hasAssistant && hasToolOnly) return "side";
+  return "";
+}
+
+function resolveTurnType(event, ctx, messages = []) {
   const candidates = [
     event?.turnType,
     event?.turn_type,
@@ -355,7 +380,8 @@ function resolveTurnType(event, ctx) {
     const value = asString(item).trim().toLowerCase();
     if (value) return value;
   }
-  return "";
+  const inferred = inferTurnTypeByMessages(messages?.length ? messages : pickMessages(event, ctx));
+  return inferred || "";
 }
 
 function resolveSessionDone(event, ctx) {
@@ -1371,7 +1397,7 @@ function buildEmbeddedLivePayload(cfg, event, ctx) {
   const messages = pickMessages(event, ctx);
   if (!messages.length) return null;
   const sessionId = resolveSessionId(event, ctx, messages);
-  const turnType = resolveTurnType(event, ctx);
+  const turnType = resolveTurnType(event, ctx, messages);
   const channel = trimmed(
     event?.channel || event?.channelId || event?.channel_id || ctx?.channel || ctx?.channelId || ctx?.channel_id,
   );
@@ -1395,7 +1421,7 @@ function buildEndPayload(cfg, event, ctx, extras = {}) {
   const { hasSignal, value } = resolveSuccess(event);
   const success = hasSignal ? value : true;
   const sessionId = resolveSessionId(event, ctx, messages);
-  const turnType = resolveTurnType(event, ctx);
+  const turnType = resolveTurnType(event, ctx, messages);
   const sessionDone = resolveSessionDone(event, ctx);
   const channel = trimmed(
     event?.channel || event?.channelId || event?.channel_id || ctx?.channel || ctx?.channelId || ctx?.channel_id,

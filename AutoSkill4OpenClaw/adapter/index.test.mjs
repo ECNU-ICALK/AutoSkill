@@ -551,6 +551,39 @@ test("agent_end payload includes session and turn metadata when available", () =
   assert.equal(payload.channel, "cli");
 });
 
+test("buildEndPayload infers main turn_type when runtime omits turnType fields", () => {
+  const cfg = makeConfig();
+  const payload = buildEndPayload(
+    cfg,
+    {
+      sessionId: "sess-infer-main",
+      messages: [
+        { role: "user", content: "Do this task." },
+        { role: "assistant", content: "Done." },
+      ],
+    },
+    {},
+  );
+
+  assert.equal(payload.turn_type, "main");
+});
+
+test("buildEndPayload infers side turn_type when only tool/environment messages exist", () => {
+  const cfg = makeConfig();
+  const payload = buildEndPayload(
+    cfg,
+    {
+      sessionId: "sess-infer-side",
+      messages: [
+        { role: "environment", content: "tool output only" },
+      ],
+    },
+    {},
+  );
+
+  assert.equal(payload.turn_type, "side");
+});
+
 test("buildEndPayload preserves assistant tool-call messages and maps environment to tool", () => {
   const cfg = makeConfig();
   const payload = buildEndPayload(

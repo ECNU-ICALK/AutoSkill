@@ -288,6 +288,10 @@ Notes:
   - duplicate candidate skills are skipped before maintenance decision
   - merge is allowed only with explicit/valid target id or high-confidence top BM25 hit
   - unsafe merge target degrades to `add` (no blind merge)
+- OpenClaw compatibility fallback:
+  - if `turn_type/turnType` is missing (observed on some OpenClaw 2026.3.x builds), adapter infers turn type from messages (`user` present => `main`, tool-only => `side`)
+  - explicit `turn_type` still has highest priority when provided
+  - if `session_done` is missing, session closing still works via `session_id` change (and sidecar idle-timeout close when enabled)
 - `before_prompt_build` retrieval is auto-disabled by default in embedded mode (to avoid sidecar-only retrieval calls when no sidecar is running)
 - recursion guard is enabled for internal extraction/merge calls
 - precedence: explicit `runtimeMode` config overrides the no-sidecar alias

@@ -288,6 +288,10 @@ AUTOSKILL_OPENCLAW_SKILLS_DIR=~/.openclaw/workspace/skills
   - 抽取候选若与现有技能重复，会在维护决策前直接跳过
   - merge 只在目标 id 有效，或 BM25 高置信命中时允许
   - 不安全的 merge 目标会自动降级为 `add`（避免盲目合并）
+- OpenClaw 兼容兜底：
+  - 若缺少 `turn_type/turnType`（部分 OpenClaw 2026.3.x 版本会出现），adapter 会按消息结构推断（存在 `user` 视为 `main`，仅 tool/environment 视为 `side`）
+  - 一旦上游显式提供 `turn_type`，仍以显式字段为准
+  - 若缺少 `session_done`，仍可通过 `session_id` 变化收口（sidecar 开启空闲超时时也可自动收口）
 - embedded 模式下 `before_prompt_build` 检索默认自动关闭（避免无 sidecar 场景下发起无效检索请求）
 - 内置防递归保护，避免抽取/合并过程再次触发抽取链路
 - 优先级说明：若显式配置 `runtimeMode`，会覆盖 no-sidecar 别名

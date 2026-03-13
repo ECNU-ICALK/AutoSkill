@@ -874,3 +874,45 @@
 ### Risk Notes
 - Added one lightweight local-write path on `before_prompt_build`; failures are swallowed and logged, never blocking prompt flow.
 - Extraction triggering behavior remains in `agent_end` path; `stageLive` intentionally avoids model calls.
+
+## 2026-03-13 - Round 18 (OpenClaw 2026.3.x turn field compatibility fallback)
+
+### Scope
+- Target area: adapter hook payload compatibility when OpenClaw runtime does not expose `turn_type/session_done` in `event/ctx`.
+- Objective: avoid false `no_successful_main_turn` skips caused by missing `turn_type` fields in some OpenClaw 2026.3.x builds.
+
+### Issue Found
+- Adapter previously treated missing `turn_type` as empty.
+- Downstream extraction gates require at least one successful `turn_type=main` in a closed session.
+- Result: when runtime omitted turn fields, valid sessions could be archived but skipped for extraction.
+
+### Fixes Applied
+- `AutoSkill4OpenClaw/adapter/index.js`
+  - added `inferTurnTypeByMessages(...)` fallback:
+    - if any `user` message exists -> infer `main`
+    - if assistant-only (without tool-only trace) -> infer `main`
+    - if only tool/environment messages -> infer `side`
+  - explicit `turnType/turn_type` still has highest priority.
+  - wired fallback for both:
+    - embedded live-stage payload (`before_prompt_build`)
+    - `agent_end` payload construction
+- `AutoSkill4OpenClaw/adapter/index.test.mjs`
+  - added regression tests:
+    - infers `main` when runtime omits turn fields
+    - infers `side` for tool/environment-only records
+
+### Documentation
+- Updated:
+  - `AutoSkill4OpenClaw/README.md`
+  - `AutoSkill4OpenClaw/README.zh-CN.md`
+- Added explicit compatibility notes for:
+  - missing `turn_type` inference behavior
+  - missing `session_done` fallback behavior (`session_id` boundary / sidecar idle-timeout close)
+
+### Validation
+- `cd AutoSkill4OpenClaw/adapter && npm test` (pass, 52 tests)
+- `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q` (pass, 49 tests)
+
+### Risk Notes
+- This is a compatibility fallback, not a protocol replacement.
+- If your deployment can provide explicit `turn_type`, explicit values always override inferred values.
