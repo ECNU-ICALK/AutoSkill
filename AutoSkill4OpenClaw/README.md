@@ -1,6 +1,6 @@
 # AutoSkill4OpenClaw
 
-[中文说明](./README.zh-CN.md)
+English | [中文](README.zh-CN.md)
 
 Teach OpenClaw new reusable skills without modifying OpenClaw core.
 
@@ -168,6 +168,40 @@ That means:
 - In embedded mainline, `agent_end` is handled in adapter runtime and drives extraction/maintenance.
 - For new deployments, explicitly set `runtimeMode=embedded` in adapter config.
 - `runtimeMode=sidecar` remains available for optional externalized deployment.
+
+### Shared prompt pack (sidecar + embedded)
+
+To keep extraction/merge/maintenance decisions consistent across runtimes, both paths now read a shared prompt pack:
+
+- Source file: `AutoSkill4OpenClaw/adapter/openclaw_prompt_pack.txt`
+- Sidecar prompt profile (`agentic_prompt_profile.py`) renders `sidecar.*` templates from this file
+- Embedded runtime (`adapter/embedded_runtime.js`) renders `embedded.*` templates from the same file
+
+Optional override:
+
+```bash
+AUTOSKILL_OPENCLAW_PROMPT_PACK_PATH=/abs/path/to/openclaw_prompt_pack.txt
+```
+
+You can also set it in adapter config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "autoskill-openclaw-adapter": {
+        "config": {
+          "embedded": {
+            "promptPackPath": "/abs/path/to/openclaw_prompt_pack.txt"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+If the prompt pack is missing or invalid, both runtimes fail open and fall back to built-in prompts.
 
 ### What gets stored locally
 

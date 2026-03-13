@@ -1,6 +1,6 @@
 # AutoSkill: 基于技能自进化的经验驱动终身学习
 
-中文 | [English](README.md)
+[English](README.md) | 中文
 
 <p align="center">
   <img src="imgs/AutoSkill_logo.png" alt="AutoSkill Logo" width="320" />

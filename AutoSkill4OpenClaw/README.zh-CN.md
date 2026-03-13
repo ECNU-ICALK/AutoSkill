@@ -1,6 +1,6 @@
 # AutoSkill4OpenClaw
 
-[English](./README.md)
+[English](README.md) | 中文
 
 让 OpenClaw 在不改核心代码的前提下，持续学会新技能。
 
@@ -168,6 +168,40 @@ AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror
 - 在 embedded 主线下，`agent_end` 在 adapter 运行时内驱动抽取与维护
 - 新部署建议显式把 `runtimeMode` 设为 `embedded`
 - `runtimeMode=sidecar` 仍保留为可选外置部署路径
+
+### 共享提示词包（sidecar + embedded）
+
+为避免两条运行时路径出现提示词漂移，sidecar 和 embedded 现在共用同一份提示词包：
+
+- 源文件：`AutoSkill4OpenClaw/adapter/openclaw_prompt_pack.txt`
+- sidecar（`agentic_prompt_profile.py`）读取 `sidecar.*` 模板
+- embedded（`adapter/embedded_runtime.js`）读取 `embedded.*` 模板
+
+可选覆盖路径：
+
+```bash
+AUTOSKILL_OPENCLAW_PROMPT_PACK_PATH=/abs/path/to/openclaw_prompt_pack.txt
+```
+
+也可以直接在 adapter 配置中写：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "autoskill-openclaw-adapter": {
+        "config": {
+          "embedded": {
+            "promptPackPath": "/abs/path/to/openclaw_prompt_pack.txt"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+如果提示词包缺失或解析失败，两条路径都会 fail-open，自动回退到内置提示词，不会阻断主流程。
 
 ### 本地会存什么
 

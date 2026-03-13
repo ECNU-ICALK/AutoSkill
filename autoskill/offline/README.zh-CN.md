@@ -1,6 +1,6 @@
 # AutoSkill Offline
 
-中文 | [English](README.md)
+[English](README.md) | 中文
 
 `autoskill.offline` 提供面向历史数据的批处理/离线技能学习流程。
 它适合这样一类场景：源数据已经保存在本地文件、目录或归档数据集中，希望在非交互模式下把这些数据转成可复用的技能。
