@@ -4,6 +4,8 @@ import path from "node:path";
 import { createEmbeddedProcessor } from "./embedded_runtime.js";
 
 const PLUGIN_ID = "autoskill-openclaw-adapter";
+const BEFORE_PROMPT_BUILD_HOOK_NAMES = ["before_prompt_build", "beforePromptBuild"];
+const AGENT_END_HOOK_NAMES = ["agent_end", "agentEnd"];
 const DEFAULTS = {
   baseUrl: "http://127.0.0.1:9100/v1",
   apiKey: "",
@@ -1545,6 +1547,32 @@ function registerLifecycleHook(api, hookName, handler, meta) {
   throw new Error(`No hook registration API found for ${hookName}`);
 }
 
+function registerLifecycleHooks(api, hookNames, handler, meta, log) {
+  const names = Array.isArray(hookNames)
+    ? hookNames.map((x) => asString(x).trim()).filter(Boolean)
+    : [];
+  const seen = new Set();
+  let firstError = null;
+  let count = 0;
+  for (const hookName of names) {
+    if (seen.has(hookName)) continue;
+    seen.add(hookName);
+    try {
+      registerLifecycleHook(api, hookName, handler, meta);
+      count += 1;
+      if (log?.info) {
+        log.info(`[${PLUGIN_ID}] hook registered name=${hookName}`);
+      }
+    } catch (err) {
+      if (!firstError) firstError = err;
+      if (log?.warn) {
+        log.warn(`[${PLUGIN_ID}] hook registration failed name=${hookName}: ${String(err)}`);
+      }
+    }
+  }
+  if (!count && firstError) throw firstError;
+}
+
 export default {
   id: PLUGIN_ID,
   name: "AutoSkill OpenClaw Adapter",
@@ -1557,9 +1585,9 @@ export default {
       cfg.runtimeMode === "embedded" ? createEmbeddedProcessor(cfg, api, log) : null;
     const retrievalCache = createSessionRetrievalCache();
 
-    registerLifecycleHook(
+    registerLifecycleHooks(
       api,
-      "before_prompt_build",
+      BEFORE_PROMPT_BUILD_HOOK_NAMES,
       createBeforePromptBuildHandler(cfg, log, {
         embeddedProcessor,
         onRetrieval(sessionId, snapshot, userId) {
@@ -1570,11 +1598,12 @@ export default {
         name: `${PLUGIN_ID}.before-prompt-build`,
         description: "AutoSkill recall hook: retrieve and append concise skill hints before prompt build.",
       },
+      log,
     );
 
-    registerLifecycleHook(
+    registerLifecycleHooks(
       api,
-      "agent_end",
+      AGENT_END_HOOK_NAMES,
       createAgentEndHandler(cfg, log, {
         embeddedProcessor,
         consumeRetrieval(sessionId, userId) {
@@ -1588,6 +1617,7 @@ export default {
         name: `${PLUGIN_ID}.agent-end`,
         description: "AutoSkill evolution hook: schedule background extraction after run.",
       },
+      log,
     );
   },
 };

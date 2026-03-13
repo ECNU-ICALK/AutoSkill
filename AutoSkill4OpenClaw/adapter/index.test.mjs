@@ -521,10 +521,11 @@ test("plugin registers before_prompt_build without re-registering before_agent_s
     },
   });
 
-  assert.deepEqual(
-    hooks.map((hook) => hook.name),
-    ["before_prompt_build", "agent_end"],
-  );
+  const names = hooks.map((hook) => hook.name);
+  assert.equal(names.includes("before_prompt_build"), true);
+  assert.equal(names.includes("beforePromptBuild"), true);
+  assert.equal(names.includes("agent_end"), true);
+  assert.equal(names.includes("agentEnd"), true);
   assert.equal(hooks.some((hook) => hook.name === "before_agent_start"), false);
 });
 

@@ -916,3 +916,34 @@
 ### Risk Notes
 - This is a compatibility fallback, not a protocol replacement.
 - If your deployment can provide explicit `turn_type`, explicit values always override inferred values.
+
+## 2026-03-13 - Round 19 (hook alias compatibility for OpenClaw lifecycle naming drift)
+
+### Scope
+- Target area: adapter hook registration compatibility in OpenClaw environments where lifecycle hook names may differ by naming style.
+- Objective: avoid "plugin loaded but hooks never trigger" in deployments that expose camelCase hook names.
+
+### Issue Found
+- Field reports showed adapter startup logs present (plugin loaded), but no per-turn hook logs and no embedded session writes.
+- This pattern indicates hook name mismatch risk across versions (`before_prompt_build`/`agent_end` vs camelCase variants).
+
+### Fixes Applied
+- `AutoSkill4OpenClaw/adapter/index.js`
+  - introduced hook alias registration sets:
+    - `before_prompt_build`, `beforePromptBuild`
+    - `agent_end`, `agentEnd`
+  - added `registerLifecycleHooks(...)` helper:
+    - registers all aliases
+    - logs successful registration names
+    - fail-open per alias, fail-hard only when all aliases fail
+- `AutoSkill4OpenClaw/adapter/index.test.mjs`
+  - updated registration test to assert both snake_case and camelCase aliases are registered.
+  - preserved guard that `before_agent_start` is not reintroduced.
+
+### Validation
+- `cd AutoSkill4OpenClaw/adapter && npm test` (pass, 52 tests)
+- `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q` (pass, 49 tests)
+
+### Risk Notes
+- Registering aliases may cause duplicate callbacks only if a runtime emits both naming variants for the same turn.
+- Existing extraction dedupe and fail-open behavior remain intact; no OpenClaw core patching introduced.
