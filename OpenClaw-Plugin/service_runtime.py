@@ -6,10 +6,13 @@ This runtime keeps retrieval/evolution APIs and disables chat-generation endpoin
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from autoskill.interactive.server import (
@@ -34,6 +37,10 @@ from openclaw_conversation_archive import (
     OpenClawConversationArchiveConfig,
 )
 from openclaw_skill_mirror import OpenClawSkillInstallConfig, OpenClawSkillMirror
+from openclaw_usage_tracking import (
+    OpenClawSkillUsageTracker,
+    OpenClawUsageTrackingConfig,
+)
 
 
 @dataclass
@@ -46,6 +53,7 @@ class _OpenClawExtractJob:
     retrieval_reference: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     event_fields: Optional[Dict[str, Any]] = None
+    dedupe_key: Optional[str] = None
 
 
 class OpenClawSkillRuntime(AutoSkillProxyRuntime):
@@ -70,6 +78,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         main_turn_proxy_config: Optional[OpenClawMainTurnProxyConfig] = None,
         skill_install_config: Optional[OpenClawSkillInstallConfig] = None,
         conversation_archive_config: Optional[OpenClawConversationArchiveConfig] = None,
+        usage_tracking_config: Optional[OpenClawUsageTrackingConfig] = None,
     ) -> None:
         """Run init."""
         super().__init__(
@@ -99,6 +108,17 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         self._conversation_archive = OpenClawConversationArchive(config=self.conversation_archive_config)
         self.skill_install_config = (skill_install_config or OpenClawSkillInstallConfig()).normalize()
         self._skill_mirror = OpenClawSkillMirror(config=self.skill_install_config)
+        self.usage_tracking_config = (usage_tracking_config or OpenClawUsageTrackingConfig()).normalize()
+        self._usage_tracker = OpenClawSkillUsageTracker(
+            sdk=self.sdk,
+            config=self.usage_tracking_config,
+        )
+        self._openclaw_extract_dedupe_lock = threading.Lock()
+        self._openclaw_extract_dedupe_seen: Dict[str, int] = {}
+        self._openclaw_extract_dedupe_max_entries = max(
+            512,
+            int(self.main_turn_proxy_config.dedupe_max_entries or 4096),
+        )
         self._sync_openclaw_installed_skills(
             user_id=str(self.skill_install_config.install_user_id or self.config.user_id or "").strip(),
             reason="runtime_startup",
@@ -120,6 +140,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         data["openclaw"] = {
             "turn": "/v1/autoskill/openclaw/turn",
             "skills_sync": "/v1/autoskill/openclaw/skills/sync",
+            "usage_stats": "/v1/autoskill/openclaw/usage/stats",
             "hooks_before_agent_start": "/v1/autoskill/openclaw/hooks/before_agent_start",
             "hooks_agent_end": "/v1/autoskill/openclaw/hooks/agent_end",
             "retrieve_preview": "/v1/autoskill/retrieval/preview",
@@ -132,6 +153,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             },
             "conversation_archive": self._conversation_archive.status(),
             "skill_install_mirror": self._skill_mirror.status(),
+            "usage_tracking": self._usage_tracker.status(),
         }
         payload["data"] = data
         return payload
@@ -152,6 +174,9 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         }
         paths["/v1/autoskill/openclaw/skills/sync"] = {
             "post": {"summary": "Sync active AutoSkill skills into the local OpenClaw skills folder"}
+        }
+        paths["/v1/autoskill/openclaw/usage/stats"] = {
+            "post": {"summary": "Get OpenClaw skill retrieval/usage counters for one user"}
         }
         paths["/v1/autoskill/openclaw/hooks/before_agent_start"] = {
             "post": {"summary": "Hook adapter: retrieve skills and return context injection payload"}
@@ -266,6 +291,169 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
                 "user_id": str(user_id or ""),
             }
 
+    def _extract_used_skill_ids(self, *, body: Dict[str, Any]) -> List[str]:
+        """Resolve explicit used-skill ids from OpenClaw payload when available."""
+        out: List[str] = []
+        seen: set[str] = set()
+
+        def _add(raw: Any) -> None:
+            if raw is None:
+                return
+            if isinstance(raw, list):
+                for item in raw:
+                    _add(item)
+                return
+            sid = ""
+            if isinstance(raw, dict):
+                sid = str(raw.get("id") or raw.get("skill_id") or "").strip()
+            else:
+                sid = str(raw or "").strip()
+            if not sid:
+                return
+            key = sid.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            out.append(sid)
+
+        candidates = [
+            body.get("used_skill_ids"),
+            body.get("usedSkillIds"),
+            body.get("skills_used"),
+            body.get("skillsUsed"),
+        ]
+        usage_block = body.get("usage")
+        if isinstance(usage_block, dict):
+            candidates.extend(
+                [
+                    usage_block.get("used_skill_ids"),
+                    usage_block.get("usedSkillIds"),
+                    usage_block.get("skills_used"),
+                    usage_block.get("skillsUsed"),
+                ]
+            )
+        metadata = body.get("metadata")
+        if isinstance(metadata, dict):
+            candidates.extend(
+                [
+                    metadata.get("used_skill_ids"),
+                    metadata.get("usedSkillIds"),
+                    metadata.get("skills_used"),
+                    metadata.get("skillsUsed"),
+                ]
+            )
+        for item in candidates:
+            _add(item)
+        return out[:64]
+
+    def _extract_inferred_used_skill_ids(self, *, body: Dict[str, Any]) -> List[str]:
+        """Resolve inferred used-skill ids from optional payload hints."""
+        out: List[str] = []
+        seen: set[str] = set()
+
+        def _add(raw: Any) -> None:
+            if raw is None:
+                return
+            if isinstance(raw, list):
+                for item in raw:
+                    _add(item)
+                return
+            sid = ""
+            if isinstance(raw, dict):
+                sid = str(
+                    raw.get("id")
+                    or raw.get("skill_id")
+                    or raw.get("skillId")
+                    or raw.get("name")
+                    or ""
+                ).strip()
+            else:
+                sid = str(raw or "").strip()
+            if not sid:
+                return
+            key = sid.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            out.append(sid)
+
+        retrieval = body.get("retrieval") if isinstance(body.get("retrieval"), dict) else {}
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        usage_block = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        candidates: List[Any] = [
+            body.get("inferred_used_skill_ids"),
+            body.get("inferredUsedSkillIds"),
+            body.get("selected_for_use_ids"),
+            body.get("selectedForUseIds"),
+            body.get("selected_for_context_ids"),
+            body.get("selectedForContextIds"),
+            body.get("selected_skills"),
+            body.get("selectedSkills"),
+            retrieval.get("selected_for_use_ids"),
+            retrieval.get("selectedForUseIds"),
+            retrieval.get("selected_for_context_ids"),
+            retrieval.get("selectedForContextIds"),
+            retrieval.get("selected_skills"),
+            retrieval.get("selectedSkills"),
+            metadata.get("inferred_used_skill_ids"),
+            metadata.get("inferredUsedSkillIds"),
+            metadata.get("selected_for_use_ids"),
+            metadata.get("selectedForUseIds"),
+            usage_block.get("inferred_used_skill_ids"),
+            usage_block.get("inferredUsedSkillIds"),
+        ]
+        for item in candidates:
+            _add(item)
+        return out[:64]
+
+    def _track_openclaw_usage(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        retrieval: Optional[Dict[str, Any]],
+        used_skill_ids: Optional[List[str]],
+        inferred_used_skill_ids: Optional[List[str]],
+        messages: Optional[List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """Record retrieval/usage counters in best-effort mode."""
+        try:
+            result = self._usage_tracker.record_agent_end(
+                user_id=user_id,
+                session_id=session_id,
+                retrieval=(dict(retrieval) if isinstance(retrieval, dict) else None),
+                used_skill_ids=list(used_skill_ids or []),
+                inferred_used_skill_ids=list(inferred_used_skill_ids or []),
+                messages=list(messages or []),
+            )
+        except Exception as e:
+            print(
+                f"[openclaw-usage-tracking] record failed user={user_id or '<empty>'} "
+                f"session={session_id or '<empty>'} error={e}"
+            )
+            return {
+                "enabled": bool(self.usage_tracking_config.enabled),
+                "status": "failed",
+                "reason": f"tracker_failed:{e}",
+            }
+        return dict(result or {})
+
+    def openclaw_usage_stats_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
+        """Get usage counters for one user (and optionally one skill)."""
+        user_id = (
+            str(body.get("user") or body.get("user_id") or "").strip()
+            or self._resolve_user_id(body=body, headers=headers)
+        )
+        skill_id = str(body.get("skill_id") or body.get("skillId") or "").strip()
+        payload = self._usage_tracker.get_stats(user_id=user_id, skill_id=skill_id)
+        return {
+            "object": "openclaw_usage_stats",
+            "ok": True,
+            "user": user_id,
+            "skill_id": skill_id or None,
+            "data": payload,
+        }
+
     def openclaw_skill_sync_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
         """Force a mirror sync into the OpenClaw skills directory."""
         user_id = (
@@ -367,6 +555,116 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             return []
         return out
 
+    def _build_session_end_window(self, *, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Build extraction window for a closed session archive.
+
+        Session-end extraction keeps the merged full session messages and only
+        checks that user+assistant evidence exists.
+        """
+
+        out = list(messages or [])
+        if not out:
+            return []
+        has_user = any(str((m or {}).get("role") or "").strip().lower() == "user" for m in out)
+        has_assistant = any(str((m or {}).get("role") or "").strip().lower() == "assistant" for m in out)
+        if not has_user or not has_assistant:
+            return []
+        return out
+
+    @staticmethod
+    def _merge_ended_sessions(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicate ended-session records by `(session_id, path)`."""
+        out: List[Dict[str, Any]] = []
+        seen: set[Tuple[str, str]] = set()
+        for item in list(items or []):
+            sid = str(item.get("session_id") or "").strip()
+            path = str(item.get("path") or "").strip()
+            key = (sid, path)
+            if not sid or not path or key in seen:
+                continue
+            seen.add(key)
+            out.append(dict(item))
+        return out
+
+    def _session_has_main_turn_extraction_event(self, *, user_id: str, session_id: str) -> bool:
+        """
+        Return True when we already have non-failed main-turn extraction events for this session.
+
+        This provides cross-trigger hard dedupe for:
+        - main-turn proxy extraction
+        - agent_end session-close extraction fallback
+        """
+
+        uid = str(user_id or "").strip() or self.config.user_id
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        with self._extract_events_lock:
+            events = list(self._extract_events_by_user.get(uid) or [])
+        for ev in reversed(events):
+            if str(ev.get("trigger") or "").strip() != "openclaw_main_turn_proxy":
+                continue
+            if str(ev.get("session_id") or "").strip() != sid:
+                continue
+            status = str(ev.get("status") or "").strip().lower()
+            if status in {"scheduled", "running", "completed"}:
+                return True
+        return False
+
+    def _build_openclaw_extraction_dedupe_key(
+        self,
+        *,
+        user_id: str,
+        messages: List[Dict[str, Any]],
+        trigger: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> str:
+        """Build a stable dedupe key for OpenClaw extraction scheduling."""
+
+        meta = dict(metadata or {})
+        explicit = str(meta.get("dedupe_key") or "").strip()
+        if explicit:
+            return explicit
+
+        source = str(meta.get("source") or trigger or "").strip().lower()
+        if source not in {"openclaw_main_turn_proxy", "openclaw_agent_end_session_end"}:
+            return ""
+        canonical_messages: List[Dict[str, str]] = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            content = str(item.get("content") or "").strip()
+            if not role or not content:
+                continue
+            canonical_messages.append({"role": role, "content": content})
+        if not canonical_messages:
+            return ""
+        payload = {
+            "user_id": str(user_id or "").strip(),
+            "session_id": str(meta.get("session_id") or "").strip(),
+            "messages": canonical_messages,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _mark_openclaw_extraction_dedupe(self, *, dedupe_key: str) -> bool:
+        """Return False when dedupe key is already observed."""
+        key = str(dedupe_key or "").strip()
+        if not key:
+            return True
+        now_ms = int(time.time() * 1000)
+        with self._openclaw_extract_dedupe_lock:
+            if key in self._openclaw_extract_dedupe_seen:
+                return False
+            self._openclaw_extract_dedupe_seen[key] = now_ms
+            if len(self._openclaw_extract_dedupe_seen) > int(self._openclaw_extract_dedupe_max_entries):
+                ordered = sorted(self._openclaw_extract_dedupe_seen.items(), key=lambda item: item[1])
+                keep = ordered[-int(self._openclaw_extract_dedupe_max_entries) :]
+                self._openclaw_extract_dedupe_seen = {k: ts for k, ts in keep}
+        return True
+
     def openclaw_before_agent_start_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
         """
         pre-run hook:
@@ -395,6 +693,17 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             min_score=min_score,
         )
         payload = self._retrieval_response_payload(retrieval)
+        session_id = self._resolve_session_id(body=body, headers=headers)
+        usage_remember = self._usage_tracker.remember_retrieval(
+            user_id=user_id,
+            session_id=session_id,
+            retrieval=payload,
+        )
+        if usage_remember.get("status") == "remembered":
+            print(
+                f"[openclaw-usage-tracking] remembered retrieval user={user_id or '<empty>'} "
+                f"session={session_id or '<empty>'} hits={usage_remember.get('tracked_hits', 0)}"
+            )
         context = str(retrieval.get("context") or "")
         context_message = (
             {"role": "system", "content": context}
@@ -408,6 +717,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             **payload,
             "context": context,
             "context_message": context_message,
+            "usage_tracking": usage_remember,
         }
 
     def openclaw_agent_end_api(self, *, body: Dict[str, Any], headers: Any) -> Dict[str, Any]:
@@ -429,6 +739,9 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         turn_type = self._resolve_turn_type(body=body, headers=headers)
         session_id = self._resolve_session_id(body=body, headers=headers)
         session_done = self._resolve_session_done(body=body, headers=headers)
+        used_skill_ids = self._extract_used_skill_ids(body=body)
+        inferred_used_skill_ids = self._extract_inferred_used_skill_ids(body=body)
+        retrieval_payload = body.get("retrieval") if isinstance(body.get("retrieval"), dict) else None
 
         hint_raw = body.get("hint")
         hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
@@ -465,93 +778,197 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             f"turn_type={turn_type or '<empty>'} skipped={int(bool(archive_result.get('skipped')))} "
             f"path={archive_result.get('path', '')}"
         )
-        if turn_type and turn_type != "main":
-            return {
-                "object": "openclaw_hook_agent_end",
-                "user": user_id,
-                "scope": scope,
-                "extraction": {
-                    "job_id": None,
-                    "status": "skipped",
-                    "reason": f"turn_type_{turn_type}",
-                },
-            }
-        if self.main_turn_proxy_config.enabled and self.main_turn_proxy_config.chat_endpoint_enabled:
-            return {
-                "object": "openclaw_hook_agent_end",
-                "user": user_id,
-                "scope": scope,
-                "extraction": {
-                    "job_id": None,
-                    "status": "skipped",
-                    "reason": "main_turn_proxy_enabled",
-                },
-            }
+        sweep = self._conversation_archive.sweep_inactive_sessions(user_id=user_id)
+        sweep_ended = list(sweep.get("ended_sessions") or [])
+        if sweep_ended:
+            print(
+                f"[openclaw-session-archive] idle timeout closed user={user_id or '<empty>'} "
+                f"count={len(sweep_ended)}"
+            )
+        session_archive = self._conversation_archive.append_session_record(
+            user_id=user_id,
+            session_id=session_id,
+            turn_type=turn_type,
+            messages=messages,
+            metadata=archive_meta,
+            session_done=bool(session_done),
+            success=bool(success),
+        )
+        ended_sessions = self._merge_ended_sessions(
+            list(sweep_ended or []) + list(session_archive.get("ended_sessions") or [])
+        )
+        print(
+            f"[openclaw-session-archive] agent_end staged user={user_id or '<empty>'} "
+            f"session={session_id or '<empty>'} turn_type={turn_type or '<empty>'} "
+            f"ended={len(ended_sessions)} path={session_archive.get('path', '')}"
+        )
+        usage = self._track_openclaw_usage(
+            user_id=user_id,
+            session_id=session_id,
+            retrieval=retrieval_payload,
+            used_skill_ids=used_skill_ids,
+            inferred_used_skill_ids=inferred_used_skill_ids,
+            messages=messages,
+        )
+        if str(usage.get("status") or "") == "recorded":
+            inference = usage.get("usage_inference") if isinstance(usage.get("usage_inference"), dict) else {}
+            print(
+                f"[openclaw-usage-tracking] recorded user={user_id or '<empty>'} "
+                f"session={session_id or '<empty>'} updated={usage.get('updated', 0)} "
+                f"deleted={len(list(usage.get('deleted_skill_ids') or []))} "
+                f"infer_status={str(inference.get('status') or 'skipped')}"
+            )
+        deleted_by_usage = [str(x) for x in (usage.get("deleted_skill_ids") or []) if str(x).strip()]
+        if deleted_by_usage:
+            sync = self._sync_openclaw_installed_skills(
+                user_id=user_id,
+                reason="usage_tracking_prune",
+            )
+            usage["openclaw_install_sync"] = sync
         if not self.main_turn_proxy_config.agent_end_extract_enabled:
             return {
                 "object": "openclaw_hook_agent_end",
                 "user": user_id,
                 "scope": scope,
+                "usage": usage,
                 "extraction": {
                     "job_id": None,
                     "status": "skipped",
                     "reason": "agent_end_disabled_by_config",
                 },
             }
-        if not success:
+        if not session_id:
             return {
                 "object": "openclaw_hook_agent_end",
                 "user": user_id,
                 "scope": scope,
+                "usage": usage,
                 "extraction": {
                     "job_id": None,
                     "status": "skipped",
-                    "reason": "task_not_successful",
+                    "reason": "missing_session_id",
+                },
+            }
+        if not ended_sessions:
+            return {
+                "object": "openclaw_hook_agent_end",
+                "user": user_id,
+                "scope": scope,
+                "usage": usage,
+                "extraction": {
+                    "job_id": None,
+                    "status": "skipped",
+                    "reason": "session_not_finished",
                 },
             }
 
         min_score = _safe_float(body.get("min_score"), self.config.min_score)
-        retrieval = self._retrieve_context(
-            messages=messages,
-            user_id=user_id,
-            scope=scope,
-            limit=1,
-            min_score=min_score,
-        )
-        extraction_window = self._build_agent_end_window(messages=messages, feedback=feedback)
-        if not extraction_window:
+        scheduled_jobs: List[str] = []
+        skipped_reasons: List[str] = []
+        for ended in ended_sessions:
+            ended_path = str(ended.get("path") or "").strip()
+            ended_session_id = str(ended.get("session_id") or "").strip()
+            if self._session_has_main_turn_extraction_event(
+                user_id=user_id,
+                session_id=ended_session_id,
+            ):
+                skipped_reasons.append(f"{ended_session_id or '<empty>'}:dedupe_main_turn_already_extracted")
+                print(
+                    f"[openclaw-extraction-dedupe] skip agent_end session={ended_session_id or '<empty>'} "
+                    f"reason=main_turn_event_exists"
+                )
+                continue
+            loaded = self._conversation_archive.load_session_for_extraction(path=ended_path)
+            if not bool(loaded.get("ok")):
+                skipped_reasons.append(
+                    f"{ended_session_id or '<empty>'}:load_failed:{loaded.get('reason') or 'unknown'}"
+                )
+                continue
+            if not bool(loaded.get("has_main_turn")):
+                skipped_reasons.append(f"{ended_session_id or '<empty>'}:turn_type_not_main")
+                continue
+            if not bool(loaded.get("has_successful_main_turn")):
+                skipped_reasons.append(f"{ended_session_id or '<empty>'}:task_not_successful")
+                continue
+
+            session_messages = list(loaded.get("messages") or [])
+            extraction_window = self._build_session_end_window(messages=session_messages)
+            if not extraction_window:
+                skipped_reasons.append(f"{ended_session_id or '<empty>'}:window_not_ready")
+                continue
+
+            retrieval = self._retrieve_context(
+                messages=extraction_window,
+                user_id=user_id,
+                scope=scope,
+                limit=1,
+                min_score=min_score,
+            )
+            top_ref = self._top_reference_from_retrieval_hits(
+                retrieval_hits=list((retrieval or {}).get("hits") or []),
+                user_id=user_id,
+            )
+            job_id = self._schedule_extraction_job(
+                user_id=user_id,
+                messages=extraction_window,
+                trigger="openclaw_agent_end_session_end",
+                hint=hint,
+                retrieval_reference=top_ref,
+                metadata={
+                    "source": "openclaw_agent_end_session_end",
+                    "session_id": ended_session_id,
+                    "turn_type": "main",
+                    "session_archive_path": ended_path,
+                    "session_turn_count": int(loaded.get("turn_count") or 0),
+                    "dedupe_key": self._build_openclaw_extraction_dedupe_key(
+                        user_id=user_id,
+                        messages=extraction_window,
+                        trigger="openclaw_agent_end_session_end",
+                        metadata={
+                            "source": "openclaw_agent_end_session_end",
+                            "session_id": ended_session_id,
+                        },
+                    ),
+                },
+                event_fields={
+                    "session_id": ended_session_id,
+                    "session_archive_path": ended_path,
+                },
+            )
+            ev = self._get_extraction_event_by_job(job_id=job_id)
+            status = str((ev or {}).get("status") or "scheduled").strip().lower()
+            if status in {"scheduled", "running", "completed"}:
+                scheduled_jobs.append(job_id)
+                continue
+            skipped_reasons.append(f"{ended_session_id or '<empty>'}:schedule_{status or 'unknown'}")
+
+        if not scheduled_jobs:
+            reason = ";".join(skipped_reasons) if skipped_reasons else "session_not_extractable"
             return {
                 "object": "openclaw_hook_agent_end",
                 "user": user_id,
                 "scope": scope,
+                "usage": usage,
                 "extraction": {
                     "job_id": None,
                     "status": "skipped",
-                    "reason": "window_not_ready",
+                    "reason": reason,
                 },
             }
 
-        top_ref = self._top_reference_from_retrieval_hits(
-            retrieval_hits=list((retrieval or {}).get("hits") or []),
-            user_id=user_id,
-        )
-        job_id = self._schedule_extraction_job(
-            user_id=user_id,
-            messages=extraction_window,
-            trigger="openclaw_agent_end",
-            hint=hint,
-            retrieval_reference=top_ref,
-        )
-        ev = self._get_extraction_event_by_job(job_id=job_id)
+        latest_job_id = scheduled_jobs[-1]
+        ev = self._get_extraction_event_by_job(job_id=latest_job_id)
         status = str((ev or {}).get("status") or "scheduled")
         return {
             "object": "openclaw_hook_agent_end",
             "user": user_id,
             "scope": scope,
+            "usage": usage,
             "extraction": {
-                "job_id": job_id,
+                "job_id": latest_job_id,
                 "status": status,
                 "reason": "",
+                "jobs": list(scheduled_jobs),
             },
         }
 
@@ -647,6 +1064,12 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         uid = str(user_id or "").strip() or self.config.user_id
         window = list(messages or [])
         job_id = str(uuid.uuid4())
+        dedupe_key = self._build_openclaw_extraction_dedupe_key(
+            user_id=uid,
+            messages=window,
+            trigger=str(trigger or "proxy_extract"),
+            metadata=(dict(metadata) if isinstance(metadata, dict) else None),
+        )
         if not self.config.extract_enabled:
             event = self._empty_extraction_event(
                 job_id=job_id,
@@ -669,6 +1092,22 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
                 event.update(dict(event_fields))
             self._record_extraction_event(user_id=uid, event=event)
             return job_id
+        if dedupe_key and not self._mark_openclaw_extraction_dedupe(dedupe_key=dedupe_key):
+            event = self._empty_extraction_event(
+                job_id=job_id,
+                trigger=str(trigger or "proxy_extract"),
+                status="skipped",
+                error="dedupe_skipped",
+            )
+            event["dedupe_key"] = dedupe_key
+            if isinstance(event_fields, dict):
+                event.update(dict(event_fields))
+            self._record_extraction_event(user_id=uid, event=event)
+            print(
+                f"[openclaw-extraction-dedupe] skipped duplicate "
+                f"user={uid} trigger={trigger} dedupe_key={dedupe_key}"
+            )
+            return job_id
 
         job = _OpenClawExtractJob(
             job_id=job_id,
@@ -679,6 +1118,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             retrieval_reference=(dict(retrieval_reference) if isinstance(retrieval_reference, dict) else None),
             metadata=(dict(metadata) if isinstance(metadata, dict) else None),
             event_fields=(dict(event_fields) if isinstance(event_fields, dict) else None),
+            dedupe_key=dedupe_key or None,
         )
         scheduled = self._empty_extraction_event(
             job_id=job_id,
@@ -686,6 +1126,8 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             status="scheduled",
             error="",
         )
+        if dedupe_key:
+            scheduled["dedupe_key"] = dedupe_key
         if isinstance(job.event_fields, dict):
             scheduled.update(dict(job.event_fields))
         self._record_extraction_event(user_id=uid, event=scheduled)
@@ -953,6 +1395,22 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
                         return
                     try:
                         payload = runtime.openclaw_skill_sync_api(body=body, headers=self.headers)
+                    except Exception as e:
+                        return _json_response(
+                            self,
+                            _openai_error(str(e), code="invalid_request"),
+                            status=400,
+                        )
+                    return _json_response(self, payload)
+
+                if path == "/v1/autoskill/openclaw/usage/stats":
+                    if path.startswith("/v1/") and not self._authorized():
+                        return
+                    body = self._read_body_safely()
+                    if body.get("_error"):
+                        return
+                    try:
+                        payload = runtime.openclaw_usage_stats_api(body=body, headers=self.headers)
                     except Exception as e:
                         return _json_response(
                             self,

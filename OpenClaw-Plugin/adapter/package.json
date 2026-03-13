@@ -5,7 +5,7 @@
   "type": "module",
   "description": "OpenClaw lifecycle adapter for AutoSkill sidecar.",
   "scripts": {
-    "test": "node --test ./index.test.mjs"
+    "test": "node --test ./index.test.mjs ./embedded_runtime.test.mjs"
   },
   "openclaw": {
     "extensions": [

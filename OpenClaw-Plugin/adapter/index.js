@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createEmbeddedProcessor } from "./embedded_runtime.js";
 
 const PLUGIN_ID = "autoskill-openclaw-adapter";
 const DEFAULTS = {
   baseUrl: "http://127.0.0.1:9100/v1",
   apiKey: "",
   userId: "",
+  runtimeMode: "sidecar",
   skillScope: "all",
   topK: 3,
   minScore: 0.4,
@@ -25,6 +27,26 @@ const DEFAULTS = {
     minScore: 0.4,
     injectionMode: "appendSystemContext",
   },
+  embedded: {
+    sessionArchiveDir: "",
+    skillBankDir: "",
+    openclawSkillsDir: "",
+    bm25TopK: 8,
+    modelInvocation: {
+      modes: [
+        "openclaw-runtime",
+        "openclaw-runtime-subagent",
+        "openclaw-config-resolve",
+        "manual",
+      ],
+      timeoutMs: 20000,
+      retries: 1,
+      openclawHome: "",
+      manualBaseUrl: "",
+      manualApiKey: "",
+      manualModel: "",
+    },
+  },
 };
 
 let DOTENV_LOADED = false;
@@ -32,6 +54,14 @@ let DOTENV_LOADED = false;
 function asString(v) {
   if (v == null) return "";
   return String(v);
+}
+
+function cloneJson(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return null;
+  }
 }
 
 function asBool(v, defaultValue) {
@@ -66,16 +96,41 @@ function asText(content) {
   return asString(content);
 }
 
+function assistantContentFallback(message) {
+  if (!message || typeof message !== "object") return "";
+  const payload = {};
+  for (const key of ["tool_calls", "function_call", "refusal", "audio", "annotations"]) {
+    const value = message[key];
+    if (value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && value.length === 0)) {
+      payload[key] = value;
+    }
+  }
+  if (!Object.keys(payload).length) return "";
+  try {
+    return JSON.stringify(payload);
+  } catch (_) {
+    return asString(payload);
+  }
+}
+
 function normalizeMessages(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const m of raw) {
     if (!m || typeof m !== "object") continue;
     const roleRaw = asString(m.role).trim().toLowerCase();
-    const role = ["system", "user", "assistant", "tool"].includes(roleRaw)
-      ? roleRaw
-      : "user";
-    const content = asText(m.content).trim();
+    const role = roleRaw === "environment"
+      ? "tool"
+      : ["system", "user", "assistant", "tool"].includes(roleRaw)
+        ? roleRaw
+        : "user";
+    let content = asText(m.content).trim();
+    if (!content && role === "assistant") {
+      content = assistantContentFallback(m).trim();
+    }
+    if (!content && role === "tool") {
+      content = asText(m.result ?? m.output ?? m.observation).trim();
+    }
     if (!content) continue;
     out.push({ role, content });
   }
@@ -119,6 +174,45 @@ function normalizeSkillInstallMode(mode) {
   const s = asString(mode).trim().toLowerCase();
   if (s === "store_only") return s;
   return "openclaw_mirror";
+}
+
+function normalizeRuntimeMode(mode) {
+  const s = asString(mode).trim().toLowerCase();
+  if (s === "embedded") return "embedded";
+  return "sidecar";
+}
+
+function normalizeEmbeddedModelMode(mode) {
+  const s = asString(mode).trim().toLowerCase();
+  if (s === "openclaw-runtime-subagent") return s;
+  if (s === "openclaw-config-resolve") return s;
+  if (s === "manual") return s;
+  return "openclaw-runtime";
+}
+
+function normalizeEmbeddedModelModes(input) {
+  const defaults = [
+    "openclaw-runtime",
+    "openclaw-runtime-subagent",
+    "openclaw-config-resolve",
+    "manual",
+  ];
+  const source = Array.isArray(input)
+    ? input
+    : asString(input)
+      .split(/[;,]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const picked = source.length ? source.map((x) => normalizeEmbeddedModelMode(x)) : defaults.slice();
+  const out = [];
+  const seen = new Set();
+  for (const item of picked) {
+    const key = asString(item).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out.length ? out : defaults;
 }
 
 function hasOwn(obj, key) {
@@ -424,6 +518,21 @@ function loadDotEnvFiles() {
   }
 }
 
+function defaultOpenClawHome(env) {
+  const explicit =
+    asString(env.AUTOSKILL_OPENCLAW_HOME || env.OPENCLAW_HOME || env.OPENCLAW_WORKSPACE || "").trim();
+  if (explicit) return explicit;
+  const home = asString(os.homedir?.() || "").trim();
+  if (home) return path.join(home, ".openclaw");
+  return path.resolve(".openclaw");
+}
+
+function resolvePathInput(input, fallback) {
+  const v = asString(input).trim() || asString(fallback).trim();
+  if (!v) return "";
+  return path.resolve(v);
+}
+
 function normalizeConfig(raw) {
   loadDotEnvFiles();
   const env = (typeof process !== "undefined" && process && process.env) ? process.env : {};
@@ -431,7 +540,23 @@ function normalizeConfig(raw) {
   const rawSkillCfg = rawCfg.skillRetrieval && typeof rawCfg.skillRetrieval === "object"
     ? rawCfg.skillRetrieval
     : {};
+  const rawEmbeddedCfg = rawCfg.embedded && typeof rawCfg.embedded === "object"
+    ? rawCfg.embedded
+    : {};
+  const rawEmbeddedModelCfg =
+    rawEmbeddedCfg.modelInvocation && typeof rawEmbeddedCfg.modelInvocation === "object"
+      ? rawEmbeddedCfg.modelInvocation
+      : {};
   const cfg = { ...DEFAULTS, ...rawCfg };
+  const envRuntimeMode = asString(env.AUTOSKILL_OPENCLAW_RUNTIME_MODE || "").trim();
+  const rawRuntimeMode = hasOwn(rawCfg, "runtimeMode")
+    ? asString(rawCfg.runtimeMode ?? "").trim() || undefined
+    : undefined;
+  const runtimeModeInput =
+    rawRuntimeMode ??
+    (envRuntimeMode || undefined) ??
+    (asBool(env.AUTOSKILL_OPENCLAW_NO_SIDECAR, false) ? "embedded" : "");
+  cfg.runtimeMode = normalizeRuntimeMode(runtimeModeInput || DEFAULTS.runtimeMode);
   cfg.baseUrl = asString(
     cfg.baseUrl || env.AUTOSKILL_BASE_URL || env.AUTOSKILL_PROXY_BASE_URL || DEFAULTS.baseUrl,
   )
@@ -471,18 +596,29 @@ function normalizeConfig(raw) {
     !rawSkillEnabledProvided &&
     !envSkillEnabled &&
     !rawRecallEnabledProvided;
+  const autoDisableRetrievalByEmbeddedRuntime =
+    cfg.runtimeMode === "embedded" &&
+    !rawSkillEnabledProvided &&
+    !envSkillEnabled &&
+    !rawRecallEnabledProvided;
   const autoEnableRetrievalByStoreOnly =
     cfg.skillInstallMode === "store_only" &&
+    !autoDisableRetrievalByEmbeddedRuntime &&
     !envSkillEnabled &&
     (
       (!rawSkillEnabledProvided && !rawRecallEnabledProvided) ||
       looksLikeLegacyMirrorDisabledRetrieval(rawCfg, rawSkillCfg)
     );
-  const defaultSkillRetrievalEnabled = autoDisableRetrievalByMirror
+  const defaultSkillRetrievalEnabled = (autoDisableRetrievalByMirror || autoDisableRetrievalByEmbeddedRuntime)
     ? false
     : autoEnableRetrievalByStoreOnly
       ? true
       : DEFAULTS.skillRetrieval.enabled;
+  const disableReason = autoDisableRetrievalByMirror
+    ? "openclaw_mirror_install_mode"
+    : autoDisableRetrievalByEmbeddedRuntime
+      ? "embedded_runtime_mode"
+      : "";
   const skillEnabledInput = autoEnableRetrievalByStoreOnly
     ? true
     : rawSkillCfg.enabled ?? (envSkillEnabled || (rawRecallEnabledProvided ? rawCfg.recallEnabled : defaultSkillRetrievalEnabled));
@@ -522,12 +658,109 @@ function normalizeConfig(raw) {
     injectionMode: normalizeInjectionMode(
       rawSkillCfg.injectionMode || envSkillInjectionMode || DEFAULTS.skillRetrieval.injectionMode,
     ),
-    disableReason: autoDisableRetrievalByMirror ? "openclaw_mirror_install_mode" : "",
+    disableReason,
   };
   cfg.recallEnabled = Boolean(cfg.skillRetrieval.enabled);
   cfg.topK = Number(cfg.skillRetrieval.topK);
   cfg.minScore = Number(cfg.skillRetrieval.minScore);
   cfg.maxInjectedChars = Number(cfg.skillRetrieval.maxChars);
+  const openclawHome = defaultOpenClawHome(env);
+  const defaultSkillBankDir =
+    asString(env.AUTOSKILL_SKILLBANK_DIR || "").trim() ||
+    (
+      asString(env.AUTOSKILL_REPO_DIR || "").trim()
+        ? path.join(asString(env.AUTOSKILL_REPO_DIR || "").trim(), "SkillBank")
+        : path.join(openclawHome, "autoskill", "SkillBank")
+    );
+  const defaultOpenclawSkillsDir =
+    asString(env.AUTOSKILL_OPENCLAW_SKILLS_DIR || env.OPENCLAW_SKILLS_DIR || "").trim() ||
+    path.join(openclawHome, "workspace", "skills");
+  const defaultSessionArchiveDir =
+    asString(env.AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR || "").trim() ||
+    path.join(openclawHome, "autoskill", "embedded_sessions");
+  const embeddedModelModesInput =
+    rawEmbeddedModelCfg.modes ??
+    rawEmbeddedCfg.modelModes ??
+    env.AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES ??
+    DEFAULTS.embedded.modelInvocation.modes;
+  cfg.embedded = {
+    sessionArchiveDir: resolvePathInput(
+      rawEmbeddedCfg.sessionArchiveDir || env.AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR,
+      defaultSessionArchiveDir,
+    ),
+    skillBankDir: resolvePathInput(
+      rawEmbeddedCfg.skillBankDir || env.AUTOSKILL_SKILLBANK_DIR || env.AUTOSKILL_REPO_SKILLBANK_DIR,
+      defaultSkillBankDir,
+    ),
+    openclawSkillsDir: resolvePathInput(
+      rawEmbeddedCfg.openclawSkillsDir || env.AUTOSKILL_OPENCLAW_SKILLS_DIR || env.OPENCLAW_SKILLS_DIR,
+      defaultOpenclawSkillsDir,
+    ),
+    bm25TopK: Math.max(
+      1,
+      Math.min(
+        20,
+        Number(
+          rawEmbeddedCfg.bm25TopK ?? env.AUTOSKILL_OPENCLAW_EMBEDDED_BM25_TOP_K ?? DEFAULTS.embedded.bm25TopK,
+        ) || DEFAULTS.embedded.bm25TopK,
+      ),
+    ),
+    modelInvocation: {
+      modes: normalizeEmbeddedModelModes(embeddedModelModesInput),
+      timeoutMs: Math.max(
+        1000,
+        Math.min(
+          120000,
+          Number(
+            rawEmbeddedModelCfg.timeoutMs ??
+              rawEmbeddedCfg.modelTimeoutMs ??
+              env.AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_TIMEOUT_MS ??
+              DEFAULTS.embedded.modelInvocation.timeoutMs,
+          ) || DEFAULTS.embedded.modelInvocation.timeoutMs,
+        ),
+      ),
+      retries: Math.max(
+        0,
+        Math.min(
+          3,
+          Number(
+            rawEmbeddedModelCfg.retries ??
+              rawEmbeddedCfg.modelRetries ??
+              env.AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_RETRIES ??
+              DEFAULTS.embedded.modelInvocation.retries,
+          ) || DEFAULTS.embedded.modelInvocation.retries,
+        ),
+      ),
+      openclawHome: resolvePathInput(
+        rawEmbeddedModelCfg.openclawHome ||
+          rawEmbeddedCfg.openclawHome ||
+          env.AUTOSKILL_OPENCLAW_EMBEDDED_OPENCLAW_HOME ||
+          env.OPENCLAW_HOME ||
+          env.OPENCLAW_WORKSPACE,
+        openclawHome,
+      ),
+      manualBaseUrl: asString(
+        rawEmbeddedModelCfg.manualBaseUrl ||
+          rawEmbeddedCfg.manualBaseUrl ||
+          env.AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_BASE_URL ||
+          "",
+      )
+        .trim()
+        .replace(/\/+$/, ""),
+      manualApiKey: asString(
+        rawEmbeddedModelCfg.manualApiKey ||
+          rawEmbeddedCfg.manualApiKey ||
+          env.AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_API_KEY ||
+          "",
+      ).trim(),
+      manualModel: asString(
+        rawEmbeddedModelCfg.manualModel ||
+          rawEmbeddedCfg.manualModel ||
+          env.AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_MODEL ||
+          "",
+      ).trim(),
+    },
+  };
   cfg.extractOnAgentEnd = asBool(
     extractOnAgentEndEnv ? extractOnAgentEndEnv : cfg.extractOnAgentEnd,
     DEFAULTS.extractOnAgentEnd,
@@ -823,6 +1056,230 @@ function buildSkillRetrievalPayload(cfg, event, ctx) {
   return body;
 }
 
+function normalizeRetrievalHit(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const sid = trimmed(entry.id || entry.skill?.id);
+  if (!sid) return null;
+  const score = Number(entry.score ?? entry.similarity ?? entry.relevance ?? 0);
+  return {
+    id: sid,
+    name: trimmed(entry.name || entry.skill?.name),
+    description: trimmed(entry.description || entry.skill?.description),
+    score: Number.isFinite(score) ? score : 0,
+  };
+}
+
+function buildRetrievalSnapshot(out, payload) {
+  const data = extractResultData(out);
+  const query = trimmed(
+    data?.search_query ||
+      data?.query ||
+      data?.original_query ||
+      data?.latest_user_query ||
+      payload?.query,
+  );
+  const selectedForContextIds = dedupStrings(
+    [
+      ...toArray(data?.selected_for_context_ids),
+      ...toArray(out?.selected_for_context_ids),
+    ],
+    64,
+  );
+  const selectedForUseIds = dedupStrings(
+    [
+      ...toArray(data?.selected_for_use_ids),
+      ...toArray(out?.selected_for_use_ids),
+    ],
+    64,
+  );
+  const hitBuckets = [
+    ...toArray(data?.hits),
+    ...toArray(data?.hits_user),
+    ...toArray(data?.hits_library),
+    ...toArray(out?.hits),
+    ...toArray(out?.hits_user),
+    ...toArray(out?.hits_library),
+  ];
+  const hits = [];
+  const seen = new Set();
+  for (const raw of hitBuckets) {
+    const hit = normalizeRetrievalHit(raw);
+    if (!hit) continue;
+    const key = hit.id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push(hit);
+    if (hits.length >= 12) break;
+  }
+  const selectedSkills = toArray(data?.selected_skills);
+  if ((!selectedForContextIds.length || !selectedForUseIds.length) && selectedSkills.length) {
+    const selectedIds = dedupStrings(
+      selectedSkills.map((item) => trimmed(item?.id)),
+      64,
+    );
+    if (!selectedForContextIds.length) {
+      selectedForContextIds.push(...selectedIds);
+    }
+    if (!selectedForUseIds.length) {
+      selectedForUseIds.push(...selectedIds);
+    }
+  }
+  const selectedContext = selectedForContextIds.length
+    ? selectedForContextIds
+    : dedupStrings(hits.map((item) => item.id), 64);
+  const selectedUse = selectedForUseIds.length ? selectedForUseIds : selectedContext;
+  if (!hits.length && !selectedContext.length) return null;
+  return {
+    query,
+    search_query: query,
+    original_query: query,
+    selected_for_context_ids: selectedContext,
+    selected_for_use_ids: selectedUse,
+    hits,
+    event_time: Number(data?.event_time ?? Date.now()) || Date.now(),
+  };
+}
+
+function createSessionRetrievalCache() {
+  const state = new Map();
+  const maxEntries = 4096;
+  const ttlMs = 6 * 60 * 60 * 1000;
+  const sessionKey = (sessionId, userId = "") => {
+    const sid = trimmed(sessionId).toLowerCase();
+    if (!sid) return "";
+    const uid = trimmed(userId).toLowerCase();
+    return `${uid}::${sid}`;
+  };
+  const cleanup = (now) => {
+    for (const [sid, item] of state.entries()) {
+      const ts = Number(item?.ts || 0);
+      if (!ts || now - ts > ttlMs) state.delete(sid);
+    }
+    if (state.size <= maxEntries) return;
+    const ordered = [...state.entries()].sort((a, b) => Number(a[1]?.ts || 0) - Number(b[1]?.ts || 0));
+    const overflow = state.size - maxEntries;
+    for (let i = 0; i < overflow; i += 1) {
+      state.delete(ordered[i][0]);
+    }
+  };
+  return {
+    remember(sessionId, snapshot, userId = "") {
+      const key = sessionKey(sessionId, userId);
+      if (!key || !snapshot || typeof snapshot !== "object") return;
+      const now = Date.now();
+      cleanup(now);
+      state.set(key, { snapshot: cloneJson(snapshot), ts: now });
+    },
+    consume(sessionId, userId = "") {
+      const key = sessionKey(sessionId, userId);
+      if (!key) return null;
+      const now = Date.now();
+      cleanup(now);
+      const item = state.get(key);
+      state.delete(key);
+      if (!item || typeof item !== "object") return null;
+      return cloneJson(item.snapshot);
+    },
+    clear(sessionId, userId = "") {
+      const key = sessionKey(sessionId, userId);
+      if (!key) return;
+      state.delete(key);
+    },
+  };
+}
+
+function collectSkillIdsFromAny(raw, output) {
+  if (raw == null) return;
+  if (Array.isArray(raw)) {
+    for (const item of raw) collectSkillIdsFromAny(item, output);
+    return;
+  }
+  let sid = "";
+  if (typeof raw === "string" || typeof raw === "number") {
+    sid = trimmed(raw);
+  } else if (raw && typeof raw === "object") {
+    sid = trimmed(raw.id || raw.skill_id || raw.skillId || raw.name);
+  }
+  if (!sid) return;
+  output.push(sid);
+}
+
+function extractUsedSkillIds(event, ctx) {
+  const raw = [];
+  const candidates = [
+    event?.used_skill_ids,
+    event?.usedSkillIds,
+    event?.skills_used,
+    event?.skillsUsed,
+    event?.usage?.used_skill_ids,
+    event?.usage?.usedSkillIds,
+    event?.result?.used_skill_ids,
+    event?.result?.usedSkillIds,
+    event?.result?.usage?.used_skill_ids,
+    event?.result?.usage?.usedSkillIds,
+    event?.metadata?.used_skill_ids,
+    event?.metadata?.usedSkillIds,
+    ctx?.used_skill_ids,
+    ctx?.usedSkillIds,
+    ctx?.usage?.used_skill_ids,
+    ctx?.usage?.usedSkillIds,
+    ctx?.metadata?.used_skill_ids,
+    ctx?.metadata?.usedSkillIds,
+  ];
+  for (const item of candidates) {
+    collectSkillIdsFromAny(item, raw);
+  }
+  return dedupStrings(raw, 64);
+}
+
+function extractInferredUsedSkillIds(event, ctx, retrieval) {
+  const raw = [];
+  const candidates = [
+    event?.inferred_used_skill_ids,
+    event?.inferredUsedSkillIds,
+    event?.selected_for_use_ids,
+    event?.selectedForUseIds,
+    event?.selected_for_context_ids,
+    event?.selectedForContextIds,
+    event?.selected_skills,
+    event?.selectedSkills,
+    event?.retrieval?.selected_for_use_ids,
+    event?.retrieval?.selectedForUseIds,
+    event?.retrieval?.selected_for_context_ids,
+    event?.retrieval?.selectedForContextIds,
+    event?.retrieval?.selected_skills,
+    event?.retrieval?.selectedSkills,
+    event?.result?.selected_for_use_ids,
+    event?.result?.selectedForUseIds,
+    event?.result?.selected_skills,
+    event?.result?.selectedSkills,
+    ctx?.inferred_used_skill_ids,
+    ctx?.inferredUsedSkillIds,
+    ctx?.selected_for_use_ids,
+    ctx?.selectedForUseIds,
+    ctx?.selected_for_context_ids,
+    ctx?.selectedForContextIds,
+    ctx?.selected_skills,
+    ctx?.selectedSkills,
+    ctx?.retrieval?.selected_for_use_ids,
+    ctx?.retrieval?.selectedForUseIds,
+    ctx?.retrieval?.selected_for_context_ids,
+    ctx?.retrieval?.selectedForContextIds,
+    ctx?.retrieval?.selected_skills,
+    ctx?.retrieval?.selectedSkills,
+    retrieval?.selected_for_use_ids,
+    retrieval?.selectedForUseIds,
+    retrieval?.selected_for_context_ids,
+    retrieval?.selectedForContextIds,
+    retrieval?.selected_skills,
+    retrieval?.selectedSkills,
+  ];
+  for (const item of candidates) {
+    collectSkillIdsFromAny(item, raw);
+  }
+  return dedupStrings(raw, 64);
+}
+
 function buildInjectionResult(cfg, text) {
   const content = trimmed(text);
   if (!content) return;
@@ -834,6 +1291,7 @@ function buildInjectionResult(cfg, text) {
 
 function createBeforePromptBuildHandler(cfg, log, deps = {}) {
   const requestFn = typeof deps.postJson === "function" ? deps.postJson : postJson;
+  const onRetrieval = typeof deps.onRetrieval === "function" ? deps.onRetrieval : null;
   return async (event, ctx) => {
     if (log?.info) log.info(`[${PLUGIN_ID}] before_prompt_build invoked`);
     if (!cfg.skillRetrieval.enabled) {
@@ -841,6 +1299,8 @@ function createBeforePromptBuildHandler(cfg, log, deps = {}) {
         const reason = asString(cfg.skillRetrieval.disableReason).trim();
         if (reason === "openclaw_mirror_install_mode") {
           log.info(`[${PLUGIN_ID}] retrieval disabled by openclaw_mirror install mode`);
+        } else if (reason === "embedded_runtime_mode") {
+          log.info(`[${PLUGIN_ID}] retrieval disabled by embedded runtime mode`);
         } else {
           log.info(`[${PLUGIN_ID}] retrieval disabled`);
         }
@@ -859,6 +1319,12 @@ function createBeforePromptBuildHandler(cfg, log, deps = {}) {
         payload,
         log,
       );
+      if (onRetrieval && payload?.session_id) {
+        const snapshot = buildRetrievalSnapshot(out, payload);
+        if (snapshot) {
+          onRetrieval(payload.session_id, snapshot, payload.user);
+        }
+      }
       const block = buildSkillInjectionBlock(out, cfg);
       if (!block.text) {
         if (log?.info) log.info(`[${PLUGIN_ID}] retrieval no result`);
@@ -879,7 +1345,7 @@ function createBeforePromptBuildHandler(cfg, log, deps = {}) {
   };
 }
 
-function buildEndPayload(cfg, event, ctx) {
+function buildEndPayload(cfg, event, ctx, extras = {}) {
   const messages = pickMessages(event, ctx);
   if (!messages.length) return null;
   const { hasSignal, value } = resolveSuccess(event);
@@ -890,6 +1356,9 @@ function buildEndPayload(cfg, event, ctx) {
   const channel = trimmed(
     event?.channel || event?.channelId || event?.channel_id || ctx?.channel || ctx?.channelId || ctx?.channel_id,
   );
+  const retrieval = extras && typeof extras.retrieval === "object" ? extras.retrieval : null;
+  const usedSkillIds = Array.isArray(extras?.usedSkillIds) ? extras.usedSkillIds : [];
+  const inferredUsedSkillIds = Array.isArray(extras?.inferredUsedSkillIds) ? extras.inferredUsedSkillIds : [];
   return {
     messages,
     user: resolveUserId(cfg, event, ctx),
@@ -901,6 +1370,9 @@ function buildEndPayload(cfg, event, ctx) {
     ...(turnType ? { turn_type: turnType } : {}),
     ...(sessionDone !== undefined ? { session_done: sessionDone } : {}),
     ...(channel ? { channel } : {}),
+    ...(retrieval ? { retrieval } : {}),
+    ...(usedSkillIds.length ? { used_skill_ids: dedupStrings(usedSkillIds, 64) } : {}),
+    ...(inferredUsedSkillIds.length ? { inferred_used_skill_ids: dedupStrings(inferredUsedSkillIds, 64) } : {}),
   };
 }
 
@@ -930,6 +1402,67 @@ function resolveSuccess(event) {
   return { hasSignal: false, value: true };
 }
 
+function createAgentEndHandler(cfg, log, deps = {}) {
+  const requestFn = typeof deps.postJson === "function" ? deps.postJson : postJson;
+  const embeddedProcessor = deps.embeddedProcessor;
+  const consumeRetrieval = typeof deps.consumeRetrieval === "function" ? deps.consumeRetrieval : null;
+  const clearRetrieval = typeof deps.clearRetrieval === "function" ? deps.clearRetrieval : null;
+  return async (event, ctx) => {
+    if (!cfg.extractOnAgentEnd) return;
+    const status = resolveSuccess(event);
+    if (cfg.successOnly && status.hasSignal && !status.value) return;
+    const sessionIdHint = resolveSessionId(event, ctx, pickMessages(event, ctx));
+    const payloadUser = resolveUserId(cfg, event, ctx);
+    const retrieved = sessionIdHint && consumeRetrieval ? consumeRetrieval(sessionIdHint, payloadUser) : null;
+    const usedSkillIds = extractUsedSkillIds(event, ctx);
+    const inferredUsedSkillIdsRaw = extractInferredUsedSkillIds(event, ctx, retrieved);
+    const usedSet = new Set(usedSkillIds.map((id) => asString(id).trim().toLowerCase()).filter(Boolean));
+    const inferredUsedSkillIds = inferredUsedSkillIdsRaw.filter(
+      (id) => !usedSet.has(asString(id).trim().toLowerCase()),
+    );
+    const payload = buildEndPayload(cfg, event, ctx, {
+      retrieval: retrieved,
+      usedSkillIds,
+      inferredUsedSkillIds,
+    });
+    if (!payload) return;
+    if (payload.session_done && payload.session_id && clearRetrieval) {
+      clearRetrieval(payload.session_id, payload.user);
+    }
+    if (cfg.logPayload && log?.info) {
+      log.info(`[${PLUGIN_ID}] agent_end payload user=${payload.user} success=${payload.success}`);
+    }
+    if (cfg.runtimeMode === "embedded") {
+      if (!embeddedProcessor || typeof embeddedProcessor.handle !== "function") {
+        if (log?.warn) {
+          log.warn(`[${PLUGIN_ID}] embedded runtime enabled but embedded processor is unavailable`);
+        }
+        return;
+      }
+      try {
+        const out = await embeddedProcessor.handle(payload, event, ctx);
+        if (log?.info && out && typeof out === "object") {
+          const statusText = asString(out.status).trim() || "unknown";
+          const reasonText = asString(out.reason).trim();
+          log.info(
+            `[${PLUGIN_ID}] embedded agent_end status=${statusText}${reasonText ? ` reason=${reasonText}` : ""}`,
+          );
+        }
+      } catch (err) {
+        if (log?.warn) {
+          log.warn(`[${PLUGIN_ID}] embedded agent_end failed: ${String(err)}`);
+        }
+      }
+      return;
+    }
+    try {
+      await requestFn(cfg, "/autoskill/openclaw/hooks/agent_end", payload, log);
+    } catch (_) {
+      return;
+    }
+  };
+}
+
 function registerLifecycleHook(api, hookName, handler, meta) {
   if (api && typeof api.registerHook === "function") {
     api.registerHook(hookName, handler, meta || {});
@@ -950,11 +1483,18 @@ export default {
   register(api) {
     const cfg = normalizeConfig(api.pluginConfig);
     const log = api.logger ?? console;
+    const embeddedProcessor =
+      cfg.runtimeMode === "embedded" ? createEmbeddedProcessor(cfg, api, log) : null;
+    const retrievalCache = createSessionRetrievalCache();
 
     registerLifecycleHook(
       api,
       "before_prompt_build",
-      createBeforePromptBuildHandler(cfg, log),
+      createBeforePromptBuildHandler(cfg, log, {
+        onRetrieval(sessionId, snapshot, userId) {
+          retrievalCache.remember(sessionId, snapshot, userId);
+        },
+      }),
       {
         name: `${PLUGIN_ID}.before-prompt-build`,
         description: "AutoSkill recall hook: retrieve and append concise skill hints before prompt build.",
@@ -964,21 +1504,15 @@ export default {
     registerLifecycleHook(
       api,
       "agent_end",
-      async (event, ctx) => {
-      if (!cfg.extractOnAgentEnd) return;
-      const status = resolveSuccess(event);
-      if (cfg.successOnly && status.hasSignal && !status.value) return;
-      const payload = buildEndPayload(cfg, event, ctx);
-      if (!payload) return;
-      if (cfg.logPayload && log?.info) {
-        log.info(`[${PLUGIN_ID}] agent_end payload user=${payload.user} success=${payload.success}`);
-      }
-      try {
-        await postJson(cfg, "/autoskill/openclaw/hooks/agent_end", payload, log);
-      } catch (_) {
-        return;
-      }
-      },
+      createAgentEndHandler(cfg, log, {
+        embeddedProcessor,
+        consumeRetrieval(sessionId, userId) {
+          return retrievalCache.consume(sessionId, userId);
+        },
+        clearRetrieval(sessionId, userId) {
+          retrievalCache.clear(sessionId, userId);
+        },
+      }),
       {
         name: `${PLUGIN_ID}.agent-end`,
         description: "AutoSkill evolution hook: schedule background extraction after run.",
@@ -994,9 +1528,11 @@ export {
   buildSkillRetrievalPayload,
   clampInjectedContext,
   createBeforePromptBuildHandler,
+  createAgentEndHandler,
   extractSelectedSkills,
   normalizeConfig,
   normalizeInjectionMode,
   pickMessages,
   buildEndPayload,
+  createSessionRetrievalCache,
 };

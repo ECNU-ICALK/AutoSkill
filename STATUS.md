@@ -1,0 +1,700 @@
+# STATUS
+
+## 2026-03-13 - Round 1
+
+### Scope
+- Target area: `OpenClaw-Plugin/adapter` embedded runtime behavior consistency.
+- Objective: make embedded runtime respect `openclawSkillInstallMode` (`openclaw_mirror` vs `store_only`) and verify with tests.
+
+### Completed
+- Baseline audit completed before coding:
+  - Read core docs/config: `README.md`, `OpenClaw-Plugin/README.md`, `pyproject.toml`, `OpenClaw-Plugin/adapter/package.json`, plugin adapter source and tests.
+  - Confirmed no root `Prompt.md` / `STATUS.md` existed.
+  - Confirmed no CI workflow file in `.github/workflows/`.
+- Implemented behavior fix in `OpenClaw-Plugin/adapter/embedded_runtime.js`:
+  - Added `isMirrorInstallEnabled(cfg)`.
+  - `skillInstallMode=store_only` now skips mirror copy to OpenClaw skills dir.
+  - `skillInstallMode=openclaw_mirror` keeps existing mirror behavior.
+  - Added structured result fields for observability when mirror is skipped:
+    - `mirror_skipped: true`
+    - `mirror_reason: "install_mode_store_only"`
+- Added regression test in `OpenClaw-Plugin/adapter/embedded_runtime.test.mjs`:
+  - `store_only` mode writes skill into AutoSkill SkillBank but does not mirror into OpenClaw skills dir.
+
+### Validation
+- Executed:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+- Result:
+  - `24 passed, 0 failed`.
+
+### Failed Attempts
+- None in this round.
+
+### Self-Review Notes
+- Regression risk: low, change is gated by explicit install mode check.
+- Backward compatibility:
+  - default/unknown mode still behaves as mirror-enabled (`openclaw_mirror` semantics).
+- Side effects:
+  - no changes to `before_prompt_build`, memory hooks, provider hooks, or OpenClaw core paths.
+
+### Remaining Issues / Risks
+- Embedded mode env alias (`AUTOSKILL_OPENCLAW_NO_SIDECAR=1`) behavior is implemented but lacks explicit regression test.
+- `embedded_runtime.js` and `embedded_runtime.test.mjs` are currently untracked files in git state and need final add/commit handling with related changes.
+- Repository contains many unrelated modified files outside this scope; must avoid touching/reverting them.
+
+### Next Step
+- Round 2 (minimal increment):
+  - Add config regression tests for no-sidecar env alias and install mode interplay.
+  - Re-run adapter tests.
+  - Update this `STATUS.md` with results.
+
+## 2026-03-13 - Round 2
+
+### Scope
+- Target area: `OpenClaw-Plugin/adapter` config fallback correctness.
+- Objective: lock down no-sidecar env alias behavior and prevent silent mode fallback mistakes.
+
+### Completed
+- Added config regression tests in `OpenClaw-Plugin/adapter/index.test.mjs`:
+  - `AUTOSKILL_OPENCLAW_NO_SIDECAR=1` enables `runtimeMode=embedded` when runtime mode is otherwise unset.
+  - Explicit `runtimeMode=sidecar` keeps sidecar mode even when no-sidecar alias is set.
+- Fixed `normalizeConfig` in `OpenClaw-Plugin/adapter/index.js`:
+  - Treat empty `AUTOSKILL_OPENCLAW_RUNTIME_MODE` as unset.
+  - Prevent empty-string env from overriding `AUTOSKILL_OPENCLAW_NO_SIDECAR=1`.
+
+### Validation
+- Executed:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+- Result:
+  - `26 passed, 0 failed`.
+
+### Failed Attempts
+- Initial test run failed (`25 passed, 1 failed`):
+  - Failure: no-sidecar alias test expected `embedded` but got `sidecar`.
+  - Root cause: `AUTOSKILL_OPENCLAW_RUNTIME_MODE=""` still participated in nullish-coalescing chain.
+  - Resolution: normalize env runtime mode with trim and ignore empty string.
+
+### Self-Review Notes
+- Change is localized to config normalization logic; runtime behavior unchanged for explicit `runtimeMode`.
+- Existing sidecar defaults remain intact.
+- Added tests cover both positive and precedence path.
+
+### Remaining Issues / Risks
+- Adapter-related files `embedded_runtime.js` and `embedded_runtime.test.mjs` are still untracked in git state; needs explicit add/commit in integration step.
+- Repository still contains many unrelated modified files; final merge should scope to plugin-specific paths only.
+
+### Next Step
+- Round 3 (integration finish line):
+  - Final consistency pass on plugin docs vs config schema.
+  - Optional: add one README note for `AUTOSKILL_OPENCLAW_NO_SIDECAR=1` alias.
+  - Prepare scoped commit set for OpenClaw plugin paths only.
+
+## 2026-03-13 - Round 3
+
+### Scope
+- Target area: plugin docs/config consistency.
+- Objective: make no-sidecar alias behavior discoverable and consistent with implemented precedence.
+
+### Completed
+- Updated docs:
+  - `OpenClaw-Plugin/README.md`
+  - `OpenClaw-Plugin/README.zh-CN.md`
+- Added explicit mention:
+  - `AUTOSKILL_OPENCLAW_NO_SIDECAR=1` as convenience alias.
+  - precedence rule: explicit `runtimeMode` overrides alias.
+
+### Validation
+- Executed:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+- Result:
+  - `26 passed, 0 failed`.
+
+### Failed Attempts
+- None in this round.
+
+### Self-Review Notes
+- Docs now match actual `normalizeConfig` precedence logic.
+- No code-path changes in runtime behavior this round (documentation-only change + regression run).
+
+### Remaining Issues / Risks
+- Functional work for sidecar/embedded dual path is in place and validated at adapter test level.
+- Remaining integration work is operational, not code correctness:
+  - stage and commit only plugin-scoped files in a dirty worktree.
+  - optional end-to-end validation in a real OpenClaw runtime environment.
+
+### Completion Assessment
+- Adapter-level feature target is **verifiably complete**:
+  - no-sidecar embedded option available
+  - BM25 maintenance retrieval in embedded path
+  - session-closed extraction gating with successful `main` requirement
+  - install mode semantics aligned (`store_only` no mirror, `openclaw_mirror` mirror)
+  - regression tests passing
+  - STATUS tracking in place
+
+## 2026-03-13 - Round 4 (self-optimization)
+
+### Scope
+- Target area: embedded runtime + retrieval interaction.
+- Objective: remove hidden default misbehavior where embedded mode could trigger sidecar-only retrieval calls.
+
+### Issue Found (with evidence)
+- In `normalizeConfig`, `store_only` previously auto-enabled `skillRetrieval`.
+- In `runtimeMode=embedded` (no sidecar), `before_prompt_build` retrieval still tried calling sidecar hook endpoint.
+- Impact:
+  - unnecessary outbound calls and warning noise each turn
+  - misleading runtime behavior in no-sidecar deployments
+
+### Fix Applied
+- In `OpenClaw-Plugin/adapter/index.js`:
+  - added `autoDisableRetrievalByEmbeddedRuntime` default gate
+  - `embedded` mode now disables retrieval by default unless explicitly enabled by config/env
+  - added explicit disable reason: `embedded_runtime_mode`
+  - improved log branch: `retrieval disabled by embedded runtime mode`
+  - made `runtimeMode` empty string in config treated as unset (so no-sidecar alias still works)
+- In docs:
+  - updated embedded mode notes in `OpenClaw-Plugin/README.md` and `OpenClaw-Plugin/README.zh-CN.md` to state retrieval default-off in embedded mode.
+
+### Test Coverage Added
+- `OpenClaw-Plugin/adapter/index.test.mjs`:
+  - embedded mode default disables retrieval
+  - embedded mode explicit retrieval opt-in still works
+  - empty `runtimeMode` config still honors no-sidecar alias
+  - `before_prompt_build` in embedded default mode does not call external retrieval and logs expected disable reason
+
+### Validation
+- Executed:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+- Result:
+  - `30 passed, 0 failed`.
+
+### Failed Attempts
+- None in this round.
+
+### Self-Review Notes
+- Risk/benefit:
+  - high benefit: prevents silent per-turn misbehavior in no-sidecar default path
+  - low risk: explicit retrieval opt-in remains available and tested
+- Backward compatibility:
+  - sidecar runtime defaults unchanged
+  - openclaw_mirror retrieval-disable behavior unchanged
+
+### Remaining Suggestions (not executed yet)
+- Structural option: if product later requires `embedded + store_only + retrieval`, add local retrieval implementation in adapter (instead of sidecar HTTP hook dependency).
+- Operational: final commit should include only plugin-scoped files due dirty worktree.
+
+## 2026-03-13 - Round 5 (agent-trajectory robustness + prompt/path review)
+
+### Scope
+- Target area: agent trajectory ingestion robustness and OpenClaw skill artifact compatibility.
+- Objective: reduce silent data loss during extraction/maintenance for tool-heavy agent sessions and improve generated SKILL.md safety.
+
+### Issues Found (with evidence)
+- Adapter dropped assistant turns when content was empty but `tool_calls` existed:
+  - previous `normalizeMessages` only consumed `message.content`.
+  - impact: tool-heavy trajectories could lose assistant evidence before `agent_end` extraction.
+- Adapter mapped unknown roles to `user`, including `environment`:
+  - impact: environment observations could be mislabeled as user intent.
+- Embedded SKILL.md frontmatter did not sanitize newlines:
+  - fields like `name/description/tags/triggers` could contain multiline LLM output and break frontmatter stability/parsing.
+
+### Fixes Applied
+- `OpenClaw-Plugin/adapter/index.js`
+  - added assistant fallback serialization for `tool_calls/function_call/refusal/audio/annotations`.
+  - mapped `environment` role to `tool` (instead of coercing to `user`).
+  - added tool fallback content extraction from `result/output/observation`.
+- `OpenClaw-Plugin/adapter/embedded_runtime.js`
+  - added `oneLineYamlValue(...)` sanitizer.
+  - frontmatter fields now force single-line safe values.
+  - tags/triggers are normalized to one-line entries before rendering.
+
+### Tests Added
+- `OpenClaw-Plugin/adapter/index.test.mjs`
+  - `buildEndPayload preserves assistant tool-call messages and maps environment to tool`.
+- `OpenClaw-Plugin/adapter/embedded_runtime.test.mjs`
+  - `embedded runtime writes single-line frontmatter-safe metadata for generated SKILL.md`.
+
+### Validation
+- Executed:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `32 passed, 0 failed`
+- Prompt-profile sanity check:
+  - `python3 OpenClaw-Plugin/tests/test_agentic_prompt_profile.py`
+  - result: `Ran 4 tests, OK`
+- Note:
+  - `python3 -m pytest ...` unavailable in current environment (`No module named pytest`), so fallback used direct unittest script execution.
+
+### Prompt/Profile Review Summary
+- Sidecar path (`OpenClaw-Plugin/agentic_prompt_profile.py`) prompt set is relatively complete for agent trajectories:
+  - extraction prompt includes evidence hierarchy, boundary/recency rules, de-identification, optional `scripts/references/assets`.
+  - maintenance decision prompt has add/merge/discard policy with trajectory-specific guidance.
+  - merge prompt enforces concise executable prompt + no examples metadata expansion.
+- Embedded path (`OpenClaw-Plugin/adapter/embedded_runtime.js`) prompt set is currently much lighter:
+  - works as minimal no-sidecar baseline.
+  - lacks many sidecar-level guardrails (boundary detection, explicit provenance constraints, richer anti-oneoff criteria).
+
+### Remaining Risks / Suggestions
+- Structural (recorded, not executed in this round):
+  - If embedded mode must match sidecar quality, either:
+    - port a compact subset of `agentic_prompt_profile` rules into embedded prompts, or
+    - expose a shared prompt profile package used by both Python and JS paths.
+- OpenClaw integration operational checks:
+  - ensure runtime/plugin config allows prompt augmentation when using `store_only` (`before_prompt_build` path).
+  - in `openclaw_mirror` mode this is intentionally less critical since retrieval/invocation is delegated to OpenClaw native skill loading.
+
+## 2026-03-13 - Round 6 (usage counters + safe pruning path)
+
+### Scope
+- Target area: OpenClaw plugin usage observability and stale-skill governance.
+- Objective: add low-risk retrieval/usage counters (aligned with AutoSkill core counter model) without affecting OpenClaw main flow.
+
+### Why this round
+- User requirement: track skill retrieval/usage counts and support eventual stale-skill cleanup.
+- Constraint: OpenClaw native `openclaw_mirror` retrieval/use path must remain untouched; tracking errors must never impact runtime behavior.
+
+### Completed
+- Added plugin-local usage tracker module:
+  - `OpenClaw-Plugin/openclaw_usage_tracking.py`
+  - best-effort counters via store `record_skill_usage_judgments` / `get_skill_usage_stats`
+  - in-memory session retrieval cache with TTL/size limits
+  - default-safe pruning OFF (`prune_enabled=false`)
+- Integrated tracker into OpenClaw service runtime:
+  - `OpenClaw-Plugin/service_runtime.py`
+  - `before_agent_start` remembers retrieval snapshots by `user_id + session_id`
+  - `agent_end` records counters using explicit retrieval payload (preferred) or cached snapshot fallback
+  - extraction chain remains unchanged; usage-tracking failures are swallowed/logged
+  - when usage-based prune deletes skills, mirror sync is triggered (if mirror mode enabled)
+  - added API endpoint:
+    - `POST /v1/autoskill/openclaw/usage/stats`
+  - exposed in capabilities/openapi
+- Added adapter-side pass-through for usage signals:
+  - `OpenClaw-Plugin/adapter/index.js`
+  - caches retrieval snapshot from `before_prompt_build` response per session
+  - forwards retrieval snapshot on `agent_end` payload
+  - forwards explicit `used_skill_ids` when present in event/context payload
+  - all logic is additive and does not modify messages/system prompt replacement behavior
+- Added runtime/config/env wiring:
+  - `OpenClaw-Plugin/run_proxy.py`
+  - `OpenClaw-Plugin/install.py`
+  - new env knobs:
+    - `AUTOSKILL_OPENCLAW_USAGE_TRACKING_ENABLED`
+    - `AUTOSKILL_OPENCLAW_USAGE_PRUNE_ENABLED`
+    - `AUTOSKILL_OPENCLAW_USAGE_PRUNE_MIN_RETRIEVED`
+    - `AUTOSKILL_OPENCLAW_USAGE_PRUNE_MAX_USED`
+    - `AUTOSKILL_OPENCLAW_USAGE_MAX_HITS_PER_TURN`
+    - `AUTOSKILL_OPENCLAW_USAGE_MAX_PENDING_SESSIONS`
+    - `AUTOSKILL_OPENCLAW_USAGE_PENDING_TTL_S`
+- Documentation updated:
+  - `OpenClaw-Plugin/README.md`
+  - `OpenClaw-Plugin/README.zh-CN.md`
+  - added “Skill Usage Counters / 技能使用计数” section with safe defaults and stats endpoint.
+
+### Validation
+- JS adapter tests:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `33 passed, 0 failed`
+- Python plugin tests:
+  - `python3 OpenClaw-Plugin/tests/test_usage_tracking.py`
+  - `python3 OpenClaw-Plugin/tests/test_service_runtime.py`
+  - `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'`
+  - result: all passing (`33` plugin Python tests total)
+
+### Tests added/updated
+- Added:
+  - `OpenClaw-Plugin/tests/test_usage_tracking.py`
+- Updated:
+  - `OpenClaw-Plugin/tests/test_service_runtime.py`
+  - `OpenClaw-Plugin/adapter/index.test.mjs`
+
+### Risk assessment
+- Low runtime risk:
+  - usage tracking is best-effort and isolated from extraction/main request success path.
+  - defaults keep auto-prune disabled.
+- Known limitation:
+  - in `openclaw_mirror` mode, if OpenClaw does not emit explicit used-skill signals, `used` counts are sparse.
+  - retrieval counters are strongest in `store_only` + `before_prompt_build` path where retrieval snapshots are observable.
+
+### Next optimization candidates
+- Add optional “mirror-mode estimation” strategy (disabled by default) to infer usage from session replay + retrieval replay, with conservative confidence gating.
+- Add lightweight usage trend endpoint (top retrieved / never used / recently used) for ops dashboards.
+
+## 2026-03-13 - Round 7 (prune safety hardening + re-validation)
+
+### Scope
+- Target area: usage-based auto-pruning safety.
+- Objective: prevent accidental skill pruning when runtime does not provide explicit used-skill signals.
+
+### Issue Found
+- Even with conservative defaults, if users manually enable prune in environments that do not reliably emit `used_skill_ids`, stale-skill pruning can become over-aggressive.
+
+### Fix Applied
+- Added hard safety gate in usage tracker:
+  - `prune_require_explicit_used_signal` (default `true`).
+  - when enabled, prune thresholds are suppressed (`0`) unless current payload includes explicit `used_skill_ids`.
+- Wiring updates:
+  - `OpenClaw-Plugin/openclaw_usage_tracking.py`
+  - `OpenClaw-Plugin/run_proxy.py`
+  - `OpenClaw-Plugin/install.py`
+- Docs updated (EN/ZH) with explicit safety behavior and env var:
+  - `AUTOSKILL_OPENCLAW_USAGE_PRUNE_REQUIRE_EXPLICIT_USED_SIGNAL=1`
+
+### Tests Added/Updated
+- `OpenClaw-Plugin/tests/test_usage_tracking.py`
+  - added prune gate regression (no used signal => prune disabled; with signal => prune enabled).
+- `OpenClaw-Plugin/tests/test_run_proxy_defaults.py`
+  - added default assertion for `openclaw_usage_prune_require_explicit_used_signal=1`.
+
+### Validation
+- `python3 OpenClaw-Plugin/tests/test_usage_tracking.py` (pass)
+- `python3 OpenClaw-Plugin/tests/test_run_proxy_defaults.py` (pass)
+- `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'` (pass, 34 tests)
+- `cd OpenClaw-Plugin/adapter && npm test` (pass, 33 tests)
+
+### Residual Risks
+- In strict `openclaw_mirror` black-box usage flow, `used` counters still depend on upstream signal availability.
+- This round intentionally favors false-negatives (do not prune) over false-positives (wrong prune), to keep runtime safety first.
+
+## 2026-03-13 - Round 8 (streaming header correctness + cache isolation hardening)
+
+### Scope
+- Target area:
+  - main-turn proxy stream forwarding robustness
+  - adapter retrieval cache session isolation
+- Objective:
+  - prevent malformed stream response headers
+  - avoid cross-user retrieval snapshot contamination when `session_id` collides
+
+### Issues Found
+- `openclaw_main_turn_proxy._copy_headers_to_client` could emit `Content-Length: 0` for stream forwarding when upstream carried `Content-Length`.
+  - Risk: some clients may prematurely treat stream body as empty.
+- Adapter retrieval cache keyed only by `session_id`.
+  - Risk: multi-user deployments with same `session_id` can mix retrieval snapshots, affecting usage accounting quality.
+
+### Fixes Applied
+- `OpenClaw-Plugin/openclaw_main_turn_proxy.py`
+  - stream/header fix: do not synthesize `Content-Length: 0` when `content_length` is unknown (`None`).
+  - keep explicit `Content-Length` only for non-stream path where body size is known.
+- `OpenClaw-Plugin/adapter/index.js`
+  - retrieval cache key changed to `user_id + session_id` (case-normalized).
+  - threaded user key through `onRetrieval / consumeRetrieval / clearRetrieval` flow.
+  - backward compatibility preserved for paths that do not provide user id.
+
+### Tests Added/Updated
+- `OpenClaw-Plugin/tests/test_main_turn_proxy.py`
+  - added regression: stream response header copy must not contain forced `content-length`.
+- `OpenClaw-Plugin/adapter/index.test.mjs`
+  - added retrieval cache isolation test (`same session_id`, different users).
+  - added backward compatibility test for missing user id cache flow.
+
+### Validation
+- Python:
+  - `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'`
+  - result: `35 passed, 0 failed`
+- Adapter:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `35 passed, 0 failed`
+
+### Residual Risks / Next Candidates
+- Main-turn proxy currently logs extensively in tests/runtime; consider adding opt-in structured log levels if noise becomes operationally expensive.
+- End-to-end live OpenClaw runtime verification (real gateway + real model stream edge cases) is still recommended before production rollout.
+
+## 2026-03-13 - Round 9 (hard dedupe + session timeout closure + verification scripts)
+
+### Scope
+- Target area:
+  - cross-trigger extraction dedupe (`main-turn` vs `agent_end`)
+  - optional session idle-timeout closure for `agent_end` fallback extraction
+  - runnable acceptance scripts for sidecar/embedded paths
+- Objective:
+  - reduce duplicate extraction/maintenance updates under mixed trigger configs
+  - close stale sessions safely when `session_done` is missing
+  - provide repeatable validation entrypoints for operators
+
+### Issues Addressed
+- Duplicate extraction risk remained when users explicitly enabled both:
+  - `AUTOSKILL_OPENCLAW_MAIN_TURN_EXTRACT=1`
+  - `AUTOSKILL_OPENCLAW_AGENT_END_EXTRACT=1`
+- Session close fallback previously depended only on:
+  - `session_done=true` or
+  - `session_id` change
+  - which can delay extraction if callers omit explicit close signal.
+
+### Fixes Applied
+- `OpenClaw-Plugin/service_runtime.py`
+  - added hard dedupe check:
+    - `agent_end` session-close fallback now skips sessions that already have non-failed `openclaw_main_turn_proxy` extraction events.
+  - added window-level dedupe registry for OpenClaw extraction scheduling:
+    - builds/uses `dedupe_key` for `openclaw_main_turn_proxy` and `openclaw_agent_end_session_end`.
+    - duplicate windows emit `status=skipped` extraction events instead of running duplicate jobs.
+  - integrated archive idle sweep before `append_session_record`:
+    - stale active sessions can be closed and extracted on next hook arrival.
+- `OpenClaw-Plugin/openclaw_conversation_archive.py`
+  - added config:
+    - `session_idle_timeout_seconds` (default `0`, disabled)
+  - tracks active-session touch timestamps.
+  - added `sweep_inactive_sessions(user_id=...)` API.
+  - keeps ended-session outputs deduplicated.
+- config/install wiring:
+  - `OpenClaw-Plugin/run_proxy.py`
+    - new CLI/env:
+      - `--openclaw-session-idle-timeout-s`
+      - `AUTOSKILL_OPENCLAW_SESSION_IDLE_TIMEOUT_S`
+  - `OpenClaw-Plugin/install.py`
+    - writes `AUTOSKILL_OPENCLAW_SESSION_IDLE_TIMEOUT_S=0` into generated `.env`.
+- verification scripts added:
+  - `OpenClaw-Plugin/scripts/verify_sidecar.sh`
+  - `OpenClaw-Plugin/scripts/verify_embedded.sh`
+- docs updated:
+  - `OpenClaw-Plugin/README.md`
+  - `OpenClaw-Plugin/README.zh-CN.md`
+
+### Tests Added/Updated
+- added:
+  - `OpenClaw-Plugin/tests/test_conversation_archive.py`
+    - idle-timeout disabled no-op
+    - idle-timeout closes active session
+- updated:
+  - `OpenClaw-Plugin/tests/test_service_runtime.py`
+    - agent_end dedupe skip when main-turn extraction already exists
+    - idle-timeout closure triggers session-end extraction scheduling
+    - window-level dedupe skips duplicate scheduling
+  - `OpenClaw-Plugin/tests/test_run_proxy_defaults.py`
+    - default assertion for `openclaw_session_idle_timeout_s == 0`
+
+### Validation
+- Python tests:
+  - `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'`
+  - result: `40 passed, 0 failed`
+- Adapter tests:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `35 passed, 0 failed`
+- Embedded verification script:
+  - `bash OpenClaw-Plugin/scripts/verify_embedded.sh`
+  - result: pass (embedded + adapter test flows)
+
+### Failed Attempts / Corrections
+- Initial idle-timeout archive test used touch timestamp `0`, which is treated as invalid/no-touch by implementation.
+- Corrected tests to use a minimal positive stale timestamp (`1`) and strengthened runtime timeout path assertion.
+
+### Residual Risks / Next Candidates
+- Sidecar verification script requires a running local sidecar service and real endpoint reachability; not executed in this round.
+- If operators use very short idle-timeout values, sessions may be closed too aggressively in bursty workloads; recommended to keep timeout disabled (`0`) unless explicitly needed.
+
+## 2026-03-13 - Round 10 (embedded invocation multi-fallback chain)
+
+### Scope
+- Target area: `OpenClaw-Plugin/adapter` embedded extraction/maintenance model invocation.
+- Objective: when runtime reflection cannot call model successfully, add full fallback chain:
+  - `openclaw-runtime` (direct invoke + runtime target resolve)
+  - `openclaw-runtime-subagent`
+  - `openclaw-config-resolve`
+  - `manual`
+
+### Why this round
+- User required a no-sidecar embedded path that does not depend on manual model config by default, but still has deterministic fallback behavior when runtime APIs are not available.
+
+### Fixes Applied
+- `OpenClaw-Plugin/adapter/embedded_runtime.js`
+  - replaced single-path runtime invoke with multi-mode invocation chain.
+  - added `openclaw-runtime` dual behavior:
+    - try runtime direct model invoker functions first
+    - if failed, resolve `base_url/api_key/model` from runtime object and call OpenAI-compatible chat endpoint.
+  - added `openclaw-runtime-subagent` mode:
+    - probes runtime subagent/internal reasoning methods (`runSubAgent` / `invokeSubAgent` / etc.).
+  - added `openclaw-config-resolve` mode:
+    - reads OpenClaw config candidates (`openclaw.json`, `models.json`, agent-level models) and resolves provider/model/base_url/api_key (including env references).
+  - added `manual` mode:
+    - explicit fallback for manual `base_url/api_key/model`.
+  - HTTP-call path supports timeout/retry and remains fail-open (errors become extraction job failures, never block main conversation).
+  - preserved recursion safety (`autoskill_internal` + internal depth guard) and session-close gating.
+- `OpenClaw-Plugin/adapter/index.js`
+  - added embedded invocation config normalization with env support:
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_TIMEOUT_MS`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_RETRIES`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_OPENCLAW_HOME`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_BASE_URL`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_API_KEY`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_MODEL`
+  - default invocation order set to:
+    - `openclaw-runtime,openclaw-runtime-subagent,openclaw-config-resolve,manual`
+- `OpenClaw-Plugin/adapter/openclaw.plugin.json`
+  - added config schema for `embedded.modelInvocation`.
+- docs updated:
+  - `OpenClaw-Plugin/README.md`
+  - `OpenClaw-Plugin/README.zh-CN.md`
+  - embedded section now documents fallback order and new env knobs.
+
+### Tests Added/Updated
+- `OpenClaw-Plugin/adapter/embedded_runtime.test.mjs`
+  - runtime direct failure -> runtime-target HTTP fallback.
+  - runtime unavailable -> config-resolve fallback.
+  - runtime+config unavailable -> manual fallback.
+  - runtime subagent mode success path.
+  - all modes fail -> fail-open result (`session_not_extractable` + per-session failed job).
+- `OpenClaw-Plugin/adapter/index.test.mjs`
+  - config normalization default mode order assertion.
+  - env overrides for embedded invocation modes/timeouts/retries/openclawHome/manual params.
+
+### Validation
+- Adapter:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `41 passed, 0 failed`
+- Plugin Python tests:
+  - `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'`
+  - result: `40 passed, 0 failed`
+- Syntax:
+  - `node --check OpenClaw-Plugin/adapter/index.js`
+  - `node --check OpenClaw-Plugin/adapter/embedded_runtime.js`
+  - result: pass
+
+### Failed Attempts / Corrections
+- New embedded fallback tests initially failed due test helper shallow-merge behavior that dropped `embedded.sessionArchiveDir`.
+- Corrected `makeConfig` in `embedded_runtime.test.mjs` to deep-merge embedded overrides.
+
+### Residual Risks / Next Candidates
+- `openclaw-config-resolve` is best-effort for heterogeneous OpenClaw configs; secret-ref/OAuth-only keys may remain unresolved and correctly fall through to next mode.
+- Runtime object introspection is intentionally conservative to avoid hard-coupling to internal unstable APIs; if specific OpenClaw versions expose additional official runtime APIs, probe list can be extended with low risk.
+
+## 2026-03-13 - Round 11 (subagent maintenance and merge hardening)
+
+### Scope
+- Target area: embedded `openclaw-runtime-subagent` path after candidate extraction.
+- Objective: harden maintenance decision and merge behavior (not extraction-only), preventing unsafe merge and duplicate skill bloat.
+
+### Issues Found
+- Maintenance merge in embedded path could be overly permissive:
+  - LLM `merge` decision with weak/invalid target could still drift toward wrong merge.
+- Candidate parsing robustness gap:
+  - subagent outputs may return `skill` object or direct object, not always `skills[]`.
+- No deterministic duplicate guard before maintenance:
+  - exact duplicate candidate could still enter decision pipeline and produce redundant skill files.
+
+### Fixes Applied
+- `OpenClaw-Plugin/adapter/embedded_runtime.js`
+  - added skill payload normalization:
+    - clamps (`name/description/prompt`) and dedupes triggers/tags.
+    - extraction now accepts `skills[]`, `skill`, or direct object shape.
+  - strengthened maintenance decision policy:
+    - action normalization supports common synonyms.
+    - merge requires valid explicit target id or high-confidence BM25 fallback (`score >= 0.72`).
+    - unsafe merge now degrades to `add`.
+  - removed blind `hits[0]` merge fallback in `maintainSkill`; merge now requires resolved valid target.
+  - added deterministic duplicate guard before decision:
+    - if candidate matches existing skill (prompt equality / strong normalized overlap), skip with `duplicate_existing_skill`.
+  - retained fail-open behavior and recursion guard.
+- docs updated (EN/ZH) to include embedded maintenance safety guards.
+
+### Tests Added
+- `OpenClaw-Plugin/adapter/embedded_runtime.test.mjs`
+  - explicit merge target in subagent mode -> merged + version bump.
+  - invalid/unsafe merge target -> fall back to add.
+  - duplicate candidate -> skipped before maintenance call.
+
+### Validation
+- Adapter:
+  - `cd OpenClaw-Plugin/adapter && npm test`
+  - result: `44 passed, 0 failed`
+- Plugin Python tests:
+  - `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'`
+  - result: `40 passed, 0 failed`
+
+### Residual Risks / Next Candidates
+- Current duplicate guard is conservative lexical matching; semantic near-duplicates still rely on BM25+LLM maintenance decision.
+- If production data shows false merge/add boundaries, threshold (`0.72`) can be moved to config in a later low-risk round.
+
+## 2026-03-13 - Round 12 (README mainline switch to no-sidecar embedded)
+
+### Scope
+- Target area: `OpenClaw-Plugin/README.md` and `OpenClaw-Plugin/README.zh-CN.md`.
+- Objective: make no-sidecar embedded runtime the primary user-facing mainline, with sidecar repositioned as optional.
+
+### Changes
+- Rewrote top-level positioning in EN/ZH docs:
+  - mainline is now `runtimeMode=embedded` (no sidecar required).
+  - sidecar moved to optional runtime/control-plane role.
+- Reworked Quick Start in EN/ZH:
+  - now starts from editing `~/.openclaw/openclaw.json` plugin config for embedded mode.
+  - removed sidecar startup as mandatory step.
+  - added local verification steps for SkillBank + OpenClaw mirrored skills.
+- Reframed path sections:
+  - default path diagrams/wording now describe embedded `agent_end` processing.
+  - sidecar interaction moved under explicitly optional section.
+- Updated env var grouping:
+  - recommended path now lists embedded-oriented keys.
+  - sidecar-only operations/endpoints are explicitly labeled.
+- Clarified local storage paths for embedded vs sidecar archives.
+
+### Validation
+- Documentation consistency check by manual scan of EN/ZH files.
+- No code-path changes in this round; runtime behavior unchanged.
+
+### Residual Notes
+- Runtime default in code remains backward-compatible (`sidecar`) unless explicitly configured to embedded; docs now instruct explicit embedded config for new deployments.
+
+## 2026-03-13 - Round 13 (usage counting hybrid fallback: explicit + inferred)
+
+### Scope
+- Target area: OpenClaw plugin usage observability (`adapter -> service_runtime -> openclaw_usage_tracking`).
+- Objective: improve count coverage in native OpenClaw skill flow while keeping prune safety unchanged.
+
+### Issues Found
+- Existing counting was explicit-signal heavy:
+  - `used` could not be counted when runtime omitted `used_skill_ids`.
+  - no retrieval snapshot + no explicit signal meant full skip (`no_retrieval_hits`).
+- Prune safety requirement remained strict:
+  - never let inferred signals drive auto-prune.
+
+### Fixes Applied
+- `OpenClaw-Plugin/openclaw_usage_tracking.py`
+  - added hybrid counting model:
+    - `skills_explicit` (store-backed strict counters, prune source)
+    - `skills_inferred` (plugin-local inferred counters, persisted JSON)
+    - `skills_combined` (observability aggregate only)
+  - added synthetic fallback snapshot path:
+    - if retrieval hits are missing but explicit/inferred used ids exist, build synthetic hits and still count.
+  - added inferred signal resolver:
+    - payload inferred ids
+    - selected-for-use/context ids
+    - optional assistant/tool message mention matching
+  - prune remains explicit-only and still guarded by `AUTOSKILL_OPENCLAW_USAGE_PRUNE_REQUIRE_EXPLICIT_USED_SIGNAL=1`.
+- `OpenClaw-Plugin/service_runtime.py`
+  - extracts and forwards `inferred_used_skill_ids`.
+  - passes message window to usage tracker for mention-based inference.
+  - logs inference status in usage tracking line.
+- `OpenClaw-Plugin/adapter/index.js`
+  - adds best-effort collection of `inferred_used_skill_ids` from event/ctx/retrieval.
+  - forwards inferred ids on `agent_end` payload when explicit ids are absent.
+- Config wiring:
+  - `OpenClaw-Plugin/run_proxy.py`
+    - `AUTOSKILL_OPENCLAW_USAGE_INFER_ENABLED`
+    - `AUTOSKILL_OPENCLAW_USAGE_INFER_FROM_SELECTED_IDS`
+    - `AUTOSKILL_OPENCLAW_USAGE_INFER_FROM_MESSAGE_MENTIONS`
+    - `AUTOSKILL_OPENCLAW_USAGE_INFER_MAX_MESSAGE_CHARS`
+    - `AUTOSKILL_OPENCLAW_USAGE_INFER_MANIFEST_PATH`
+  - `OpenClaw-Plugin/install.py` writes default env entries for the new knobs.
+
+### Tests Added/Updated
+- Python:
+  - `OpenClaw-Plugin/tests/test_usage_tracking.py`
+    - explicit-used fallback without retrieval hits
+    - inferred counting when explicit used is absent
+    - inference skip when explicit used is present
+  - `OpenClaw-Plugin/tests/test_service_runtime.py`
+    - inferred fallback end-to-end through `agent_end` and stats endpoint
+  - `OpenClaw-Plugin/tests/test_run_proxy_defaults.py`
+    - default assertions for new usage inference flags
+- JS:
+  - `OpenClaw-Plugin/adapter/index.test.mjs`
+    - verifies `agent_end` forwards `inferred_used_skill_ids` when explicit signal is absent
+
+### Validation
+- `python3 OpenClaw-Plugin/tests/test_usage_tracking.py` (pass)
+- `python3 OpenClaw-Plugin/tests/test_service_runtime.py` (pass)
+- `python3 OpenClaw-Plugin/tests/test_run_proxy_defaults.py` (pass)
+- `python3 -m unittest discover -s OpenClaw-Plugin/tests -p 'test_*.py'` (pass, 44 tests)
+- `cd OpenClaw-Plugin/adapter && npm test` (pass, 45 tests)
+
+### Risk / Safety Notes
+- Inferred counters are additive observability only; pruning still reads strict explicit counters.
+- Main dialog/extraction path remains fail-open:
+  - usage tracking errors are swallowed and only logged.

@@ -1,0 +1,866 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { createEmbeddedProcessor } from "./embedded_runtime.js";
+
+function makeLogger() {
+  const entries = [];
+  return {
+    entries,
+    info(message) {
+      entries.push({ level: "info", message: String(message) });
+    },
+    warn(message) {
+      entries.push({ level: "warn", message: String(message) });
+    },
+  };
+}
+
+function makeSandbox() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "autoskill-embedded-"));
+  const sessionArchiveDir = path.join(root, "sessions");
+  const skillBankDir = path.join(root, "SkillBank");
+  const openclawSkillsDir = path.join(root, "openclaw-skills");
+  fs.mkdirSync(sessionArchiveDir, { recursive: true });
+  fs.mkdirSync(skillBankDir, { recursive: true });
+  fs.mkdirSync(openclawSkillsDir, { recursive: true });
+  return { root, sessionArchiveDir, skillBankDir, openclawSkillsDir };
+}
+
+function makeConfig(paths, overrides = {}) {
+  const embeddedOverride = overrides.embedded || {};
+  const base = { ...overrides };
+  delete base.embedded;
+  return {
+    skillInstallMode: "openclaw_mirror",
+    ...base,
+    embedded: {
+      sessionArchiveDir: paths.sessionArchiveDir,
+      skillBankDir: paths.skillBankDir,
+      openclawSkillsDir: paths.openclawSkillsDir,
+      bm25TopK: 8,
+      ...embeddedOverride,
+    },
+  };
+}
+
+function listSkillDirs(skillBankDir, userId = "user1") {
+  const userRoot = path.join(skillBankDir, "Users", userId);
+  if (!fs.existsSync(userRoot)) return [];
+  return fs.readdirSync(userRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+}
+
+function writeExistingSkill({
+  skillBankDir,
+  userId = "user1",
+  dirName = "existing-skill",
+  name = "Existing Skill",
+  description = "Existing reusable skill.",
+  prompt = "Do existing workflow.\nCheck constraints.",
+}) {
+  const dir = path.join(skillBankDir, "Users", userId, dirName);
+  fs.mkdirSync(dir, { recursive: true });
+  const md = [
+    "---",
+    `id: "skill-${dirName}"`,
+    `name: "${name}"`,
+    `description: "${description}"`,
+    'version: "0.1.0"',
+    "---",
+    "",
+    `# ${name}`,
+    "",
+    description,
+    "",
+    "## Prompt",
+    "",
+    prompt,
+    "",
+    "## Triggers",
+    "",
+    "- when requested",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "SKILL.md"), md, "utf8");
+  return dir;
+}
+
+function makeInvokeModelForAdd() {
+  return async ({ metadata }) => {
+    if (metadata?.channel === "autoskill_embedded_extract") {
+      return JSON.stringify({
+        skills: [
+          {
+            name: "Release Checklist",
+            description: "Reusable release checklist for deployment workflows.",
+            prompt: "Validate readiness.\nRun deployment checks.\nDocument rollback steps.",
+            triggers: ["release workflow", "deployment checks"],
+            tags: ["release", "ops"],
+          },
+        ],
+      });
+    }
+    if (metadata?.channel === "autoskill_embedded_maintain") {
+      return JSON.stringify({ action: "add" });
+    }
+    return JSON.stringify({});
+  };
+}
+
+function makeHttpModelResponder(calls = []) {
+  return async (url, opts) => {
+    const body = JSON.parse(String(opts?.body || "{}"));
+    calls.push({
+      url: String(url),
+      model: body?.model || "",
+      channel: body?.metadata?.channel || "",
+    });
+    if (body?.metadata?.channel === "autoskill_embedded_extract") {
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    skills: [
+                      {
+                        name: "Runtime HTTP Skill",
+                        description: "Extracted through OpenAI-compatible HTTP fallback.",
+                        prompt: "Do A.\nDo B.",
+                        triggers: ["agent trajectory"],
+                        tags: ["embedded"],
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+      };
+    }
+    if (body?.metadata?.channel === "autoskill_embedded_maintain") {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "add" }) } }] }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: "{}" } }] }),
+    };
+  };
+}
+
+function makeInvokeModelWithMultilineMetadata() {
+  return async ({ metadata }) => {
+    if (metadata?.channel === "autoskill_embedded_extract") {
+      return JSON.stringify({
+        skills: [
+          {
+            name: "Release\nChecklist \"Pro\"",
+            description: "Reusable release checklist\nfor deployment workflows.",
+            prompt: "# Goal\nShip safely.\n",
+            triggers: ["release workflow", "deployment\nchecks"],
+            tags: ["release", "ops\ncore"],
+          },
+        ],
+      });
+    }
+    if (metadata?.channel === "autoskill_embedded_maintain") {
+      return JSON.stringify({ action: "add" });
+    }
+    return JSON.stringify({});
+  };
+}
+
+test("embedded runtime extracts only after session is closed and mirrors changed skills", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    invokeModel: makeInvokeModelForAdd(),
+  });
+
+  const pending = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-1",
+      turn_type: "main",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "user", content: "How to run a release?" },
+        { role: "assistant", content: "Follow a release checklist." },
+      ],
+    },
+    {},
+    {},
+  );
+  assert.equal(pending.status, "skipped");
+  assert.equal(pending.reason, "session_not_finished");
+
+  const done = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-1",
+      turn_type: "side",
+      session_done: true,
+      success: true,
+      messages: [{ role: "user", content: "Thanks." }],
+    },
+    {},
+    {},
+  );
+  assert.equal(done.status, "scheduled");
+  assert(done.jobs.some((job) => job.status === "added"));
+
+  const userSkillDirs = listSkillDirs(paths.skillBankDir, "user1");
+  assert.equal(userSkillDirs.length, 1);
+  const skillDirName = userSkillDirs[0].name;
+  assert.ok(fs.existsSync(path.join(paths.skillBankDir, "Users", "user1", skillDirName, "SKILL.md")));
+  assert.ok(fs.existsSync(path.join(paths.openclawSkillsDir, skillDirName, "SKILL.md")));
+});
+
+test("embedded runtime requires at least one successful main turn", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  let invokeCount = 0;
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    async invokeModel() {
+      invokeCount += 1;
+      return JSON.stringify({});
+    },
+  });
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-no-main-success",
+      turn_type: "main",
+      session_done: true,
+      success: false,
+      messages: [
+        { role: "user", content: "Do something risky." },
+        { role: "assistant", content: "I failed." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.jobs?.[0]?.reason, "no_successful_main_turn");
+  assert.equal(invokeCount, 0);
+  assert.equal(listSkillDirs(paths.skillBankDir, "user1").length, 0);
+});
+
+test("embedded runtime finalizes previous session when session_id changes for same user", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    invokeModel: makeInvokeModelForAdd(),
+  });
+
+  const first = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-A",
+      turn_type: "main",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "user", content: "Need better release routine." },
+        { role: "assistant", content: "Use a strict checklist." },
+      ],
+    },
+    {},
+    {},
+  );
+  assert.equal(first.status, "skipped");
+  assert.equal(first.reason, "session_not_finished");
+
+  const switched = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-B",
+      turn_type: "side",
+      session_done: false,
+      success: true,
+      messages: [{ role: "user", content: "New conversation starts." }],
+    },
+    {},
+    {},
+  );
+  assert.equal(switched.status, "scheduled");
+  assert(switched.jobs.some((job) => job.session_id === "sess-A"));
+  assert.equal(listSkillDirs(paths.skillBankDir, "user1").length, 1);
+});
+
+test("embedded runtime skips internal extraction events to prevent recursion", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  let invokeCount = 0;
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    async invokeModel() {
+      invokeCount += 1;
+      return JSON.stringify({});
+    },
+  });
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-internal",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [{ role: "user", content: "Internal test" }],
+    },
+    { autoskill_internal: true },
+    {},
+  );
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "internal_extraction_event");
+  assert.equal(invokeCount, 0);
+});
+
+test("embedded runtime keeps skills in SkillBank without mirroring when install mode is store_only", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, { skillInstallMode: "store_only" }),
+    {},
+    logger,
+    {
+      invokeModel: makeInvokeModelForAdd(),
+    },
+  );
+
+  const done = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-store-only",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Please teach me release routine." },
+        { role: "assistant", content: "Use a reusable checklist." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(done.status, "scheduled");
+  const job = done.jobs.find((item) => item.status === "added");
+  assert.ok(job);
+  assert.equal(job.mirror_skipped, true);
+  assert.equal(job.mirror_reason, "install_mode_store_only");
+
+  const userSkillDirs = listSkillDirs(paths.skillBankDir, "user1");
+  assert.equal(userSkillDirs.length, 1);
+  const skillDirName = userSkillDirs[0].name;
+  assert.ok(fs.existsSync(path.join(paths.skillBankDir, "Users", "user1", skillDirName, "SKILL.md")));
+  assert.equal(fs.existsSync(path.join(paths.openclawSkillsDir, skillDirName, "SKILL.md")), false);
+});
+
+test("embedded runtime writes single-line frontmatter-safe metadata for generated SKILL.md", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    invokeModel: makeInvokeModelWithMultilineMetadata(),
+  });
+
+  const done = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-frontmatter",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a reusable release policy." },
+        { role: "assistant", content: "Will prepare one." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(done.status, "scheduled");
+  const added = done.jobs.find((job) => job.status === "added");
+  assert.ok(added?.path);
+
+  const md = fs.readFileSync(String(added.path), "utf8");
+  const frontmatter = md.split("\n---\n")[0];
+  assert.match(frontmatter, /name: "Release Checklist \\"Pro\\""/);
+  assert.match(frontmatter, /description: "Reusable release checklist for deployment workflows\."/);
+  assert.match(frontmatter, /  - "deployment checks"/);
+  assert.match(frontmatter, /  - "ops core"/);
+});
+
+test("embedded runtime falls back to runtime-resolved HTTP target when direct runtime invoke fails", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const calls = [];
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime"],
+          timeoutMs: 5000,
+          retries: 0,
+        },
+      },
+    }),
+    {
+      runtime: {
+        async invokeModel() {
+          throw new Error("runtime direct invoke failed");
+        },
+        model: {
+          base_url: "http://runtime-fallback.local",
+          api_key: "runtime-key",
+          model: "runtime-model",
+        },
+      },
+    },
+    logger,
+    {
+      requestJson: makeHttpModelResponder(calls),
+    },
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-runtime-http",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need reusable trajectory skill." },
+        { role: "assistant", content: "I will build one." },
+      ],
+    },
+    { model: "runtime-model" },
+    {},
+  );
+
+  assert.equal(result.status, "scheduled");
+  assert(result.jobs.some((job) => job.status === "added"));
+  assert(calls.some((item) => item.url === "http://runtime-fallback.local/v1/chat/completions"));
+});
+
+test("embedded runtime falls back to openclaw-config-resolve mode when runtime modes are unavailable", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const openclawHome = path.join(paths.root, "openclaw-home");
+  fs.mkdirSync(openclawHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(openclawHome, "openclaw.json"),
+    JSON.stringify({
+      llm: {
+        provider: "openai",
+        model: "cfg-model",
+        base_url: "http://cfg-fallback.local",
+        api_key_env: "CFG_FALLBACK_KEY",
+      },
+    }),
+    "utf8",
+  );
+  process.env.CFG_FALLBACK_KEY = "cfg-key";
+  const calls = [];
+  try {
+    const processor = createEmbeddedProcessor(
+      makeConfig(paths, {
+        embedded: {
+          modelInvocation: {
+            modes: ["openclaw-runtime", "openclaw-config-resolve"],
+            openclawHome,
+            timeoutMs: 5000,
+            retries: 0,
+          },
+        },
+      }),
+      {},
+      logger,
+      {
+        requestJson: makeHttpModelResponder(calls),
+      },
+    );
+
+    const result = await processor.handle(
+      {
+        user: "user1",
+        session_id: "sess-config-resolve",
+        turn_type: "main",
+        session_done: true,
+        success: true,
+        messages: [
+          { role: "user", content: "Need a reusable config-derived skill." },
+          { role: "assistant", content: "Working on it." },
+        ],
+      },
+      { model: "cfg-model" },
+      {},
+    );
+
+    assert.equal(result.status, "scheduled");
+    assert(result.jobs.some((job) => job.status === "added"));
+    assert(calls.some((item) => item.url === "http://cfg-fallback.local/v1/chat/completions"));
+  } finally {
+    delete process.env.CFG_FALLBACK_KEY;
+  }
+});
+
+test("embedded runtime falls back to manual mode when runtime and config-resolve are unavailable", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const calls = [];
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime", "openclaw-config-resolve", "manual"],
+          manualBaseUrl: "http://manual-fallback.local",
+          manualApiKey: "manual-key",
+          manualModel: "manual-model",
+          timeoutMs: 5000,
+          retries: 0,
+        },
+      },
+    }),
+    {},
+    logger,
+    {
+      requestJson: makeHttpModelResponder(calls),
+    },
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-manual",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a manual fallback skill." },
+        { role: "assistant", content: "Will add one." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "scheduled");
+  assert(result.jobs.some((job) => job.status === "added"));
+  assert(calls.some((item) => item.url === "http://manual-fallback.local/v1/chat/completions"));
+});
+
+test("embedded runtime can use runtime subagent invocation mode", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime-subagent"],
+          timeoutMs: 5000,
+          retries: 0,
+        },
+      },
+    }),
+    {
+      async runSubAgent({ metadata }) {
+        if (metadata?.channel === "autoskill_embedded_extract") {
+          return JSON.stringify({
+            skills: [
+              {
+                name: "Subagent Skill",
+                description: "Extracted via runtime subagent.",
+                prompt: "Step 1\nStep 2",
+                triggers: ["subagent path"],
+                tags: ["runtime"],
+              },
+            ],
+          });
+        }
+        if (metadata?.channel === "autoskill_embedded_maintain") {
+          return JSON.stringify({ action: "add" });
+        }
+        return JSON.stringify({});
+      },
+    },
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-subagent",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need subagent extraction." },
+        { role: "assistant", content: "Sure." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "scheduled");
+  assert(result.jobs.some((job) => job.status === "added"));
+});
+
+test("embedded runtime stays fail-open when all model invocation modes fail", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime", "openclaw-runtime-subagent", "openclaw-config-resolve", "manual"],
+          openclawHome: path.join(paths.root, "missing-home"),
+          manualBaseUrl: "",
+        },
+      },
+    }),
+    {},
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-all-fail",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need robust fail-open behavior." },
+        { role: "assistant", content: "Try extraction." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "session_not_extractable");
+  assert.equal(result.jobs?.[0]?.status, "failed");
+});
+
+test("embedded runtime maintenance merges into explicit target skill in subagent mode", async () => {
+  const paths = makeSandbox();
+  writeExistingSkill({
+    skillBankDir: paths.skillBankDir,
+    dirName: "release-existing",
+    name: "Release Existing",
+    prompt: "Run smoke tests.\nPublish release notes.",
+  });
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime-subagent"],
+        },
+      },
+    }),
+    {
+      async runSubAgent({ metadata, user }) {
+        if (metadata?.channel === "autoskill_embedded_extract") {
+          return JSON.stringify({
+            skills: [
+              {
+                name: "Release Existing",
+                description: "Improved release routine.",
+                prompt: "Run smoke tests.\nPublish release notes.\nAdd rollback checks.",
+                triggers: ["release"],
+                tags: ["ops"],
+              },
+            ],
+          });
+        }
+        if (metadata?.channel === "autoskill_embedded_maintain") {
+          const parsed = JSON.parse(String(user || "{}"));
+          const targetId = parsed?.similar_skills?.[0]?.id || "release-existing";
+          return JSON.stringify({ action: "merge", target_skill_id: targetId });
+        }
+        if (metadata?.channel === "autoskill_embedded_merge") {
+          return JSON.stringify({
+            name: "Release Existing",
+            description: "Merged release routine",
+            prompt: "Run smoke tests.\nPublish release notes.\nAdd rollback checks.",
+            triggers: ["release workflow"],
+            tags: ["ops", "release"],
+          });
+        }
+        return JSON.stringify({});
+      },
+    },
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-maintain-merge",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a reusable release workflow." },
+        { role: "assistant", content: "Will maintain it." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  const mergedJob = result.jobs.find((job) => job.status === "merged");
+  assert.ok(mergedJob);
+  assert.equal(mergedJob.skill_id, "release-existing");
+  const md = fs.readFileSync(String(mergedJob.path), "utf8");
+  assert.match(md, /version: "0.1.1"/);
+  assert.match(md, /Add rollback checks\./);
+});
+
+test("embedded runtime maintenance avoids unsafe merge target and falls back to add", async () => {
+  const paths = makeSandbox();
+  writeExistingSkill({
+    skillBankDir: paths.skillBankDir,
+    dirName: "finance-existing",
+    name: "Finance Routine",
+    prompt: "Compute quarterly revenue growth.\nReport metrics.",
+  });
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime-subagent"],
+        },
+      },
+    }),
+    {
+      async runSubAgent({ metadata }) {
+        if (metadata?.channel === "autoskill_embedded_extract") {
+          return JSON.stringify({
+            skills: [
+              {
+                name: "Cooking Prep",
+                description: "Kitchen prep workflow.",
+                prompt: "Wash vegetables.\nPreheat oven.\nSet timer.",
+                triggers: ["cook dinner"],
+                tags: ["kitchen"],
+              },
+            ],
+          });
+        }
+        if (metadata?.channel === "autoskill_embedded_maintain") {
+          return JSON.stringify({ action: "merge", target_skill_id: "not-exists" });
+        }
+        return JSON.stringify({});
+      },
+    },
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-maintain-safe-add",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a reusable cooking prep routine." },
+        { role: "assistant", content: "Will create one." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  const added = result.jobs.find((job) => job.status === "added");
+  assert.ok(added);
+  assert.notEqual(added.skill_id, "finance-existing");
+});
+
+test("embedded runtime maintenance skips duplicate candidate without merge/add", async () => {
+  const paths = makeSandbox();
+  writeExistingSkill({
+    skillBankDir: paths.skillBankDir,
+    dirName: "dup-existing",
+    name: "Duplicate Skill",
+    prompt: "Collect logs.\nRun diagnostics.\nSummarize findings.",
+  });
+  const logger = makeLogger();
+  let maintainCallCount = 0;
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime-subagent"],
+        },
+      },
+    }),
+    {
+      async runSubAgent({ metadata }) {
+        if (metadata?.channel === "autoskill_embedded_extract") {
+          return JSON.stringify({
+            skills: [
+              {
+                name: "Duplicate Skill",
+                description: "Duplicate of existing skill.",
+                prompt: "Collect logs.\nRun diagnostics.\nSummarize findings.",
+                triggers: ["diagnose issue"],
+                tags: ["ops"],
+              },
+            ],
+          });
+        }
+        if (metadata?.channel === "autoskill_embedded_maintain") {
+          maintainCallCount += 1;
+          return JSON.stringify({ action: "add" });
+        }
+        return JSON.stringify({});
+      },
+    },
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-duplicate-skip",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need diagnostics routine." },
+        { role: "assistant", content: "Will extract one." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  const skipped = result.jobs.find((job) => job.reason === "duplicate_existing_skill");
+  assert.ok(skipped);
+  assert.equal(maintainCallCount, 0);
+});

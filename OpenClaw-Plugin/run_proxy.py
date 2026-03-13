@@ -37,6 +37,7 @@ from service_runtime import OpenClawSkillRuntime
 from openclaw_conversation_archive import OpenClawConversationArchiveConfig
 from openclaw_main_turn_proxy import OpenClawMainTurnProxyConfig
 from openclaw_skill_mirror import OpenClawSkillInstallConfig
+from openclaw_usage_tracking import OpenClawUsageTrackingConfig
 
 
 def _cli_flag_present(flag: str) -> bool:
@@ -196,6 +197,83 @@ def build_parser() -> argparse.ArgumentParser:
         default=_env("AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_DIR", ""),
         help="Local directory for archived OpenClaw conversations (JSONL).",
     )
+    parser.add_argument(
+        "--openclaw-session-idle-timeout-s",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_SESSION_IDLE_TIMEOUT_S", "0")),
+        help="Optional idle timeout (seconds) to auto-close active sessions for extraction fallback. 0 disables.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-tracking-enabled",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_TRACKING_ENABLED", "1"),
+        help="Track per-skill retrieval/usage counters in OpenClaw plugin flow: 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-infer-enabled",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_INFER_ENABLED", "1"),
+        help="Enable inferred usage counters (separate from explicit counters): 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-infer-from-selected-ids",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_INFER_FROM_SELECTED_IDS", "1"),
+        help="Infer used skills from selected_for_use/context ids when explicit signal is absent: 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-infer-from-message-mentions",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_INFER_FROM_MESSAGE_MENTIONS", "1"),
+        help="Infer used skills by matching retrieval hit ids/names in assistant/tool messages: 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-infer-max-message-chars",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_INFER_MAX_MESSAGE_CHARS", "6000")),
+        help="Maximum assistant/tool message chars scanned for inferred usage per turn.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-infer-manifest-path",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_INFER_MANIFEST_PATH", ""),
+        help="Optional JSON path for inferred usage counters persistence.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-prune-enabled",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_PRUNE_ENABLED", "0"),
+        help="Enable stale-skill auto-pruning driven by usage counters: 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-prune-require-explicit-used-signal",
+        default=_env("AUTOSKILL_OPENCLAW_USAGE_PRUNE_REQUIRE_EXPLICIT_USED_SIGNAL", "1"),
+        help="Allow prune only when current payload carries explicit used_skill_ids: 1|0",
+    )
+    parser.add_argument(
+        "--openclaw-usage-prune-min-retrieved",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_PRUNE_MIN_RETRIEVED", "40")),
+        help="Auto-prune threshold: minimum retrieved count before a skill is eligible for pruning.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-prune-max-used",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_PRUNE_MAX_USED", "0")),
+        help="Auto-prune threshold: prune when used <= this value once min retrieved threshold is reached.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-max-hits-per-turn",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_MAX_HITS_PER_TURN", "8")),
+        help="Maximum tracked retrieval hits per turn for usage accounting.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-max-pending-sessions",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_MAX_PENDING_SESSIONS", "4096")),
+        help="Maximum in-memory pending session retrieval snapshots.",
+    )
+    parser.add_argument(
+        "--openclaw-usage-pending-ttl-s",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_USAGE_PENDING_TTL_S", str(6 * 3600))),
+        help="TTL in seconds for pending retrieval snapshots.",
+    )
     return parser
 
 
@@ -297,6 +375,25 @@ def main() -> None:
     conversation_archive_cfg = OpenClawConversationArchiveConfig(
         enabled=_is_truthy(args.openclaw_conversation_archive_enabled, default=True),
         archive_dir=str(args.openclaw_conversation_archive_dir or ""),
+        session_idle_timeout_seconds=int(args.openclaw_session_idle_timeout_s),
+    ).normalize()
+    usage_tracking_cfg = OpenClawUsageTrackingConfig(
+        enabled=_is_truthy(args.openclaw_usage_tracking_enabled, default=True),
+        infer_enabled=_is_truthy(args.openclaw_usage_infer_enabled, default=True),
+        infer_from_selected_ids=_is_truthy(args.openclaw_usage_infer_from_selected_ids, default=True),
+        infer_from_message_mentions=_is_truthy(args.openclaw_usage_infer_from_message_mentions, default=True),
+        infer_max_message_chars=int(args.openclaw_usage_infer_max_message_chars),
+        infer_manifest_path=str(args.openclaw_usage_infer_manifest_path or ""),
+        prune_enabled=_is_truthy(args.openclaw_usage_prune_enabled, default=False),
+        prune_require_explicit_used_signal=_is_truthy(
+            args.openclaw_usage_prune_require_explicit_used_signal,
+            default=True,
+        ),
+        prune_min_retrieved=int(args.openclaw_usage_prune_min_retrieved),
+        prune_max_used=int(args.openclaw_usage_prune_max_used),
+        max_hits_per_turn=int(args.openclaw_usage_max_hits_per_turn),
+        max_pending_sessions=int(args.openclaw_usage_max_pending_sessions),
+        pending_ttl_seconds=int(args.openclaw_usage_pending_ttl_s),
     ).normalize()
 
     runtime = OpenClawSkillRuntime(
@@ -307,6 +404,7 @@ def main() -> None:
         main_turn_proxy_config=main_turn_proxy_cfg,
         skill_install_config=skill_install_cfg,
         conversation_archive_config=conversation_archive_cfg,
+        usage_tracking_config=usage_tracking_cfg,
     )
     server = runtime.create_server(host=str(args.host), port=int(args.port))
     host, port = server.server_address[:2]
@@ -317,6 +415,7 @@ def main() -> None:
         "/v1/autoskill/openclaw/hooks/agent_end",
         "/v1/autoskill/openclaw/turn",
         "/v1/autoskill/openclaw/skills/sync",
+        "/v1/autoskill/openclaw/usage/stats",
         "/v1/autoskill/retrieval/preview",
         "/v1/autoskill/conversations/import",
         "/v1/autoskill/extractions",
@@ -337,16 +436,36 @@ def main() -> None:
         f"chat_proxy={int(bool(main_turn_proxy_cfg.chat_endpoint_enabled))} "
         f"agent_end_extract={int(bool(main_turn_proxy_cfg.agent_end_extract_enabled))}"
     )
+    if (
+        main_turn_proxy_cfg.enabled
+        and main_turn_proxy_cfg.chat_endpoint_enabled
+        and main_turn_proxy_cfg.agent_end_extract_enabled
+    ):
+        print(
+            "[openclaw-plugin] warning: both main-turn proxy extraction and agent_end extraction are enabled; "
+            "this can cause duplicate extraction/maintenance events. Prefer keeping agent_end extraction disabled "
+            "when proxy target is configured."
+        )
     if conversation_archive_cfg.enabled:
         print(
             "[openclaw-plugin] conversation archive enabled: "
-            f"dir={conversation_archive_cfg.archive_dir}"
+            f"dir={conversation_archive_cfg.archive_dir} "
+            f"idle_timeout_s={conversation_archive_cfg.session_idle_timeout_seconds}"
         )
     if skill_install_cfg.enabled:
         print(
             "[openclaw-plugin] skill install mirror enabled: "
             f"dir={skill_install_cfg.skills_dir} "
             f"user={skill_install_cfg.install_user_id or '<dynamic>'}"
+        )
+    if usage_tracking_cfg.enabled:
+        print(
+            "[openclaw-plugin] usage tracking enabled: "
+            f"infer={int(bool(usage_tracking_cfg.infer_enabled))} "
+            f"prune={int(bool(usage_tracking_cfg.prune_enabled))} "
+            f"prune_require_used={int(bool(usage_tracking_cfg.prune_require_explicit_used_signal))} "
+            f"min_retrieved={usage_tracking_cfg.prune_min_retrieved} "
+            f"max_used={usage_tracking_cfg.prune_max_used}"
         )
     server.serve_forever()
 

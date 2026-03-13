@@ -3,6 +3,8 @@ import test from "node:test";
 
 import plugin, {
   buildEndPayload,
+  createSessionRetrievalCache,
+  createAgentEndHandler,
   createBeforePromptBuildHandler,
   normalizeConfig,
 } from "./index.js";
@@ -96,6 +98,41 @@ test("before_prompt_build returns no-op when skill retrieval is disabled", async
   assert(logger.entries.some((entry) => entry.message.includes("retrieval disabled")));
 });
 
+test("before_prompt_build skips external retrieval in embedded runtime default mode", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "",
+    },
+    async () => {
+      const logger = makeLogger();
+      const cfg = normalizeConfig({
+        baseUrl: "http://127.0.0.1:9100/v1",
+        extractOnAgentEnd: true,
+      });
+      let called = false;
+      const handler = createBeforePromptBuildHandler(cfg, logger, {
+        async postJson() {
+          called = true;
+          return sampleResult();
+        },
+      });
+
+      const result = await handler(
+        { messages: [{ role: "user", content: "Need skill help." }] },
+        {},
+      );
+
+      assert.equal(result, undefined);
+      assert.equal(called, false);
+      assert(
+        logger.entries.some((entry) => entry.message.includes("retrieval disabled by embedded runtime mode")),
+      );
+    },
+  );
+});
+
 test("normalizeConfig disables retrieval by default when openclaw_mirror install mode is active", async () => {
   await withEnv(
     {
@@ -171,6 +208,44 @@ test("normalizeConfig keeps retrieval disabled in store_only when explicitly dis
       });
       assert.equal(cfg.skillInstallMode, "store_only");
       assert.equal(cfg.skillRetrieval.enabled, false);
+    },
+  );
+});
+
+test("normalizeConfig disables retrieval by default in embedded runtime mode", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        baseUrl: "http://127.0.0.1:9100/v1",
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+      assert.equal(cfg.skillRetrieval.enabled, false);
+      assert.equal(cfg.skillRetrieval.disableReason, "embedded_runtime_mode");
+    },
+  );
+});
+
+test("normalizeConfig allows explicit retrieval opt-in in embedded runtime mode", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "1",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        baseUrl: "http://127.0.0.1:9100/v1",
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+      assert.equal(cfg.skillRetrieval.enabled, true);
+      assert.equal(cfg.skillRetrieval.disableReason, "");
     },
   );
 });
@@ -424,4 +499,361 @@ test("agent_end payload includes session and turn metadata when available", () =
   assert.equal(payload.turn_type, "main");
   assert.equal(payload.session_done, true);
   assert.equal(payload.channel, "cli");
+});
+
+test("buildEndPayload preserves assistant tool-call messages and maps environment to tool", () => {
+  const cfg = makeConfig();
+  const payload = buildEndPayload(
+    cfg,
+    {
+      sessionId: "sess-tools",
+      turnType: "main",
+      sessionDone: false,
+      messages: [
+        { role: "user", content: "Run checks." },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "tc_1", type: "function", function: { name: "run_checks", arguments: "{}" } }],
+        },
+        { role: "environment", content: "workspace ready" },
+      ],
+    },
+    {},
+  );
+
+  assert.equal(payload.messages.length, 3);
+  assert.equal(payload.messages[1].role, "assistant");
+  assert.match(payload.messages[1].content, /tool_calls/);
+  assert.equal(payload.messages[2].role, "tool");
+  assert.equal(payload.messages[2].content, "workspace ready");
+});
+
+test("normalizeConfig can switch to embedded runtime mode", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_SKILLBANK_DIR: "/tmp/autoskill-skillbank",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+      assert.equal(cfg.embedded.skillBankDir, "/tmp/autoskill-skillbank");
+      assert.equal(cfg.embedded.bm25TopK, 8);
+      assert.deepEqual(cfg.embedded.modelInvocation.modes, [
+        "openclaw-runtime",
+        "openclaw-runtime-subagent",
+        "openclaw-config-resolve",
+        "manual",
+      ]);
+    },
+  );
+});
+
+test("normalizeConfig supports embedded model invocation env overrides", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES: "openclaw-runtime-subagent,openclaw-config-resolve,manual",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_TIMEOUT_MS: "35000",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_RETRIES: "2",
+      AUTOSKILL_OPENCLAW_EMBEDDED_OPENCLAW_HOME: "/tmp/openclaw-home",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_BASE_URL: "http://127.0.0.1:8999/v1/",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_API_KEY: "k-test",
+      AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_MODEL: "m-test",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+      assert.deepEqual(cfg.embedded.modelInvocation.modes, [
+        "openclaw-runtime-subagent",
+        "openclaw-config-resolve",
+        "manual",
+      ]);
+      assert.equal(cfg.embedded.modelInvocation.timeoutMs, 35000);
+      assert.equal(cfg.embedded.modelInvocation.retries, 2);
+      assert.equal(cfg.embedded.modelInvocation.openclawHome, "/tmp/openclaw-home");
+      assert.equal(cfg.embedded.modelInvocation.manualBaseUrl, "http://127.0.0.1:8999/v1");
+      assert.equal(cfg.embedded.modelInvocation.manualApiKey, "k-test");
+      assert.equal(cfg.embedded.modelInvocation.manualModel, "m-test");
+    },
+  );
+});
+
+test("normalizeConfig enables embedded runtime via no-sidecar env alias", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "",
+      AUTOSKILL_OPENCLAW_NO_SIDECAR: "1",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+    },
+  );
+});
+
+test("normalizeConfig keeps explicit sidecar runtime even when no-sidecar env alias is set", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "",
+      AUTOSKILL_OPENCLAW_NO_SIDECAR: "1",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        runtimeMode: "sidecar",
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "sidecar");
+    },
+  );
+});
+
+test("normalizeConfig treats empty runtimeMode config as unset and still honors no-sidecar alias", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "",
+      AUTOSKILL_OPENCLAW_NO_SIDECAR: "1",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        runtimeMode: "",
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+    },
+  );
+});
+
+test("agent_end routes to sidecar request in sidecar mode", async () => {
+  const logger = makeLogger();
+  const cfg = normalizeConfig({
+    runtimeMode: "sidecar",
+    extractOnAgentEnd: true,
+    successOnly: true,
+    skillRetrieval: { enabled: false },
+  });
+  const sent = [];
+  const handler = createAgentEndHandler(cfg, logger, {
+    async postJson(_cfg, path, payload) {
+      sent.push({ path, payload });
+      return { ok: true };
+    },
+    embeddedProcessor: {
+      async handle() {
+        throw new Error("embedded should not be called in sidecar mode");
+      },
+    },
+  });
+  await handler(
+    {
+      sessionId: "sess-sidecar",
+      turnType: "main",
+      messages: [{ role: "user", content: "do it" }],
+      success: true,
+    },
+    {},
+  );
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].path, "/autoskill/openclaw/hooks/agent_end");
+  assert.equal(sent[0].payload.session_id, "sess-sidecar");
+});
+
+test("agent_end forwards cached retrieval snapshot and explicit used_skill_ids", async () => {
+  const logger = makeLogger();
+  const cfg = normalizeConfig({
+    runtimeMode: "sidecar",
+    extractOnAgentEnd: true,
+    successOnly: true,
+    skillRetrieval: { enabled: true, topK: 3, minScore: 0.1, maxChars: 1200 },
+  });
+  const sent = [];
+  const retrievalCache = new Map();
+  const beforeHandler = createBeforePromptBuildHandler(cfg, logger, {
+    async postJson() {
+      return {
+        query: "release checklist",
+        selected_for_context_ids: ["skill-1"],
+        selected_for_use_ids: ["skill-1"],
+        hits: [
+          {
+            id: "skill-1",
+            name: "Release Checklist",
+            description: "Checklist for release",
+            score: 0.91,
+          },
+        ],
+      };
+    },
+    onRetrieval(sessionId, snapshot) {
+      retrievalCache.set(sessionId, snapshot);
+    },
+  });
+  const endHandler = createAgentEndHandler(cfg, logger, {
+    async postJson(_cfg, path, payload) {
+      sent.push({ path, payload });
+      return { ok: true };
+    },
+    consumeRetrieval(sessionId) {
+      const snapshot = retrievalCache.get(sessionId) || null;
+      retrievalCache.delete(sessionId);
+      return snapshot;
+    },
+  });
+
+  await beforeHandler(
+    {
+      sessionId: "sess-usage-1",
+      messages: [{ role: "user", content: "Need release checklist." }],
+    },
+    {},
+  );
+  await endHandler(
+    {
+      sessionId: "sess-usage-1",
+      used_skill_ids: ["skill-1"],
+      messages: [
+        { role: "user", content: "Need release checklist." },
+        { role: "assistant", content: "Using the checklist now." },
+      ],
+      success: true,
+    },
+    {},
+  );
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].path, "/autoskill/openclaw/hooks/agent_end");
+  assert.deepEqual(sent[0].payload.used_skill_ids, ["skill-1"]);
+  assert.equal(sent[0].payload.retrieval.selected_for_context_ids[0], "skill-1");
+  assert.equal(sent[0].payload.retrieval.hits[0].id, "skill-1");
+});
+
+test("agent_end forwards inferred_used_skill_ids when explicit signal is absent", async () => {
+  const logger = makeLogger();
+  const cfg = normalizeConfig({
+    runtimeMode: "sidecar",
+    extractOnAgentEnd: true,
+    successOnly: true,
+    skillRetrieval: { enabled: true, topK: 3, minScore: 0.1, maxChars: 1200 },
+  });
+  const sent = [];
+  const retrievalCache = new Map();
+  const beforeHandler = createBeforePromptBuildHandler(cfg, logger, {
+    async postJson() {
+      return {
+        query: "deployment rollback",
+        selected_for_context_ids: ["skill-rb"],
+        selected_for_use_ids: ["skill-rb"],
+        hits: [
+          {
+            id: "skill-rb",
+            name: "Rollback Procedure",
+            description: "Rollback deployment safely",
+            score: 0.88,
+          },
+        ],
+      };
+    },
+    onRetrieval(sessionId, snapshot) {
+      retrievalCache.set(sessionId, snapshot);
+    },
+  });
+  const endHandler = createAgentEndHandler(cfg, logger, {
+    async postJson(_cfg, path, payload) {
+      sent.push({ path, payload });
+      return { ok: true };
+    },
+    consumeRetrieval(sessionId) {
+      const snapshot = retrievalCache.get(sessionId) || null;
+      retrievalCache.delete(sessionId);
+      return snapshot;
+    },
+  });
+
+  await beforeHandler(
+    {
+      sessionId: "sess-usage-infer",
+      messages: [{ role: "user", content: "Need rollback procedure." }],
+    },
+    {},
+  );
+  await endHandler(
+    {
+      sessionId: "sess-usage-infer",
+      messages: [
+        { role: "user", content: "Need rollback procedure." },
+        { role: "assistant", content: "I will apply rollback procedure." },
+      ],
+      success: true,
+    },
+    {},
+  );
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].path, "/autoskill/openclaw/hooks/agent_end");
+  assert.ok(Array.isArray(sent[0].payload.inferred_used_skill_ids));
+  assert.deepEqual(sent[0].payload.inferred_used_skill_ids, ["skill-rb"]);
+  assert.equal(sent[0].payload.used_skill_ids, undefined);
+});
+
+test("agent_end routes to embedded processor in embedded mode", async () => {
+  const logger = makeLogger();
+  const cfg = normalizeConfig({
+    runtimeMode: "embedded",
+    extractOnAgentEnd: true,
+    successOnly: true,
+    skillRetrieval: { enabled: false },
+  });
+  const embeddedCalls = [];
+  const handler = createAgentEndHandler(cfg, logger, {
+    async postJson() {
+      throw new Error("sidecar request should not be sent in embedded mode");
+    },
+    embeddedProcessor: {
+      async handle(payload) {
+        embeddedCalls.push(payload);
+        return { status: "scheduled" };
+      },
+    },
+  });
+  await handler(
+    {
+      sessionId: "sess-embedded",
+      turnType: "main",
+      messages: [{ role: "user", content: "build skill" }],
+      success: true,
+    },
+    {},
+  );
+
+  assert.equal(embeddedCalls.length, 1);
+  assert.equal(embeddedCalls[0].session_id, "sess-embedded");
+  assert.equal(embeddedCalls[0].turn_type, "main");
+});
+
+test("session retrieval cache isolates same session_id across different users", () => {
+  const cache = createSessionRetrievalCache();
+  const snapshotA = { query: "q-a", hits: [{ id: "skill-a", score: 0.8 }] };
+  const snapshotB = { query: "q-b", hits: [{ id: "skill-b", score: 0.9 }] };
+
+  cache.remember("sess-1", snapshotA, "user-a");
+  cache.remember("sess-1", snapshotB, "user-b");
+
+  assert.deepEqual(cache.consume("sess-1", "user-a"), snapshotA);
+  assert.deepEqual(cache.consume("sess-1", "user-b"), snapshotB);
+  assert.equal(cache.consume("sess-1", "user-a"), null);
+});
+
+test("session retrieval cache keeps backward compatibility when user id is missing", () => {
+  const cache = createSessionRetrievalCache();
+  const snapshot = { query: "q", hits: [{ id: "skill-a" }] };
+  cache.remember("sess-legacy", snapshot);
+  assert.deepEqual(cache.consume("sess-legacy"), snapshot);
 });

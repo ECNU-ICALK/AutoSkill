@@ -19,6 +19,7 @@ from openclaw_main_turn_proxy import (  # noqa: E402
     OpenClawMainTurnStateManager,
     StreamAssistantAccumulator,
     UpstreamChatProxy,
+    _copy_headers_to_client,
     parse_turn_context,
 )
 
@@ -272,6 +273,22 @@ class MainTurnProxyStateTest(unittest.TestCase):
 
 
 class StreamAccumulatorTest(unittest.TestCase):
+    def test_copy_headers_does_not_force_zero_content_length_for_stream(self) -> None:
+        handler = _FakeHandler()
+        _copy_headers_to_client(
+            handler,
+            headers=[
+                ("Content-Type", "text/event-stream"),
+                ("Content-Length", "123"),
+                ("X-Trace-Id", "trace-1"),
+            ],
+            content_length=None,
+        )
+        headers = {k.lower(): v for k, v in handler.headers}
+        self.assertEqual(headers.get("content-type"), "text/event-stream")
+        self.assertEqual(headers.get("x-trace-id"), "trace-1")
+        self.assertNotIn("content-length", headers)
+
     def test_stream_accumulator_collects_sse_content(self) -> None:
         acc = StreamAssistantAccumulator()
         acc.feed(b'data: {"choices":[{"delta":{"role":"assistant","content":"Hello"}}]}\n\n')

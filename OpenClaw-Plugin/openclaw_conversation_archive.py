@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _safe_text(value: Any) -> str:
@@ -132,12 +132,14 @@ class OpenClawConversationArchiveConfig:
     archive_dir: str = ""
     max_messages_per_record: int = 200
     max_content_chars: int = 20000
+    session_idle_timeout_seconds: int = 0
 
     def normalize(self) -> "OpenClawConversationArchiveConfig":
         self.enabled = bool(self.enabled)
         self.archive_dir = detect_archive_dir(self.archive_dir)
         self.max_messages_per_record = max(1, int(self.max_messages_per_record or 200))
         self.max_content_chars = max(256, int(self.max_content_chars or 20000))
+        self.session_idle_timeout_seconds = max(0, int(self.session_idle_timeout_seconds or 0))
         return self
 
 
@@ -147,6 +149,8 @@ class OpenClawConversationArchive:
     def __init__(self, *, config: Optional[OpenClawConversationArchiveConfig] = None) -> None:
         self.config = (config or OpenClawConversationArchiveConfig()).normalize()
         self._lock = threading.Lock()
+        self._active_session_by_user: Dict[str, str] = {}
+        self._active_session_touch_ms: Dict[str, int] = {}
 
     def status(self) -> Dict[str, Any]:
         return {
@@ -154,6 +158,8 @@ class OpenClawConversationArchive:
             "archive_dir": str(self.config.archive_dir),
             "max_messages_per_record": int(self.config.max_messages_per_record),
             "max_content_chars": int(self.config.max_content_chars),
+            "session_idle_timeout_seconds": int(self.config.session_idle_timeout_seconds),
+            "session_archive_dir": str((Path(self.config.archive_dir).expanduser().resolve() / "sessions")),
         }
 
     def append_record(
@@ -202,3 +208,356 @@ class OpenClawConversationArchive:
             "path": str(path),
             "record_id": str(payload["record_id"]),
         }
+
+    def append_session_record(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        turn_type: str,
+        messages: List[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]] = None,
+        session_done: bool = False,
+        success: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Append one turn payload into the session-specific file.
+
+        It also detects session boundaries per user:
+        - current session_id differs from the previous active session_id
+        - explicit session_done=True
+        """
+
+        uid = _safe_text(user_id)
+        sid = _safe_text(session_id)
+        if not self.config.enabled:
+            return {
+                "enabled": False,
+                "skipped": True,
+                "reason": "archive_disabled",
+                "user_id": uid,
+                "session_id": sid,
+                "ended_sessions": [],
+            }
+        if not sid:
+            return {
+                "enabled": True,
+                "skipped": True,
+                "reason": "missing_session_id",
+                "user_id": uid,
+                "session_id": sid,
+                "ended_sessions": [],
+            }
+
+        sanitized_messages = _sanitize_messages(
+            list(messages or []),
+            max_messages=int(self.config.max_messages_per_record),
+            max_content_chars=int(self.config.max_content_chars),
+        )
+        if not sanitized_messages:
+            return {
+                "enabled": True,
+                "skipped": True,
+                "reason": "empty_messages",
+                "user_id": uid,
+                "session_id": sid,
+                "ended_sessions": [],
+            }
+
+        ended_sessions: List[Dict[str, Any]] = []
+        turn_type_norm = _safe_text(turn_type).lower()
+        root = Path(self.config.archive_dir).expanduser().resolve()
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            if int(self.config.session_idle_timeout_seconds or 0) > 0:
+                ended_sessions.extend(self._close_idle_session_locked(user_id=uid, now_ms=now_ms))
+
+            prev_sid = self._active_session_by_user.get(uid)
+            if prev_sid and prev_sid != sid:
+                ended_sessions.append(
+                    self._close_session_file_locked(
+                        user_id=uid,
+                        session_id=prev_sid,
+                        reason="session_id_changed",
+                    )
+                )
+
+            path = self._session_file_path(root=root, user_id=uid, session_id=sid)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "record_id": uuid.uuid4().hex,
+                "event_time": int(time.time() * 1000),
+                "user_id": uid,
+                "session_id": sid,
+                "turn_type": turn_type_norm,
+                "session_done": bool(session_done),
+                "success": bool(success),
+                "message_count": len(sanitized_messages),
+                "messages": sanitized_messages,
+                "metadata": _sanitize_metadata(metadata),
+            }
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            self._active_session_by_user[uid] = sid
+            self._active_session_touch_ms[uid] = int(now_ms)
+
+            if bool(session_done):
+                ended_sessions.append(
+                    self._close_session_file_locked(
+                        user_id=uid,
+                        session_id=sid,
+                        reason="session_done",
+                    )
+                )
+                if self._active_session_by_user.get(uid) == sid:
+                    self._active_session_by_user.pop(uid, None)
+                self._active_session_touch_ms.pop(uid, None)
+
+        ended_unique = self._dedupe_ended_sessions(ended_sessions)
+
+        return {
+            "enabled": True,
+            "skipped": False,
+            "reason": "",
+            "user_id": uid,
+            "session_id": sid,
+            "path": str(path),
+            "record_id": str(payload["record_id"]),
+            "ended_sessions": ended_unique,
+        }
+
+    def sweep_inactive_sessions(self, *, user_id: str) -> Dict[str, Any]:
+        """
+        Close an active session for `user_id` when idle timeout is exceeded.
+
+        This is a safe no-op unless `session_idle_timeout_seconds > 0`.
+        """
+
+        uid = _safe_text(user_id)
+        if not self.config.enabled:
+            return {
+                "enabled": False,
+                "skipped": True,
+                "reason": "archive_disabled",
+                "user_id": uid,
+                "ended_sessions": [],
+            }
+        if int(self.config.session_idle_timeout_seconds or 0) <= 0:
+            return {
+                "enabled": True,
+                "skipped": True,
+                "reason": "idle_timeout_disabled",
+                "user_id": uid,
+                "ended_sessions": [],
+            }
+        if not uid:
+            return {
+                "enabled": True,
+                "skipped": True,
+                "reason": "missing_user_id",
+                "user_id": uid,
+                "ended_sessions": [],
+            }
+
+        with self._lock:
+            ended = self._close_idle_session_locked(
+                user_id=uid,
+                now_ms=int(time.time() * 1000),
+            )
+        ended_unique = self._dedupe_ended_sessions(ended)
+        return {
+            "enabled": True,
+            "skipped": not bool(ended_unique),
+            "reason": "" if ended_unique else "idle_not_expired",
+            "user_id": uid,
+            "ended_sessions": ended_unique,
+        }
+
+    def load_session_for_extraction(
+        self,
+        *,
+        path: str,
+    ) -> Dict[str, Any]:
+        """
+        Build a full-session extraction payload from a closed session archive file.
+        """
+
+        session_path = Path(_safe_text(path)).expanduser().resolve()
+        if not session_path.exists():
+            return {
+                "ok": False,
+                "reason": "session_file_missing",
+                "path": str(session_path),
+                "messages": [],
+                "has_main_turn": False,
+                "has_successful_main_turn": False,
+                "turn_count": 0,
+            }
+
+        records: List[Dict[str, Any]] = []
+        for line in session_path.read_text(encoding="utf-8").splitlines():
+            text = str(line or "").strip()
+            if not text:
+                continue
+            try:
+                obj = json.loads(text)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                records.append(obj)
+
+        if not records:
+            return {
+                "ok": False,
+                "reason": "session_file_empty",
+                "path": str(session_path),
+                "messages": [],
+                "has_main_turn": False,
+                "has_successful_main_turn": False,
+                "turn_count": 0,
+            }
+
+        merged_messages: List[Dict[str, Any]] = []
+        has_main_turn = False
+        has_successful_main_turn = False
+        session_id = ""
+        user_id = ""
+        for rec in records:
+            turn_type = _safe_text(rec.get("turn_type")).lower()
+            success = bool(rec.get("success"))
+            if turn_type == "main":
+                has_main_turn = True
+                if success:
+                    has_successful_main_turn = True
+            session_id = session_id or _safe_text(rec.get("session_id"))
+            user_id = user_id or _safe_text(rec.get("user_id"))
+            msg_list = rec.get("messages")
+            if not isinstance(msg_list, list):
+                continue
+            turn_messages = _sanitize_messages(
+                msg_list,
+                max_messages=int(self.config.max_messages_per_record),
+                max_content_chars=int(self.config.max_content_chars),
+            )
+            merged_messages = self._merge_messages_with_overlap(
+                merged_messages,
+                turn_messages,
+            )
+
+        return {
+            "ok": True,
+            "reason": "",
+            "path": str(session_path),
+            "session_id": session_id,
+            "user_id": user_id,
+            "messages": merged_messages,
+            "has_main_turn": bool(has_main_turn),
+            "has_successful_main_turn": bool(has_successful_main_turn),
+            "turn_count": len(records),
+        }
+
+    def _session_file_path(self, *, root: Path, user_id: str, session_id: str) -> Path:
+        """Return a stable file path for one user/session pair."""
+        user_slug = _slug(user_id or "default", fallback="default")
+        session_slug = _slug(session_id, fallback="session")
+        return root / "sessions" / user_slug / f"{session_slug}.jsonl"
+
+    def _close_session_file_locked(self, *, user_id: str, session_id: str, reason: str) -> Dict[str, Any]:
+        """Rotate the active session file into a closed immutable file."""
+        root = Path(self.config.archive_dir).expanduser().resolve()
+        src = self._session_file_path(root=root, user_id=user_id, session_id=session_id)
+        if not src.exists():
+            return {
+                "user_id": str(user_id or ""),
+                "session_id": str(session_id or ""),
+                "reason": str(reason or ""),
+                "path": str(src),
+                "closed": False,
+            }
+        closed_suffix = _slug(reason, fallback="closed")
+        dst = src.with_name(f"{src.stem}.{int(time.time() * 1000)}.{closed_suffix}.jsonl")
+        if dst.exists():
+            dst = src.with_name(
+                f"{src.stem}.{int(time.time() * 1000)}.{closed_suffix}.{uuid.uuid4().hex[:8]}.jsonl"
+            )
+        try:
+            src.rename(dst)
+            path = dst
+            closed = True
+        except Exception:
+            path = src
+            closed = False
+        return {
+            "user_id": str(user_id or ""),
+            "session_id": str(session_id or ""),
+            "reason": str(reason or ""),
+            "path": str(path),
+            "closed": bool(closed),
+        }
+
+    def _close_idle_session_locked(self, *, user_id: str, now_ms: int) -> List[Dict[str, Any]]:
+        """
+        Close active session for user when idle timeout is exceeded.
+
+        Caller must hold `self._lock`.
+        """
+
+        timeout_s = int(self.config.session_idle_timeout_seconds or 0)
+        if timeout_s <= 0:
+            return []
+        uid = _safe_text(user_id)
+        sid = _safe_text(self._active_session_by_user.get(uid))
+        if not sid:
+            return []
+        last_touch = int(self._active_session_touch_ms.get(uid) or 0)
+        if last_touch <= 0:
+            return []
+        if int(now_ms) - last_touch <= timeout_s * 1000:
+            return []
+        closed = self._close_session_file_locked(
+            user_id=uid,
+            session_id=sid,
+            reason="session_idle_timeout",
+        )
+        if self._active_session_by_user.get(uid) == sid:
+            self._active_session_by_user.pop(uid, None)
+        self._active_session_touch_ms.pop(uid, None)
+        return [closed]
+
+    @staticmethod
+    def _dedupe_ended_sessions(ended_sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicate ended-session records by `(session_id, path)`."""
+        ended_unique: List[Dict[str, Any]] = []
+        seen: set[Tuple[str, str]] = set()
+        for item in list(ended_sessions or []):
+            session_key = (_safe_text(item.get("session_id")), _safe_text(item.get("path")))
+            if not all(session_key) or session_key in seen:
+                continue
+            seen.add(session_key)
+            ended_unique.append(item)
+        return ended_unique
+
+    @staticmethod
+    def _merge_messages_with_overlap(
+        existing: List[Dict[str, Any]],
+        incoming: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge turn-level windows into one timeline by removing prefix/suffix overlap.
+        """
+        base = list(existing or [])
+        nxt = list(incoming or [])
+        if not base:
+            return nxt
+        if not nxt:
+            return base
+
+        max_overlap = min(len(base), len(nxt))
+        overlap = 0
+        for size in range(max_overlap, 0, -1):
+            if base[-size:] == nxt[:size]:
+                overlap = size
+                break
+        if overlap > 0:
+            return base + nxt[overlap:]
+        return base + nxt

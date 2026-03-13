@@ -276,7 +276,6 @@ def _copy_headers_to_client(
     content_length: Optional[int],
 ) -> None:
     """Run copy headers to client."""
-    seen_content_length = False
     for key, value in headers:
         k = str(key or "").strip()
         if not k:
@@ -285,13 +284,12 @@ def _copy_headers_to_client(
         if lk in _HOP_BY_HOP_HEADERS:
             continue
         if lk == "content-length":
-            seen_content_length = True
+            # Always rebuild Content-Length explicitly for non-stream responses.
+            # For stream/chunked responses we must not emit a synthetic zero length.
             continue
         handler.send_header(k, str(value or ""))
     if content_length is not None:
         handler.send_header("Content-Length", str(int(content_length)))
-    elif seen_content_length:
-        handler.send_header("Content-Length", "0")
 
 
 @dataclass

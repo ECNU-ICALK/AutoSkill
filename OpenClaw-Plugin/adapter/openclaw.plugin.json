@@ -23,6 +23,113 @@
         "default": "",
         "description": "Optional fixed user id override."
       },
+      "runtimeMode": {
+        "type": "string",
+        "enum": [
+          "sidecar",
+          "embedded"
+        ],
+        "default": "sidecar",
+        "description": "sidecar: send hooks to external AutoSkill service; embedded: run extraction/maintenance inside OpenClaw plugin runtime."
+      },
+      "embedded": {
+        "type": "object",
+        "description": "Embedded runtime options used when runtimeMode=embedded.",
+        "properties": {
+          "sessionArchiveDir": {
+            "type": "string",
+            "default": "",
+            "description": "Session archive JSONL directory for embedded extraction."
+          },
+          "skillBankDir": {
+            "type": "string",
+            "default": "",
+            "description": "AutoSkill SkillBank root directory."
+          },
+          "openclawSkillsDir": {
+            "type": "string",
+            "default": "",
+            "description": "OpenClaw standard local skills directory for mirror install."
+          },
+          "bm25TopK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 8,
+            "description": "Top-K candidate skills for BM25 similarity filtering before maintenance decision."
+          },
+          "modelInvocation": {
+            "type": "object",
+            "description": "Embedded model invocation fallback chain for extraction and maintenance.",
+            "properties": {
+              "modes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "openclaw-runtime",
+                    "openclaw-runtime-subagent",
+                    "openclaw-config-resolve",
+                    "manual"
+                  ]
+                },
+                "default": [
+                  "openclaw-runtime",
+                  "openclaw-runtime-subagent",
+                  "openclaw-config-resolve",
+                  "manual"
+                ],
+                "description": "Invocation fallback order. First successful mode is used."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 120000,
+                "default": 20000,
+                "description": "Per-request timeout for embedded model calls."
+              },
+              "retries": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "default": 1,
+                "description": "Retry count for HTTP-based embedded model calls."
+              },
+              "openclawHome": {
+                "type": "string",
+                "default": "",
+                "description": "OpenClaw home path used by config-resolve mode."
+              },
+              "manualBaseUrl": {
+                "type": "string",
+                "default": "",
+                "description": "Manual fallback base URL for OpenAI-compatible chat completions."
+              },
+              "manualApiKey": {
+                "type": "string",
+                "default": "",
+                "description": "Manual fallback API key (optional if backend allows empty key)."
+              },
+              "manualModel": {
+                "type": "string",
+                "default": "",
+                "description": "Manual fallback model id."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "openclawSkillInstallMode": {
+        "type": "string",
+        "enum": [
+          "openclaw_mirror",
+          "store_only"
+        ],
+        "default": "openclaw_mirror",
+        "description": "openclaw_mirror installs/mirrors skills to OpenClaw local directory; store_only keeps skills in AutoSkill store."
+      },
       "skillScope": {
         "type": "string",
         "enum": [

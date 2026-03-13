@@ -55,6 +55,20 @@ class RunProxyDefaultsTest(unittest.TestCase):
         )
         self.assertTrue(enabled)
 
+    def test_usage_tracking_defaults_are_safe(self) -> None:
+        args = build_parser().parse_args([])
+        self.assertEqual(str(args.openclaw_usage_tracking_enabled), "1")
+        self.assertEqual(str(args.openclaw_usage_infer_enabled), "1")
+        self.assertEqual(str(args.openclaw_usage_infer_from_selected_ids), "1")
+        self.assertEqual(str(args.openclaw_usage_infer_from_message_mentions), "1")
+        self.assertEqual(int(args.openclaw_usage_infer_max_message_chars), 6000)
+        self.assertEqual(str(args.openclaw_usage_infer_manifest_path), "")
+        self.assertEqual(str(args.openclaw_usage_prune_enabled), "0")
+        self.assertEqual(str(args.openclaw_usage_prune_require_explicit_used_signal), "1")
+        self.assertEqual(int(args.openclaw_usage_prune_min_retrieved), 40)
+        self.assertEqual(int(args.openclaw_usage_prune_max_used), 0)
+        self.assertEqual(int(args.openclaw_session_idle_timeout_s), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

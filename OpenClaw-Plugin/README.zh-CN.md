@@ -4,21 +4,11 @@
 
 让 OpenClaw 在不改核心代码的前提下，持续学会新技能。
 
-这个插件会启动一个本地 sidecar，它负责：
+AutoSkill 的核心意图是让 OpenClaw 在使用过程中自动进化：每个会话结束后，自动从完整交互轨迹里抽取可复用技能；当发现更好的做法时，自动合并或更新旧技能；并把最新可用技能同步到 OpenClaw 标准本地 `skills` 目录。  
+你不需要改 OpenClaw 核心，也不需要手工维护每一条技能。
 
-- 接收 OpenClaw 发来的对话数据
-- 在 AutoSkill `SkillBank` 中完成技能抽取与维护
-- 把当前有效技能镜像到 OpenClaw 标准本地 skills 目录
-- 让 OpenClaw 继续按原生本地 skill 机制去检索和使用这些技能
-
-默认推荐的理解方式只有一条主线：
-
-`OpenClaw -> sidecar 抽取/维护 -> mirror 到 OpenClaw 本地 skills -> OpenClaw 原生 skill 使用`
-
-职责划分也很清楚：
-
-- sidecar = 学习、维护、归档、镜像
-- OpenClaw = 正常加载、检索、使用本地 skill
+默认路径可直接在你现有 OpenClaw 环境中运行。  
+如果后续需要集中化运维或更复杂部署，再使用可选的外置服务路径。
 
 ## 安装
 
@@ -73,42 +63,34 @@ python3 OpenClaw-Plugin/install.py \
 - `~/.openclaw/extensions/autoskill-openclaw-adapter/package.json`
 - `~/.openclaw/openclaw.json`，并自动启用 adapter
 
-## 快速开始
+## 快速开始（推荐默认路径）
 
-### 1. 编辑 sidecar 的 `.env`
+### 1. 将 adapter 运行模式设为 embedded
 
-```bash
-vim ~/.openclaw/plugins/autoskill-openclaw-plugin/.env
+编辑 `~/.openclaw/openclaw.json`，在插件配置中设置：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "autoskill-openclaw-adapter": {
+        "enabled": true,
+        "config": {
+          "runtimeMode": "embedded",
+          "openclawSkillInstallMode": "openclaw_mirror",
+          "embedded": {
+            "skillBankDir": "~/.openclaw/autoskill/SkillBank",
+            "openclawSkillsDir": "~/.openclaw/workspace/skills",
+            "sessionArchiveDir": "~/.openclaw/autoskill/embedded_sessions"
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
-至少填好：
-
-- 你的 LLM provider key
-- 你的 embedding provider key
-
-默认推荐模式已经预置好：
-
-```bash
-AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror
-AUTOSKILL_OPENCLAW_MAIN_TURN_EXTRACT=1
-AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_ENABLED=1
-```
-
-### 2. 启动 sidecar
-
-```bash
-~/.openclaw/plugins/autoskill-openclaw-plugin/start.sh
-~/.openclaw/plugins/autoskill-openclaw-plugin/status.sh
-```
-
-### 3. 验证服务
-
-```bash
-curl http://127.0.0.1:9100/health
-curl http://127.0.0.1:9100/v1/autoskill/capabilities
-```
-
-### 4. 重启 OpenClaw
+### 2. 重启 OpenClaw
 
 ```bash
 openclaw gateway restart
@@ -116,7 +98,7 @@ openclaw gateway restart
 
 如果你的环境没有 `openclaw` CLI，就用现有的服务管理方式重启 OpenClaw gateway/runtime。
 
-### 5. 确认插件已经接上
+### 3. 确认插件已经接上
 
 ```bash
 cat ~/.openclaw/openclaw.json
@@ -126,17 +108,26 @@ cat ~/.openclaw/openclaw.json
 
 - `plugins.load.paths` 包含 `~/.openclaw/extensions/autoskill-openclaw-adapter`
 - `plugins.entries.autoskill-openclaw-adapter.enabled = true`
-- `plugins.entries.autoskill-openclaw-adapter.config.baseUrl = http://127.0.0.1:9100/v1`
+- `plugins.entries.autoskill-openclaw-adapter.config.runtimeMode = embedded`
+
+### 4. 验证技能已维护并镜像
+
+```bash
+find ~/.openclaw/autoskill/SkillBank/Users -name SKILL.md | head
+find ~/.openclaw/workspace/skills -name SKILL.md | head
+```
+
+前者是 AutoSkill 真源 SkillBank，后者是 OpenClaw 原生检索使用的本地 skills 镜像。
 
 ## 这个插件到底做什么
 
-### 默认推荐路径
+### 推荐 embedded 主线
 
 这是大多数用户最应该先采用的路径。
 
 ```mermaid
 flowchart LR
-  A["OpenClaw 运行"] --> B["agent_end 把会话发给 sidecar"]
+  A["OpenClaw 运行"] --> B["adapter 内 embedded 处理 agent_end"]
   B --> C["AutoSkill SkillBank<br/>抽取 / 合并 / 维护"]
   C --> D["镜像到<br/>~/.openclaw/workspace/skills"]
   D --> E["OpenClaw 原生本地 skill<br/>加载 检索 使用"]
@@ -144,10 +135,10 @@ flowchart LR
 
 在这个模式下：
 
-- OpenClaw 把运行数据发给 sidecar
-- sidecar 先把 transcript 归档到本地
-- sidecar 在 AutoSkill `SkillBank` 中完成技能抽取与维护
-- sidecar 把当前有效技能镜像到 OpenClaw 标准本地 skills 目录
+- OpenClaw adapter 在运行时内处理 `agent_end`（不需要 sidecar）
+- embedded runtime 先按 session 归档 transcript
+- embedded runtime 在 AutoSkill `SkillBank` 中完成技能抽取与维护
+- embedded runtime 把当前有效技能镜像到 OpenClaw 标准本地 skills 目录
 - OpenClaw 继续通过自己的标准本地 skill 机制来使用这些技能
 
 ### 为什么默认推荐这条路
@@ -157,6 +148,7 @@ flowchart LR
 - 不替换 system prompt
 - 不直接干扰 memory、compaction、tools、provider 选择
 - OpenClaw 继续按它原本的本地 skill 行为工作
+- 默认主线不需要额外维护 sidecar 进程
 
 ## 默认行为
 
@@ -173,17 +165,99 @@ AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror
 - AutoSkill `SkillBank` 是技能真源
 - OpenClaw 本地 skills 目录只是安装镜像，不是真源
 - `before_prompt_build` 的检索注入默认关闭，避免重复检索、重复提示
-- 除非你显式把模型流量接到高级的 main-turn proxy，否则 `agent_end` 就是默认在线数据入口
+- 在 embedded 主线下，`agent_end` 在 adapter 运行时内驱动抽取与维护
+- 新部署建议显式把 `runtimeMode` 设为 `embedded`
+- `runtimeMode=sidecar` 仍保留为可选外置部署路径
 
 ### 本地会存什么
 
 - SkillBank：`~/.openclaw/autoskill/SkillBank`
-- 对话归档：`~/.openclaw/autoskill/conversations`
+- embedded 会话归档：`~/.openclaw/autoskill/embedded_sessions`
 - OpenClaw 本地技能镜像：`~/.openclaw/workspace/skills`
+- sidecar 对话归档（`runtimeMode=sidecar`）：`~/.openclaw/autoskill/conversations`
 
-## 可选路径
+### 技能使用计数（默认安全模式）
 
-### 1. `store_only` 加 `before_prompt_build` 注入
+运行时支持与 AutoSkill 核心一致的轻量计数模型：
+
+- `retrieved`：技能被检索命中的次数
+- `relevant`：该轮是否被选入上下文/使用集合
+- `used`：技能被使用次数（取决于计数桶是显式还是推断）
+
+统计接口现在会返回三类计数：
+
+- `skills_explicit`：只基于运行时显式信号的严格计数（清理决策使用它）
+- `skills_inferred`：当显式信号缺失时，基于候选选择信息/消息线索的兜底推断计数
+- `skills_combined`：观测视角的汇总计数（`explicit + inferred`）
+
+安全默认策略：
+
+- 统计是 best-effort，不会阻塞主链路
+- 统计异常只记日志，不中断对话/抽取
+- 默认不自动删技能（`AUTOSKILL_OPENCLAW_USAGE_PRUNE_ENABLED=0`）
+- 默认开启推断计数，用于补齐显式信号稀疏时的可观测性
+- `openclaw_mirror` 模式下，显式 `used` 计数仍依赖运行时是否有显式“已使用技能”信号
+- 即使开启自动清理，默认也要求当前请求带有显式 `used_skill_ids` 才会执行 prune（`AUTOSKILL_OPENCLAW_USAGE_PRUNE_REQUIRE_EXPLICIT_USED_SIGNAL=1`）
+- prune 只看显式计数（`skills_explicit`），避免误删
+
+查看计数（仅 sidecar 运行时）：
+
+```bash
+curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/usage/stats \
+  -H "Content-Type: application/json" \
+  -d '{"user":"<your_user_id>"}'
+```
+
+建议在观察一段时间后再开启自动清理：
+
+```bash
+AUTOSKILL_OPENCLAW_USAGE_PRUNE_ENABLED=1
+AUTOSKILL_OPENCLAW_USAGE_PRUNE_MIN_RETRIEVED=40
+AUTOSKILL_OPENCLAW_USAGE_PRUNE_MAX_USED=0
+```
+
+## 运行模式与路径
+
+### 1. 无 sidecar 的 embedded 模式（复用 OpenClaw 当前模型，推荐）
+
+把它当作默认主线即可。
+
+这个模式下：
+
+- `agent_end` 在插件进程内直接处理
+- 对话按 `session_id` 归档，只有会话闭合后才会抽取
+- 只有闭合会话里存在至少一条成功的 `turn_type=main` 才会触发抽取
+- 抽取后的技能维护在 AutoSkill `SkillBank`
+- 一旦技能发生新增/合并，立即镜像到 OpenClaw 本地 skills 目录
+
+核心配置：
+
+```bash
+AUTOSKILL_OPENCLAW_RUNTIME_MODE=embedded
+# 便捷别名（等价兜底）：
+# AUTOSKILL_OPENCLAW_NO_SIDECAR=1
+AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror
+AUTOSKILL_SKILLBANK_DIR=/path/to/AutoSkill/SkillBank
+AUTOSKILL_OPENCLAW_SKILLS_DIR=~/.openclaw/workspace/skills
+```
+
+说明：
+
+- 默认不需要手动再配一套抽取模型；embedded 抽取使用以下回退链：
+  - `openclaw-runtime`：先尝试 runtime 直接模型调用；若不可用，再尝试从 runtime 对象解析 `base_url/api_key/model` 并走 OpenAI-compatible `/chat/completions`
+  - `openclaw-runtime-subagent`：尝试调用 OpenClaw runtime 的子 agent / 内部推理入口
+  - `openclaw-config-resolve`：读取 OpenClaw 配置文件（`openclaw.json`、`models.json` 等）解析 provider/model/base_url
+  - `manual`：最后才使用显式手填配置
+- embedded 模式下技能维护检索使用 BM25
+- embedded 模式下维护安全护栏：
+  - 抽取候选若与现有技能重复，会在维护决策前直接跳过
+  - merge 只在目标 id 有效，或 BM25 高置信命中时允许
+  - 不安全的 merge 目标会自动降级为 `add`（避免盲目合并）
+- embedded 模式下 `before_prompt_build` 检索默认自动关闭（避免无 sidecar 场景下发起无效检索请求）
+- 内置防递归保护，避免抽取/合并过程再次触发抽取链路
+- 优先级说明：若显式配置 `runtimeMode`，会覆盖 no-sidecar 别名
+
+### 2. `store_only` 加 `before_prompt_build` 注入
 
 只有当你不想把技能镜像安装到 OpenClaw 本地 skills 目录时，才建议用这条路。
 
@@ -213,7 +287,17 @@ AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=store_only
 AUTOSKILL_SKILL_RETRIEVAL_ENABLED=1
 ```
 
-### 2. 高级 main-turn proxy
+### 3. sidecar 运行模式（可选外置控制面）
+
+只有在你明确需要以下能力时才建议 sidecar：
+
+- 外置集中服务做抽取/维护/运维
+- sidecar 独立生命周期管理（`start.sh` / `stop.sh`）
+- 共享事件接口给外部系统自动化使用
+
+开启方式：设 `runtimeMode=sidecar` 并配置 `baseUrl`。
+
+### 4. 高级 main-turn proxy（仅 sidecar）
 
 只有当你需要比 `agent_end` 更精确的 `main turn -> next state` 采样时，才建议启用这条路。
 
@@ -235,11 +319,11 @@ sidecar 会暴露：
 - 如果 target 没配，`/v1/chat/completions` 会返回 `503`
 - 这时在线抽取会自动回退到 `agent_end`
 
-## OpenClaw 和 sidecar 的协作方式
+## sidecar 协作（可选模式）
 
-### 默认在线抽取入口
+### sidecar 模式的在线抽取入口
 
-默认情况下，OpenClaw 会通过下面这个接口把结束态数据发给 sidecar：
+当 `runtimeMode=sidecar` 时，OpenClaw 会通过下面这个接口把结束态数据发给 sidecar：
 
 - `POST /v1/autoskill/openclaw/hooks/agent_end`
 
@@ -250,16 +334,18 @@ sidecar 收到后会：
 3. 更新 `SkillBank`
 4. 把当前有效技能镜像到 OpenClaw 本地 skills 目录
 
-### `agent_end` 和 main-turn proxy 的关系
+### `agent_end` 和 main-turn proxy 的关系（sidecar 模式）
 
 - 如果 main-turn proxy 已开启，且模型流量真的走 sidecar `/v1/chat/completions`，sidecar 会优先用 main-turn 抽取
 - 这时 `agent_end` 只负责归档，不会再调度第二次抽取
 - 如果 main-turn proxy 没真正生效，`agent_end` 仍然是在线抽取入口
 - fallback 抽取只会对 `turn_type == main` 的 payload 触发
+- 现在有硬去重保护：如果某个闭合会话已经存在非失败的 `openclaw_main_turn_proxy` 抽取事件，`agent_end` 的会话闭合 fallback 会跳过该会话
+- 现在支持可选会话空闲超时收口（`AUTOSKILL_OPENCLAW_SESSION_IDLE_TIMEOUT_S`），用于在缺少显式 `session_done` 时补充闭合触发
 
 ## 常用操作
 
-### 启动 / 停止 / 状态
+### 启动 / 停止 / 状态（仅 sidecar 运行时）
 
 ```bash
 ~/.openclaw/plugins/autoskill-openclaw-plugin/start.sh
@@ -267,7 +353,7 @@ sidecar 收到后会：
 ~/.openclaw/plugins/autoskill-openclaw-plugin/stop.sh
 ```
 
-### 手动触发一次镜像同步
+### 手动触发一次镜像同步（仅 sidecar 运行时）
 
 ```bash
 curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/skills/sync \
@@ -275,14 +361,14 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/openclaw/skills/sync \
   -d '{"user":"u1"}'
 ```
 
-### 查看抽取事件
+### 查看抽取事件（仅 sidecar 运行时）
 
 ```bash
 curl http://127.0.0.1:9100/v1/autoskill/extractions/latest?user=<user_id>
 curl -N http://127.0.0.1:9100/v1/autoskill/extractions/<job_id>/events
 ```
 
-### 离线导入会话
+### 离线导入会话（仅 sidecar 运行时）
 
 ```bash
 curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
@@ -300,9 +386,19 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
   }'
 ```
 
+### 验收脚本（sidecar / embedded）
+
+```bash
+# sidecar 运行时冒烟检查（health/capabilities/hooks/抽取事件）
+bash OpenClaw-Plugin/scripts/verify_sidecar.sh
+
+# embedded 运行时冒烟检查（adapter embedded 测试）
+bash OpenClaw-Plugin/scripts/verify_embedded.sh
+```
+
 ## 关键环境变量
 
-### 运行时基础配置
+### 运行时基础配置（服务/sidecar）
 
 - `AUTOSKILL_PROXY_HOST`
 - `AUTOSKILL_PROXY_PORT`
@@ -313,13 +409,13 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
 - `AUTOSKILL_EMBEDDINGS_MODEL`
 - `AUTOSKILL_PROXY_API_KEY`
 
-### 默认推荐路径
+### 推荐 embedded 主线
 
+- `AUTOSKILL_OPENCLAW_RUNTIME_MODE=embedded`
 - `AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror`
+- `AUTOSKILL_SKILLBANK_DIR`
 - `AUTOSKILL_OPENCLAW_SKILLS_DIR`
-- `AUTOSKILL_OPENCLAW_INSTALL_USER_ID`
-- `AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_ENABLED`
-- `AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_DIR`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR`
 
 ### 可选检索注入路径
 
@@ -330,7 +426,7 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
 - `AUTOSKILL_SKILL_RETRIEVAL_INJECTION_MODE`
 - `AUTOSKILL_REWRITE_MODE`
 
-### 可选 main-turn proxy 路径
+### 可选 main-turn proxy 路径（仅 sidecar）
 
 - `AUTOSKILL_OPENCLAW_MAIN_TURN_EXTRACT`
 - `AUTOSKILL_OPENCLAW_AGENT_END_EXTRACT`
@@ -339,6 +435,17 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
 - `AUTOSKILL_OPENCLAW_PROXY_CONNECT_TIMEOUT_S`
 - `AUTOSKILL_OPENCLAW_PROXY_READ_TIMEOUT_S`
 - `AUTOSKILL_OPENCLAW_INGEST_WINDOW`
+
+### 可选 embedded 调用回退路径
+
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES`
+  - 默认：`openclaw-runtime,openclaw-runtime-subagent,openclaw-config-resolve,manual`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_TIMEOUT_MS`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_RETRIES`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_OPENCLAW_HOME`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_BASE_URL`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_API_KEY`
+- `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_MODEL`
 
 ## API 一览
 
@@ -380,7 +487,8 @@ curl -X POST http://127.0.0.1:9100/v1/autoskill/conversations/import \
 
 ## 说明
 
-- sidecar 不会替换 OpenClaw 的 memory 机制
-- sidecar 不需要自定义 ContextEngine
-- 默认 mirror 模式下，OpenClaw 走的是标准本地 skills，而不是第二层 sidecar 在线检索
+- 插件不会替换 OpenClaw 的 memory 机制
+- 插件不需要自定义 ContextEngine
+- 默认 mirror 模式下，OpenClaw 走的是标准本地 skills，而不是第二层检索
+- sidecar 是可选模式；默认主线推荐 embedded
 - 如果 `openclaw.json` 不是合法 JSON，安装脚本会直接停止，不会覆盖
