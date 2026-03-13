@@ -22,7 +22,7 @@ and continuously evolves existing Skills through merge + version updates.
 ## News
 
 - **2026-03-01**: Added offline skill extraction from archived conversations.
-- **2025-02-26**: **AutoSkill-OpenClaw-Plugin 1.0** released.
+- **2025-02-26**: **AutoSkill4OpenClaw 1.0** released.
 - **2025-02-04**: **AutoSkill 1.0** released.
 
 ## Table of Contents
@@ -62,7 +62,7 @@ and continuously evolves existing Skills through merge + version updates.
   - [9.3 Startup Offline Maintenance (Auto)](#93-startup-offline-maintenance-auto)
   - [9.4 OpenAI-Compatible Proxy API](#94-openai-compatible-proxy-api)
   - [9.5 Auto Evaluation Script](#95-auto-evaluation-script)
-  - [9.6 OpenClaw Plugin (autoskill)](#96-openclaw-plugin-autoskill)
+  - [9.6 AutoSkill4OpenClaw](#96-autoskill4openclaw)
 - [11. Citation](#11-citation)
 - [12. Contributions and Acknowledgments](#12-contributions-and-acknowledgments)
 
@@ -320,7 +320,7 @@ Notes:
 - `autoskill/`: SDK core.
 - `examples/`: runnable demos and entry scripts.
 - `autoskill/interactive/server.py`: OpenAI-compatible reverse proxy runtime.
-- `OpenClaw-Plugin/`: local-deployable OpenClaw sidecar plugin for autoskill interface integration.
+- `AutoSkill4OpenClaw/`: local-deployable OpenClaw sidecar plugin for autoskill interface integration.
 - `web/`: static frontend assets for local Web UI.
 - `SkillBank/`: default local storage root.
 - `imgs/`: README demo images.
@@ -637,12 +637,12 @@ python3 -m examples.auto_evalution \
   --report-json ./proxy_eval_report.json
 ```
 
-### 9.6 OpenClaw Plugin (autoskill)
+### 9.6 AutoSkill4OpenClaw
 
 Deploy sidecar + native OpenClaw adapter (auto wiring):
 
 ```bash
-python3 OpenClaw-Plugin/install.py \
+python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
   --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
@@ -654,7 +654,7 @@ python3 OpenClaw-Plugin/install.py \
 ```
 
 Full plugin guide (install, wiring, runtime flow, verification):
-- `OpenClaw-Plugin/README.md`
+- `AutoSkill4OpenClaw/README.md`
 
 The installer automatically:
 - installs sidecar scripts
