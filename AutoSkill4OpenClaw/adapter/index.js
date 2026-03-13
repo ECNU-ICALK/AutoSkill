@@ -4,8 +4,8 @@ import path from "node:path";
 import { createEmbeddedProcessor } from "./embedded_runtime.js";
 
 const PLUGIN_ID = "autoskill-openclaw-adapter";
-const BEFORE_PROMPT_BUILD_HOOK_NAMES = ["before_prompt_build", "beforePromptBuild"];
-const AGENT_END_HOOK_NAMES = ["agent_end", "agentEnd"];
+const BEFORE_PROMPT_BUILD_HOOK_NAMES = ["before_prompt_build"];
+const AGENT_END_HOOK_NAMES = ["agent_end"];
 const DEFAULTS = {
   baseUrl: "http://127.0.0.1:9100/v1",
   apiKey: "",
@@ -1536,12 +1536,12 @@ function createAgentEndHandler(cfg, log, deps = {}) {
 }
 
 function registerLifecycleHook(api, hookName, handler, meta) {
-  if (api && typeof api.registerHook === "function") {
-    api.registerHook(hookName, handler, meta || {});
-    return;
-  }
   if (api && typeof api.on === "function") {
     api.on(hookName, handler);
+    return;
+  }
+  if (api && typeof api.registerHook === "function") {
+    api.registerHook(hookName, handler, meta || {});
     return;
   }
   throw new Error(`No hook registration API found for ${hookName}`);

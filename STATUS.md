@@ -947,3 +947,35 @@
 ### Risk Notes
 - Registering aliases may cause duplicate callbacks only if a runtime emits both naming variants for the same turn.
 - Existing extraction dedupe and fail-open behavior remain intact; no OpenClaw core patching introduced.
+
+## 2026-03-13 - Round 20 (typed hook registration correctness for OpenClaw 2026.3.x)
+
+### Scope
+- Target area: lifecycle hook wiring in adapter register path.
+- Objective: fix the real trigger blocker where plugin is loaded but typed lifecycle hooks are never fired.
+
+### Issue Found
+- Adapter previously preferred `api.registerHook(...)` when both `registerHook` and `on` existed.
+- In OpenClaw 2026.3.x, typed lifecycle hooks (`before_prompt_build`, `agent_end`) are registered through `api.on(...)`, while `registerHook` is for internal hooks.
+- Result: plugin can appear loaded (prompt pack log present), but per-turn lifecycle callbacks are not triggered.
+
+### Fixes Applied
+- `AutoSkill4OpenClaw/adapter/index.js`
+  - changed hook registration priority:
+    - prefer `api.on(...)` first
+    - fallback to `api.registerHook(...)` only if `on` is unavailable
+  - removed non-official camelCase hook alias registration; keep official typed names only:
+    - `before_prompt_build`
+    - `agent_end`
+- `AutoSkill4OpenClaw/adapter/index.test.mjs`
+  - restored registration assertion to official snake_case hook names.
+  - added regression test:
+    - when both `on` and `registerHook` exist, adapter must register typed lifecycle hooks via `on`.
+
+### Validation
+- `cd AutoSkill4OpenClaw/adapter && npm test` (pass, 53 tests)
+- `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q` (pass, 49 tests)
+
+### Risk Notes
+- Very low risk: this aligns adapter behavior to OpenClaw official typed lifecycle API.
+- Backward compatibility preserved for environments exposing only `registerHook` (fallback path retained).

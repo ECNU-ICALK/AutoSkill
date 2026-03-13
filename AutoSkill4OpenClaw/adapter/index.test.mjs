@@ -521,12 +521,35 @@ test("plugin registers before_prompt_build without re-registering before_agent_s
     },
   });
 
-  const names = hooks.map((hook) => hook.name);
-  assert.equal(names.includes("before_prompt_build"), true);
-  assert.equal(names.includes("beforePromptBuild"), true);
-  assert.equal(names.includes("agent_end"), true);
-  assert.equal(names.includes("agentEnd"), true);
+  assert.deepEqual(
+    hooks.map((hook) => hook.name),
+    ["before_prompt_build", "agent_end"],
+  );
   assert.equal(hooks.some((hook) => hook.name === "before_agent_start"), false);
+});
+
+test("plugin prefers api.on for typed lifecycle hooks when on/registerHook both exist", () => {
+  const onHooks = [];
+  const registerHooks = [];
+  plugin.register({
+    pluginConfig: {
+      skillRetrieval: { enabled: false },
+      extractOnAgentEnd: false,
+    },
+    logger: makeLogger(),
+    on(name, handler) {
+      onHooks.push({ name, handler });
+    },
+    registerHook(name, handler, meta) {
+      registerHooks.push({ name, handler, meta });
+    },
+  });
+
+  assert.deepEqual(
+    onHooks.map((hook) => hook.name),
+    ["before_prompt_build", "agent_end"],
+  );
+  assert.equal(registerHooks.length, 0);
 });
 
 test("agent_end payload includes session and turn metadata when available", () => {
