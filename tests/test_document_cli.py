@@ -117,7 +117,7 @@ class DocumentCliTest(unittest.TestCase):
                     self._mock_response(),
                     "--maintenance-strategy",
                     "llm",
-                    "--school-name",
+                    "--family-name",
                     "认知行为疗法",
                     "--profile-id",
                     "test_therapy_v2",
@@ -132,7 +132,7 @@ class DocumentCliTest(unittest.TestCase):
             self.assertGreater(payload["total_support_records"], 0)
             self.assertGreater(payload["total_skill_drafts"], 0)
             self.assertGreater(payload["total_skill_specs"], 0)
-            self.assertEqual(payload["visible_tree"]["affected_schools"], ["认知行为疗法"])
+            self.assertEqual(payload["visible_tree"]["affected_families"], ["认知行为疗法"])
 
     def test_extract_command_returns_support_records_and_drafts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -231,6 +231,26 @@ class DocumentCliTest(unittest.TestCase):
             self.assertGreater(len(payload["support_records"]), 0)
             self.assertGreater(len(payload["skill_drafts"]), 0)
             self.assertGreater(len(payload["skills"]), 0)
+
+    def test_parser_accepts_domain_type_custom_taxonomy_and_family_name(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "ingest",
+                "--file",
+                "/tmp/doc.md",
+                "--domain-type",
+                "chemistry",
+                "--skill-taxonomy",
+                "/tmp/custom-taxonomy.yaml",
+                "--family-name",
+                "有机合成",
+            ]
+        )
+
+        self.assertEqual(args.domain_type, "chemistry")
+        self.assertEqual(args.skill_taxonomy, "/tmp/custom-taxonomy.yaml")
+        self.assertEqual(args.family_name, "有机合成")
 
     def test_standalone_package_cli_routes_to_document_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -359,7 +379,7 @@ class DocumentCliTest(unittest.TestCase):
                     self._mock_response(),
                     "--maintenance-strategy",
                     "llm",
-                    "--school-name",
+                    "--family-name",
                     "认知行为疗法",
                     "--profile-id",
                     "test_therapy_v2",
@@ -371,7 +391,7 @@ class DocumentCliTest(unittest.TestCase):
             )
 
             self.assertEqual(payload["total_documents"], 1)
-            self.assertEqual(payload["visible_tree"]["affected_schools"], ["认知行为疗法"])
+            self.assertEqual(payload["visible_tree"]["affected_families"], ["认知行为疗法"])
             self.assertGreaterEqual(len(list(payload.get("staging_runs") or [])), 1)
 
     def test_diag_command_writes_jsonl_report(self) -> None:
@@ -419,7 +439,7 @@ class DocumentCliTest(unittest.TestCase):
                     self._mock_response(),
                     "--maintenance-strategy",
                     "llm",
-                    "--school-name",
+                    "--family-name",
                     "认知行为疗法",
                     "--profile-id",
                     "test_therapy_v2",
@@ -437,13 +457,13 @@ class DocumentCliTest(unittest.TestCase):
                     tmpdir,
                     "--profile-id",
                     "test_therapy_v2",
-                    "--school-name",
+                    "--family-name",
                     "认知行为疗法",
                     "--json",
                 ]
             )
-            self.assertEqual(hierarchy["route"], "school_hierarchy")
-            self.assertEqual(hierarchy["school_name"], "认知行为疗法")
+            self.assertEqual(hierarchy["route"], "family_hierarchy")
+            self.assertEqual(hierarchy["family_name"], "认知行为疗法")
             self.assertGreaterEqual(len(list(hierarchy.get("hits") or [])), 1)
 
             merge_payload = self._run_main_json(
@@ -453,7 +473,7 @@ class DocumentCliTest(unittest.TestCase):
                     tmpdir,
                     "--profile-id",
                     "test_therapy_v2",
-                    "--school-name",
+                    "--family-name",
                     "认知行为疗法",
                     "--child-type",
                     "intake",

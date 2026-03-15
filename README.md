@@ -289,12 +289,12 @@ Documents
   -> extract (SupportRecord + SkillDraft)
   -> compile (SkillSpec)
   -> versioning + registry (lifecycle / provenance / history)
-  -> optional SkillBank store upsert
+  -> staged snapshots + final SkillBank store + visible family tree
 ```
 
 - The old `autoskill/offline/document` module has been migrated into top-level `AutoSkill4Doc/`.
 - The document pipeline is now standalone: use `autoskill4doc ...` or `python3 -m AutoSkill4Doc ...`.
-- The current CLI exposes staged commands: `build`, `ingest`, `extract`, and `compile`.
+- The current CLI exposes staged commands: `build`, `llm-extract`, `ingest`, `extract`, `compile`, `diag`, `retrieve-hierarchy`, `canonical-merge`, and `migrate-layout`.
 - Detailed document-pipeline design and options: [AutoSkill4Doc/README.md](AutoSkill4Doc/README.md).
 
 ## 5. SkillBank Storage Layout
@@ -407,10 +407,12 @@ python3 -m autoskill.offline.conversation.extract \
 # 3) Document -> skill extraction
 python3 -m AutoSkill4Doc llm-extract \
   --file ./data/docs \
-  --user-id u1 \
+  --domain psychology \
+  --domain-type psychology \
+  --family-name "认知行为疗法" \
   --llm-provider dashscope \
   --embeddings-provider dashscope \
-  --max-chars-per-chunk 6000
+  --max-chars-per-window 6000
 
 # 4) Agentic trajectory -> skill extraction
 python3 -m autoskill.offline.trajectory.extract \

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from autoskill import AutoSkill
 
 from .core.common import StageLogger
-from .core.config import DEFAULT_EXTRACT_STRATEGY, default_store_path
+from .core.config import DEFAULT_DOC_SKILL_USER_ID, DEFAULT_EXTRACT_STRATEGY, default_store_path
 from .stages.compiler import (
     SkillCompilationResult,
     SkillCompiler,
@@ -71,7 +71,7 @@ class DocumentBuildResult:
             "provenance_links": len(self.registration.provenance_links),
             "store_upserts": len(self.registration.upserted_store_skills),
             "staging_runs": len(self.registration.staging_runs),
-            "visible_schools": len(list((self.registration.visible_tree or {}).get("affected_schools") or [])),
+            "visible_families": len(list((self.registration.visible_tree or {}).get("affected_families") or [])),
             "visible_children": len(list((self.registration.visible_tree or {}).get("child_paths") or [])),
             "intermediate": dict(self.intermediate or {}),
             "errors": (
@@ -143,6 +143,7 @@ class DocumentBuildPipeline:
         documents: List[DocumentRecord],
         windows: Optional[List[StrictWindow]] = None,
         progress_callback=None,
+        accumulate_result: bool = True,
     ) -> SkillExtractionResult:
         """Runs the direct skill extraction stage only."""
 
@@ -152,6 +153,7 @@ class DocumentBuildPipeline:
             extractor=self.document_skill_extractor,
             logger=self.logger,
             progress_callback=progress_callback,
+            accumulate_result=accumulate_result,
         )
 
     def compile_skills(
@@ -177,7 +179,7 @@ class DocumentBuildPipeline:
         documents: List[DocumentRecord],
         support_records: List[SupportRecord],
         skill_specs: List[SkillSpec],
-        user_id: str,
+        user_id: str = DEFAULT_DOC_SKILL_USER_ID,
         metadata: Optional[Dict[str, Any]] = None,
         dry_run: bool = False,
         target_state: VersionState = VersionState.ACTIVE,
@@ -190,7 +192,7 @@ class DocumentBuildPipeline:
             support_records=list(support_records or []),
             skill_specs=list(skill_specs or []),
             sdk=self.sdk,
-            user_id=str(user_id or "").strip() or "u1",
+            user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
             metadata=metadata,
             dry_run=dry_run,
             target_state=target_state,
@@ -200,7 +202,7 @@ class DocumentBuildPipeline:
     def build(
         self,
         *,
-        user_id: str,
+        user_id: str = DEFAULT_DOC_SKILL_USER_ID,
         data: Optional[Any] = None,
         file_path: str = "",
         title: str = "",
@@ -253,6 +255,7 @@ class DocumentBuildPipeline:
             extracted_result = self.extract_skills(
                 documents=ingest_result.documents,
                 windows=ingest_result.windows,
+                accumulate_result=(intermediate_writer is None),
                 progress_callback=(
                     None
                     if intermediate_writer is None
@@ -260,12 +263,12 @@ class DocumentBuildPipeline:
                         record=record,
                         supports=supports,
                         drafts=drafts,
-                        cumulative=cumulative,
                         total_documents=len(ingest_result.documents),
                     )
                 ),
             )
             if intermediate_writer is not None:
+                extracted_result = intermediate_writer.load_extract()
                 intermediate_writer.write_extract(extracted_result)
                 intermediate_summary = intermediate_writer.summary().to_dict()
             compiled_result = self.compile_skills(

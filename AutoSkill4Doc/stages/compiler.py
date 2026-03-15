@@ -308,6 +308,20 @@ class LLMSkillCompiler:
             return []
 
         out: List[SkillSpec] = []
+        source_domain_types = dedupe_strings(
+            [
+                str((draft.metadata or {}).get("domain_type") or "").strip()
+                for draft in drafts
+                if str((draft.metadata or {}).get("domain_type") or "").strip()
+            ]
+        )
+        source_taxonomy_ids = dedupe_strings(
+            [
+                str((draft.metadata or {}).get("taxonomy_id") or "").strip()
+                for draft in drafts
+                if str((draft.metadata or {}).get("taxonomy_id") or "").strip()
+            ]
+        )
         for raw_item in raw_skills:
             item = maybe_json_dict(raw_item)
             name = str(item.get("name") or "").strip()
@@ -425,6 +439,8 @@ class LLMSkillCompiler:
                     "files": maybe_json_dict(item.get("files")),
                     "resources": maybe_json_dict(item.get("resources")),
                     "confidence": clip_confidence(item.get("confidence"), default=0.75),
+                    "domain_type": source_domain_types[0] if source_domain_types else "",
+                    "taxonomy_id": source_taxonomy_ids[0] if source_taxonomy_ids else "",
                 },
                 version="0.1.0",
                 status=target_state,

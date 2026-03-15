@@ -27,16 +27,30 @@ _OFFLINE_CHANNELS = {
 }
 
 
+def _taxonomy_guidance_text(taxonomy: Any) -> str:
+    """Builds prompt guidance for one selected skill taxonomy."""
+
+    if taxonomy is None:
+        return ""
+    guidance = getattr(taxonomy, "prompt_guidance", None)
+    if callable(guidance):
+        text = str(guidance() or "").strip()
+        if text:
+            return f"\nTaxonomy guidance:\n{text}\n"
+    return ""
+
+
 def is_offline_channel(channel: str) -> bool:
     """Run is offline channel."""
     return str(channel or "").strip().lower() in _OFFLINE_CHANNELS
 
 
-def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
+def build_offline_extract_prompt(*, channel: str, max_candidates: int, taxonomy: Any = None) -> str:
     """Run build offline extract prompt."""
     ch = str(channel or "").strip().lower()
 
     if ch == OFFLINE_CHANNEL_DOC:
+        taxonomy_guidance = _taxonomy_guidance_text(taxonomy)
         return (
             "You are AutoSkill's offline DOCUMENT skill extractor.\n"
             "Task: convert document evidence into reusable, executable counseling assets.\n"
@@ -55,6 +69,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
             "11) Include 1-3 short therapist-response examples when the source supports them.\n"
             "12) If no durable reusable asset exists, return {\"skills\": []}.\n"
             "13) Keep only assets likely to be reused by the same user/team.\n\n"
+            f"{taxonomy_guidance}"
             f"Return schema: {{\"skills\": [...]}} with at most {max_candidates} item(s).\n"
             "Each skill item fields:\n"
             "- name, description, prompt, triggers, tags\n"
@@ -128,7 +143,7 @@ def build_offline_extract_prompt(*, channel: str, max_candidates: int) -> str:
     return ""
 
 
-def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
+def build_offline_repair_prompt(*, channel: str, max_candidates: int, taxonomy: Any = None) -> str:
     """Run build offline repair prompt."""
     ch = str(channel or "").strip().lower()
     if ch == OFFLINE_CHANNEL_DOC:
@@ -154,6 +169,8 @@ def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
             "Use USER turns as evidence. If input includes 'Primary User Questions', treat it as main evidence and full conversation as context only.\n"
         )
 
+    taxonomy_guidance = _taxonomy_guidance_text(taxonomy) if ch == OFFLINE_CHANNEL_DOC else ""
+
     return (
         f"You are a JSON fixer for offline {label} skill extraction.\n"
         "Given DATA and DRAFT, output ONLY strict JSON: {\"skills\": [...]} with no commentary.\n"
@@ -161,6 +178,7 @@ def build_offline_repair_prompt(*, channel: str, max_candidates: int) -> str:
         f"{conv_note}"
         "Keep only reusable, de-identified rules/workflows likely to be reused by the same user/team.\n"
         "Drop one-off facts, entity names, assistant/platform artifacts, and non-portable payload.\n"
+        f"{taxonomy_guidance}"
         f"Keep schema fields: {keep_fields}.\n"
         "If resources/files exist, keep only concise reusable assets with safe relative paths.\n"
         "Use one dominant language consistently across all textual fields; if unclear return {\"skills\": []}.\n"
@@ -273,6 +291,7 @@ def maybe_offline_prompt(
     channel: str,
     kind: str,
     max_candidates: Optional[int] = None,
+    taxonomy: Any = None,
 ) -> str:
     """Run maybe offline prompt."""
     ch = str(channel or "").strip().lower()
@@ -280,9 +299,9 @@ def maybe_offline_prompt(
     if not is_offline_channel(ch):
         return ""
     if k == "extract":
-        return build_offline_extract_prompt(channel=ch, max_candidates=int(max_candidates or 1))
+        return build_offline_extract_prompt(channel=ch, max_candidates=int(max_candidates or 1), taxonomy=taxonomy)
     if k == "repair":
-        return build_offline_repair_prompt(channel=ch, max_candidates=int(max_candidates or 1))
+        return build_offline_repair_prompt(channel=ch, max_candidates=int(max_candidates or 1), taxonomy=taxonomy)
     if k == "manage_decide":
         return build_offline_manage_decide_prompt(ch)
     if k == "merge_gate":

@@ -43,13 +43,18 @@ python3 -m autoskill.offline.trajectory.extract \
 Document (standalone package):
 
 ```bash
-python3 -m AutoSkill4Doc llm-extract --file ./paper.md --dry-run
+python3 -m AutoSkill4Doc llm-extract \
+  --file ./paper.md \
+  --domain psychology \
+  --domain-type psychology \
+  --family-name "认知行为疗法" \
+  --dry-run
 ```
 
 Document (installed script):
 
 ```bash
-autoskill4doc llm-extract --file ./paper.md --json
+autoskill4doc llm-extract --file ./paper.md --family-name "认知行为疗法" --json
 ```
 
 ## Package Layout
@@ -71,12 +76,21 @@ AutoSkill4Doc/
   core/
     config.py
     provider_config.py
+    common.py
   document/
+    file_loader.py
     windowing.py
   stages/
+    diag.py
     extractor.py
     compiler.py
+    hierarchy.py
+    merge.py
+    migrate.py
   store/
+    layout.py
+    staging.py
     versioning.py
     registry.py
+    visible_tree.py
 ```

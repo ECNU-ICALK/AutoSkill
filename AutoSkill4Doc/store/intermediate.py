@@ -80,6 +80,11 @@ class IntermediateRunWriter:
             "completed_stages": [],
             "metadata": dict(metadata or {}),
             "counts": {},
+            "progress_counts": {
+                "extract_support_records": 0,
+                "extract_skill_drafts": 0,
+                "processed_documents": 0,
+            },
             "source_file": "",
         }
         os.makedirs(self.run_dir, exist_ok=True)
@@ -127,26 +132,24 @@ class IntermediateRunWriter:
         record: DocumentRecord,
         supports: List[SupportRecord],
         drafts: List[SkillDraft],
-        cumulative: SkillExtractionResult,
         total_documents: int,
     ) -> None:
         """Writes per-document extraction progress as soon as one doc finishes."""
 
+        progress = dict(self._state.get("progress_counts") or {})
+        progress["extract_support_records"] = int(progress.get("extract_support_records") or 0) + len(list(supports or []))
+        progress["extract_skill_drafts"] = int(progress.get("extract_skill_drafts") or 0) + len(list(drafts or []))
+        progress["processed_documents"] = int(progress.get("processed_documents") or 0) + 1
+        self._state["progress_counts"] = progress
         payload = {
             "doc_id": record.doc_id,
             "title": record.title,
             "source_file": str((record.metadata or {}).get("source_file") or ""),
             "supports": [support.to_dict() for support in list(supports or [])],
             "skill_drafts": [draft.to_dict() for draft in list(drafts or [])],
-            "cumulative_support_records": len(list(cumulative.support_records or [])),
-            "cumulative_skill_drafts": len(list(cumulative.skill_drafts or [])),
-            "processed_documents": len(
-                {
-                    str(item.doc_id or "").strip()
-                    for item in list(cumulative.documents or [])
-                    if str(item.doc_id or "").strip()
-                }
-            ),
+            "cumulative_support_records": int(progress.get("extract_support_records") or 0),
+            "cumulative_skill_drafts": int(progress.get("extract_skill_drafts") or 0),
+            "processed_documents": int(progress.get("processed_documents") or 0),
             "total_documents": int(total_documents or 0),
         }
         doc_name = str(record.doc_id or "").strip() or "document"
@@ -155,9 +158,9 @@ class IntermediateRunWriter:
             stage="extract_running",
             counts={
                 "documents": total_documents,
-                "processed_documents": min(total_documents, self._count_progress_documents()),
-                "support_records": len(list(cumulative.support_records or [])),
-                "skill_drafts": len(list(cumulative.skill_drafts or [])),
+                "processed_documents": min(total_documents, int(progress.get("processed_documents") or 0)),
+                "support_records": int(progress.get("extract_support_records") or 0),
+                "skill_drafts": int(progress.get("extract_skill_drafts") or 0),
             },
         )
 
@@ -181,6 +184,45 @@ class IntermediateRunWriter:
                 "documents": len(result.documents),
                 "windows": len(result.windows),
             },
+        )
+
+    def load_extract(self) -> SkillExtractionResult:
+        """Loads aggregated extraction results from per-document progress files."""
+
+        extract_dir = os.path.join(self.run_dir, "extract", "documents")
+        support_records: List[SupportRecord] = []
+        skill_drafts: List[SkillDraft] = []
+        errors: List[Dict[str, Any]] = []
+        if os.path.isdir(extract_dir):
+            for name in sorted(os.listdir(extract_dir)):
+                if not name.endswith(".json"):
+                    continue
+                path = os.path.join(extract_dir, name)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        payload = json.load(f)
+                except Exception as exc:
+                    errors.append({"path": path, "error": str(exc)})
+                    continue
+                for item in list(payload.get("supports") or []):
+                    if isinstance(item, dict):
+                        support_records.append(SupportRecord.from_dict(item))
+                for item in list(payload.get("skill_drafts") or []):
+                    if isinstance(item, dict):
+                        skill_drafts.append(SkillDraft.from_dict(item))
+        seen_supports = {}
+        for support in support_records:
+            seen_supports[support.support_id] = support
+        seen_drafts = {}
+        for draft in skill_drafts:
+            seen_drafts[draft.draft_id] = draft
+        return SkillExtractionResult(
+            documents=[],
+            windows=[],
+            support_records=list(seen_supports.values()),
+            skill_drafts=list(seen_drafts.values()),
+            errors=[{"stage": "intermediate_extract_load", **item} for item in errors],
+            extractor_name="llm",
         )
 
     def write_compile(self, result: SkillCompilationResult) -> None:
@@ -251,12 +293,6 @@ class IntermediateRunWriter:
         self._state["last_error"] = str(error or "").strip()
         self._flush_state()
 
-    def _count_progress_documents(self) -> int:
-        path = os.path.join(self.run_dir, "extract", "documents")
-        if not os.path.isdir(path):
-            return 0
-        return len([name for name in os.listdir(path) if name.endswith(".json")])
-
     def _write_json(self, relative_path: str, payload: Any) -> str:
         path = os.path.join(self.run_dir, relative_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -295,4 +331,3 @@ class IntermediateRunWriter:
         os.makedirs(os.path.dirname(self.status_path), exist_ok=True)
         with open(self.status_path, "w", encoding="utf-8") as f:
             json.dump(self._state, f, ensure_ascii=False, indent=2, sort_keys=False)
-

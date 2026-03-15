@@ -16,6 +16,7 @@ from autoskill.llm.factory import build_llm
 from autoskill.utils.time import now_iso
 
 from ..core.common import StageLogger, emit_stage_log, summarize_names
+from ..core.config import DEFAULT_DOC_SKILL_USER_ID
 from ..core.llm_utils import (
     coerce_str_list,
     compact_text_list,
@@ -212,8 +213,9 @@ def _layout_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Collects visible-layout metadata carried by one run."""
 
     md = dict(metadata or {})
+    family_name = str(md.get("family_name") or md.get("school_name") or "").strip()
     return {
-        "school_name": str(md.get("school_name") or "").strip(),
+        "family_name": family_name,
         "profile_id": str(md.get("profile_id") or "").strip(),
         "taxonomy_axis": str(md.get("taxonomy_axis") or "").strip(),
         "taxonomy_class": str(md.get("taxonomy_class") or "").strip(),
@@ -251,7 +253,7 @@ def _store_root_from_context(*, registry: DocumentRegistry, sdk: Optional[AutoSk
 
 
 def _staging_bucket_for_skill(skill: SkillSpec, *, metadata: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
-    """Builds one `(profile_id, school_id, child_type)` staging bucket tuple."""
+    """Builds one `(profile_id, family_id, child_type)` staging bucket tuple."""
 
     md = dict(metadata or {})
     skill_md = dict(skill.metadata or {})
@@ -260,13 +262,15 @@ def _staging_bucket_for_skill(skill: SkillSpec, *, metadata: Optional[Dict[str, 
         or str(md.get("profile_id") or "").strip()
         or "document_profile"
     )
-    school_id = (
-        str(skill_md.get("school_name") or "").strip()
+    family_id = (
+        str(skill_md.get("family_name") or "").strip()
+        or str(skill_md.get("school_name") or "").strip()
+        or str(md.get("family_name") or "").strip()
         or str(skill_md.get("taxonomy_class") or "").strip()
         or str(md.get("school_name") or "").strip()
         or str(skill.domain or "").strip()
         or str(skill.method_family or "").strip()
-        or "unknown_school"
+        or "unknown_family"
     )
     child_type = (
         str(skill_md.get("child_type") or "").strip()
@@ -275,7 +279,7 @@ def _staging_bucket_for_skill(skill: SkillSpec, *, metadata: Optional[Dict[str, 
         or str(md.get("child_type") or "").strip()
         or "general_child"
     )
-    return profile_id, school_id, child_type
+    return profile_id, family_id, child_type
 
 
 class VersionManager:
@@ -1174,7 +1178,7 @@ def register_versions(
     skill_specs: Sequence[SkillSpec],
     sdk: Optional[AutoSkill] = None,
     llm: Optional[LLM] = None,
-    user_id: str = "u1",
+    user_id: str = DEFAULT_DOC_SKILL_USER_ID,
     metadata: Optional[Dict[str, Any]] = None,
     dry_run: bool = False,
     target_state: VersionState = VersionState.ACTIVE,
@@ -1196,6 +1200,7 @@ def register_versions(
     reconciled.skill_specs = [_merge_layout_metadata(skill, metadata=metadata) for skill in list(reconciled.skill_specs or [])]
     reconciled.documents = list(documents or [])
     reconciled.dry_run = bool(dry_run)
+    persisted_store_skills: List[Any] = []
 
     if not dry_run:
         for document in documents or []:
@@ -1242,9 +1247,10 @@ def register_versions(
                     with activate_offline_prompt_runtime(sdk=sdk, channel="offline_extract_from_doc"):
                         updated = sdk.maintainer.apply(
                             candidates,
-                            user_id=str(user_id or "").strip() or "u1",
+                            user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
                             metadata=md,
                         )
+                    persisted_store_skills = list(updated or [])
                     reconciled.upserted_store_skills = [_plain_skill(skill) for skill in (updated or [])]
                     emit_stage_log(
                         logger,
@@ -1258,6 +1264,11 @@ def register_versions(
                     logger,
                     f"[register_versions] dry-run store_upserts={len(candidates)} names={summarize_names([candidate.name for candidate in candidates])}",
                 )
+        if not dry_run and not persisted_store_skills:
+            try:
+                persisted_store_skills = list(sdk.store.list(user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID) or [])
+            except Exception:
+                persisted_store_skills = []
 
     if not dry_run:
         store_root = _store_root_from_context(registry=registry, sdk=sdk)
@@ -1274,7 +1285,7 @@ def register_versions(
 
             support_by_id = {support.support_id: support for support in list(reconciled.support_records or [])}
             document_by_id = {document.doc_id: document for document in list(documents or [])}
-            for (profile_id, school_id, child_type), bucket_skills in bucketed.items():
+            for (profile_id, family_id, child_type), bucket_skills in bucketed.items():
                 bucket_skill_ids = {skill.skill_id for skill in list(bucket_skills or [])}
                 bucket_support_ids = {
                     str(support_id or "").strip()
@@ -1299,7 +1310,7 @@ def register_versions(
                 bucket_existing_active = [
                     skill.to_dict()
                     for skill in preexisting_skills
-                    if skill.status in _ACTIVE_STORE_STATES and _staging_bucket_for_skill(skill, metadata=metadata) == (profile_id, school_id, child_type)
+                    if skill.status in _ACTIVE_STORE_STATES and _staging_bucket_for_skill(skill, metadata=metadata) == (profile_id, family_id, child_type)
                 ]
                 bucket_change_logs = [
                     dict(payload)
@@ -1309,12 +1320,12 @@ def register_versions(
                 staging_summary = write_registration_staging(
                     base_store_root=store_root,
                     profile_id=profile_id,
-                    school_id=school_id,
+                    family_id=family_id,
                     child_type=child_type,
                     run_id="",
                     documents=bucket_documents,
                     support_records=bucket_supports,
-                    raw_candidates=plain_skill_specs(raw_bucketed.get((profile_id, school_id, child_type)) or []),
+                    raw_candidates=plain_skill_specs(raw_bucketed.get((profile_id, family_id, child_type)) or []),
                     existing_active=bucket_existing_active,
                     canonical_results=plain_skill_specs(bucket_skills),
                     change_logs=bucket_change_logs,
@@ -1322,7 +1333,7 @@ def register_versions(
                 reconciled.staging_runs.append(staging_summary.to_dict())
                 emit_stage_log(
                     logger,
-                    f"[register_versions] staging profile={profile_id} school={school_id} child_type={child_type} skills={len(bucket_skills)}",
+                    f"[register_versions] staging profile={profile_id} family={family_id} child_type={child_type} skills={len(bucket_skills)}",
                 )
 
         try:
@@ -1332,8 +1343,9 @@ def register_versions(
                 documents=documents,
                 support_records=reconciled.support_records,
                 skill_specs=reconciled.skill_specs,
-                user_id=str(user_id or "").strip() or "u1",
+                user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
                 metadata=metadata,
+                store_skills=(persisted_store_skills if sdk is not None else None),
                 logger=logger,
             )
             reconciled.visible_tree = visible_tree.to_dict()

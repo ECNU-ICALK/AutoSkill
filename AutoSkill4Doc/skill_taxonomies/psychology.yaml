@@ -1,0 +1,71 @@
+{
+  "taxonomy_id": "psychology",
+  "domain_type": "psychology",
+  "display_name": "Psychology",
+  "default_base_type": "session_skill",
+  "family_axis": "疗法",
+  "default_family_name": "通用心理咨询",
+  "family_candidates": [
+    {
+      "id": "psychodynamic",
+      "name": "Psychodynamic（心理动力学）",
+      "aliases": ["Psychodynamic", "心理动力学", "psychodynamic", "psychodynamic therapy"]
+    },
+    {
+      "id": "behaviorism",
+      "name": "Behaviorism（行为主义）",
+      "aliases": ["Behaviorism", "行为主义", "behaviorism", "behavior therapy", "行为治疗"]
+    },
+    {
+      "id": "cbt",
+      "name": "CBT（认知行为疗法）",
+      "aliases": ["CBT", "认知行为疗法", "cognitive behavioral therapy"]
+    },
+    {
+      "id": "humanistic_existentialist",
+      "name": "Humanistic Existentialist（人本-存在主义）",
+      "aliases": [
+        "Humanistic Existentialist",
+        "人本-存在主义",
+        "humanistic existentialist",
+        "humanistic therapy",
+        "existential therapy",
+        "人本主义",
+        "存在主义"
+      ]
+    },
+    {
+      "id": "postmodernist",
+      "name": "Postmodernist（后现代主义）",
+      "aliases": [
+        "Postmodernist",
+        "后现代主义",
+        "postmodernist",
+        "solution-focused",
+        "narrative therapy",
+        "叙事疗法",
+        "焦点解决"
+      ]
+    }
+  ],
+  "asset_types": [
+    {
+      "base_type": "session_skill",
+      "label": "session_intervention",
+      "description": "One counseling session-phase workflow or intervention scaffold.",
+      "aliases": ["session_intervention", "session_skill", "session", "case_intervention"]
+    },
+    {
+      "base_type": "micro_skill",
+      "label": "micro_intervention",
+      "description": "One therapist move or small counseling micro-sequence.",
+      "aliases": ["micro_intervention", "micro_skill", "reflection_move", "reframe_move"]
+    },
+    {
+      "base_type": "safety_rule",
+      "label": "risk_rule",
+      "description": "Risk screening, escalation, crisis stabilization, referral, or safety planning rule.",
+      "aliases": ["risk_rule", "safety_rule", "crisis_rule", "referral_rule"]
+    }
+  ]
+}

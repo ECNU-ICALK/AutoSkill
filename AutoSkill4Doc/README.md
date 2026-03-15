@@ -16,7 +16,7 @@ document
   -> extract_skills (SupportRecord + SkillDraft)
   -> compile_skills (SkillSpec)
   -> register_versions
-  -> registry + visible parent/child skill tree + optional SkillBank store upsert
+  -> registry + staged snapshots + final SkillBank store + visible parent/child skill tree
 ```
 
 Core layers:
@@ -38,6 +38,7 @@ Core layers:
 - lifecycle-aware versioning: `candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
 - visible parent/child output tree under the document skill library root
 - incremental intermediate snapshots under `.runtime/intermediate_runs/<run_id>/` during non-dry-run builds
+- configurable skill taxonomy via built-in or custom YAML files, with `domain_type` supplied by the caller rather than predicted by the model
 
 Input notes:
 - text / markdown / json / jsonl are read directly
@@ -71,7 +72,7 @@ Visible output tree:
 ```text
 <store_root>/
   README.md
-  <school_name>/
+  <family_name>/
     总技能/
       SKILL.md
       references/
@@ -90,6 +91,19 @@ Visible output tree:
     library_manifest.json
 ```
 
+Storage layers under the same library root:
+
+1. `.runtime/document_registry/`
+   - internal document/support/skill/version records
+2. `Users/<internal_user>/`
+   - final AutoSkill local-store skills after maintainer reconciliation
+3. `<family_name>/`
+   - visible parent/child projection built for browsing and export
+
+These layers share one root, but they are not the same dataset. During long runs,
+non-`dry-run` builds also write incremental snapshots under
+`.runtime/intermediate_runs/<run_id>/`.
+
 ## How Parent/Child Skills Are Generated
 
 The current implementation does not try to emit a whole visible skill tree in a
@@ -101,24 +115,140 @@ single extraction step. It works in two layers:
    - `compile` turns drafts into `SkillSpec`
    - `register_versions` persists registry state and lifecycle updates
 
-2. The visible parent/child tree is then projected from the current registry state
-   - each effective `SkillSpec` becomes one child skill under `子技能/<name>/SKILL.md`
-   - `references/evidence.md` and `references/evidence_manifest.json` are built from the linked `SupportRecord + DocumentRecord`
-   - one parent navigation skill is synthesized per `school_name`
+2. The visible parent/child tree is then projected for browsing/export
+   - if final store skills are available, the visible child skills are rebuilt from the reconciled `Users/<internal_user>/...` store results
+   - registry records are still used to stitch `references/evidence.md` and `references/evidence_manifest.json`
+   - one parent navigation skill is synthesized per `family_name`
    - `children_manifest.json` and `children_map.md` are emitted together with the parent skill
 
 This is intentional:
 
 - the source of truth stays in document/support/skill registry layers
 - the parent skill remains a navigation layer rather than raw truth
-- the visible tree can be rebuilt from registry state after updates
+- the visible tree can be rebuilt after updates without manual drift
+- the visible family tree now prefers final store-reconciled skills so it stays aligned with `Users/<internal_user>/...`
 
 To keep the visible layout stable, the most important flag is:
 
-- `--school-name`
+- `--family-name`
 
-`--profile-id` and `--taxonomy-axis` are also recommended if you want those tags
-and manifest fields preserved.
+If `--profile-id` is omitted, AutoSkill4Doc now derives one from the selected
+taxonomy plus `family_name`. If `--taxonomy-axis` is omitted, the selected
+taxonomy may provide a default axis label.
+`--user-id` is now treated as an internal store-routing detail and is no longer
+part of the normal documented workflow.
+
+## Skill Taxonomy
+
+`AutoSkill4Doc` keeps a small stable internal `asset_type` set for compile/versioning:
+
+- `macro_protocol`
+- `session_skill`
+- `micro_skill`
+- `safety_rule`
+- `knowledge_reference`
+
+On top of that, extraction can load a configurable skill taxonomy:
+
+- built-in via `--domain-type psychology` / `--domain-type chemistry`
+- custom via `--skill-taxonomy /path/to/taxonomy.yaml`
+
+Important:
+
+- `domain_type` is caller-provided configuration, not model output
+- the model still returns the stable internal `asset_type`
+- taxonomy files provide:
+  - domain-specific labels, aliases, and guidance
+  - optional default `family_name`
+  - optional default `taxonomy_axis`
+  - optional family candidates for future constrained family resolution
+
+Example:
+
+```bash
+python3 -m AutoSkill4Doc llm-extract \
+  --file ./chem_docs \
+  --domain chemistry \
+  --domain-type chemistry \
+  --family-name "分析化学" \
+  --skill-taxonomy ./custom-taxonomy.yaml \
+  --store-path ./SkillBank/DocSkill
+```
+
+## Configuration Files
+
+AutoSkill4Doc currently uses three configuration layers:
+
+1. Built-in taxonomy files
+   - [AutoSkill4Doc/skill_taxonomies/default.yaml](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/skill_taxonomies/default.yaml)
+   - [AutoSkill4Doc/skill_taxonomies/psychology.yaml](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/skill_taxonomies/psychology.yaml)
+   - [AutoSkill4Doc/skill_taxonomies/chemistry.yaml](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/skill_taxonomies/chemistry.yaml)
+2. One optional user taxonomy file passed via `--skill-taxonomy`
+3. Runtime CLI arguments and provider env vars
+
+How taxonomy loading works:
+
+- `default.yaml` is always loaded first
+- if `--domain-type psychology` / `chemistry` is set, the matching built-in file is overlaid on top of `default.yaml`
+- if `--skill-taxonomy /path/to/file.yaml` is set, that file is used as the overlay instead of the built-in domain file
+- the final resolved values then feed:
+  - extraction prompt guidance
+  - `asset_type` alias normalization
+  - default `family_name`
+  - default `taxonomy_axis`
+  - auto-derived `profile_id`
+
+Important taxonomy fields:
+
+- `taxonomy_id`: stable taxonomy id used when deriving `profile_id`
+- `domain_type`: the externally supplied domain type name
+- `display_name`: human-readable label
+- `default_base_type`: fallback internal `asset_type`
+- `family_axis`: default visible axis label, such as `疗法` or `实验路线`
+- `default_family_name`: fallback visible family name
+- `family_candidates`: optional constrained candidate set for future family resolution
+- `asset_types`: domain labels mapped back to stable internal base types
+
+Minimal taxonomy example:
+
+```yaml
+taxonomy_id: psychology
+domain_type: psychology
+display_name: Psychology
+default_base_type: session_skill
+family_axis: 疗法
+default_family_name: 通用心理咨询
+family_candidates:
+  - id: cbt
+    name: CBT（认知行为疗法）
+    aliases: ["CBT", "认知行为疗法", "cognitive behavioral therapy"]
+asset_types:
+  - base_type: session_skill
+    label: session_intervention
+    description: One counseling workflow or session scaffold.
+    aliases: ["session_intervention", "session_skill"]
+```
+
+Other configuration sources:
+
+- [AutoSkill4Doc/core/config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/config.py)
+  - code defaults such as default store path, runtime path, and extract strategy
+- [AutoSkill4Doc/core/provider_config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/provider_config.py)
+  - provider/env resolution for `dashscope`, `glm`, `openai`, `anthropic`, and `generic`
+
+Provider config is environment-variable based rather than file-based. Common examples:
+
+- DashScope: `DASHSCOPE_API_KEY`, optional `DASHSCOPE_MODEL`, `DASHSCOPE_EMBED_MODEL`
+- GLM: `ZHIPUAI_API_KEY` or `BIGMODEL_API_KEY`
+- Generic backend: `AUTOSKILL_GENERIC_LLM_URL`, `AUTOSKILL_GENERIC_EMBED_URL`
+
+Resolution priority:
+
+- explicit CLI argument
+- custom taxonomy file
+- built-in taxonomy file
+- code default in `core/config.py`
+- provider env vars for backend credentials and endpoint URLs
 
 ## Is The Flow Reasonable
 
@@ -126,7 +256,7 @@ For the current MVP, yes:
 
 - extraction and visible layout generation are decoupled
 - parent/child directories are a projection, not the only truth layer
-- rebuilding one school directory from registry state avoids manual drift
+- rebuilding one family directory from final store output plus registry evidence avoids manual drift
 
 But this is still simpler than the full paper target:
 
@@ -134,6 +264,8 @@ But this is still simpler than the full paper target:
 - the visible tree already matches the target directory shape
 - the full `single-document standardization + canonical merge + parent synthesis`
   quality pipeline is not fully implemented yet
+- `.runtime/document_registry/` may still contain more internal skill records than
+  the final `Users/<internal_user>/...` store and visible `<family_name>/...` tree
 
 Stored entities:
 
@@ -151,27 +283,28 @@ Standalone CLI:
 
 ```bash
 python3 -m AutoSkill4Doc build --file ./paper.md --dry-run
-python3 -m AutoSkill4Doc llm-extract --file ./cbt_docs --school-name "认知行为疗法"
+python3 -m AutoSkill4Doc llm-extract --file ./cbt_docs --family-name "认知行为疗法"
 python3 -m AutoSkill4Doc ingest --file ./docs/ --json
 python3 -m AutoSkill4Doc extract --file ./paper.md --json
 autoskill4doc compile --file ./paper.md --json
 python3 -m AutoSkill4Doc diag --file ./paper.md --report-path ./diag.jsonl --json
-python3 -m AutoSkill4Doc retrieve-hierarchy --store-path ./SkillBank/DocSkill --profile-id test_therapy_v2 --school-name "认知行为疗法" --json
-python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --profile-id test_therapy_v2 --school-name "认知行为疗法" --child-type intake --json
+python3 -m AutoSkill4Doc retrieve-hierarchy --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --json
+python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --child-type intake --json
 python3 -m AutoSkill4Doc migrate-layout --store-path ./SkillBank/DocSkill --json
 
 python3 -m AutoSkill4Doc build \
   --file ./cbt_docs/ \
-  --school-name "认知行为疗法" \
-  --profile-id test_therapy_v2 \
-  --taxonomy-axis "疗法" \
+  --domain psychology \
+  --domain-type psychology \
+  --family-name "认知行为疗法" \
   --store-path ./SkillBank/DocSkill
 ```
 
 Notes:
+- `dry-run` runs ingest/extract/compile for inspection but does not write final registry/store/visible-tree results.
 - `diag` always runs in non-persisting dry-run mode.
 - non-`dry-run` `build` / `llm-extract` writes ingest/extract/compile/register snapshots to `.runtime/intermediate_runs/<run_id>/`.
-- `canonical-merge` currently inspects staged results and requires `--profile-id` plus `--school-name`.
+- `canonical-merge` currently inspects staged results and requires `--profile-id` plus `--family-name`.
 
 ## Python API
 
@@ -180,12 +313,10 @@ from AutoSkill4Doc import extract_from_doc
 
 result = extract_from_doc(
     sdk=sdk,
-    user_id="u1",
     file_path="./paper.md",
     domain="psychology",
-    school_name="认知行为疗法",
-    profile_id="test_therapy_v2",
-    taxonomy_axis="疗法",
+    domain_type="psychology",
+    family_name="认知行为疗法",
     dry_run=True,
 )
 ```
@@ -210,6 +341,8 @@ compiled = pipeline.compile_skills(
 - `extract.py` / `__main__.py`: standalone package CLI + API entrypoint
 - `pipeline.py`: staged orchestration
 - `ingest.py`: document normalization and incremental checks
+- `taxonomy.py`: built-in/custom skill taxonomy loading plus `family_name`/`profile_id` resolution
+- `document/file_loader.py`: directory/file loading, conversion fallback, and generated-artifact skipping
 - `document/windowing.py`: section filtering and strict/recommended window construction
 - `stages/extractor.py`: `DocumentRecord -> SupportRecord[] + SkillDraft[]`
 - `stages/compiler.py`: `SkillDraft[] -> SkillSpec[]`
@@ -219,7 +352,8 @@ compiled = pipeline.compile_skills(
 - `stages/migrate.py`: safe runtime layout preparation
 - `store/versioning.py`: skill-centric version/lifecycle reconciliation
 - `store/registry.py`: filesystem registry persistence
-- `store/visible_tree.py`: visible `总技能/子技能/references` export
+- `store/visible_tree.py`: visible `总技能/子技能/references` export, rebuilt from final store skills plus registry evidence
+- `store/intermediate.py`: incremental per-run ingest/extract/compile/register snapshots
 - `store/layout.py`: shared visible/runtime path conventions
 - `store/staging.py`: canonical-merge staging payload helpers
 - `core/config.py`: standalone AutoSkill4Doc defaults and paths

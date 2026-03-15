@@ -1,0 +1,41 @@
+{
+  "taxonomy_id": "default",
+  "domain_type": "default",
+  "display_name": "Default",
+  "default_base_type": "session_skill",
+  "family_axis": "",
+  "default_family_name": "未分类技能",
+  "family_candidates": [],
+  "asset_types": [
+    {
+      "base_type": "macro_protocol",
+      "label": "macro_protocol",
+      "description": "Cross-phase or multi-stage reusable protocol.",
+      "aliases": ["macro_protocol", "protocol", "macro"]
+    },
+    {
+      "base_type": "session_skill",
+      "label": "workflow_skill",
+      "description": "One reusable workflow-level skill or session-sized scaffold.",
+      "aliases": ["workflow_skill", "session_skill", "session", "skill"]
+    },
+    {
+      "base_type": "micro_skill",
+      "label": "micro_skill",
+      "description": "One tightly scoped move or mini-sequence.",
+      "aliases": ["micro_skill", "micro", "micro_intervention"]
+    },
+    {
+      "base_type": "safety_rule",
+      "label": "safety_rule",
+      "description": "Safety, escalation, compliance, or guardrail rule.",
+      "aliases": ["safety_rule", "safety", "risk_rule", "policy"]
+    },
+    {
+      "base_type": "knowledge_reference",
+      "label": "knowledge_reference",
+      "description": "Reference-style knowledge asset with limited direct execution content.",
+      "aliases": ["knowledge_reference", "knowledge", "reference"]
+    }
+  ]
+}

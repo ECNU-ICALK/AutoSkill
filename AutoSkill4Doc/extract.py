@@ -30,7 +30,13 @@ from typing import Any, Dict, List, Optional, Sequence
 from autoskill import AutoSkill, AutoSkillConfig
 
 from .core.common import StageLogger
-from .core.config import DEFAULT_EXTRACT_STRATEGY, SUPPORTED_EXTRACT_STRATEGIES, default_store_path, normalize_extract_strategy
+from .core.config import (
+    DEFAULT_DOC_SKILL_USER_ID,
+    DEFAULT_EXTRACT_STRATEGY,
+    SUPPORTED_EXTRACT_STRATEGIES,
+    default_store_path,
+    normalize_extract_strategy,
+)
 from .core.provider_config import (
     build_embeddings_config as _build_provider_embeddings_config,
     build_llm_config as _build_provider_llm_config,
@@ -43,24 +49,53 @@ from .stages.hierarchy import retrieve_hierarchy
 from .stages.merge import available_merge_child_types, canonical_merge_from_staging
 from .stages.migrate import migrate_layout
 from .store.staging import list_child_types
+from .taxonomy import SkillTaxonomy, list_builtin_skill_taxonomies, load_skill_taxonomy
 
 _DOCUMENT_CLI_EXAMPLES = (
     "Examples:\n"
     "  python -m AutoSkill4Doc build --file ./paper.md --dry-run\n"
-    "  python -m AutoSkill4Doc llm-extract --file ./cbt_docs --school-name '认知行为疗法'\n"
+    "  python -m AutoSkill4Doc llm-extract --file ./cbt_docs --family-name '认知行为疗法'\n"
     "  python -m AutoSkill4Doc diag --file ./paper.md --report-path ./diag.jsonl --json\n"
-    "  python -m AutoSkill4Doc retrieve-hierarchy --store-path SkillBank/DocSkill --profile-id test_therapy_v2 --school-name '认知行为疗法'\n"
-    "  python -m AutoSkill4Doc canonical-merge --store-path SkillBank/DocSkill --profile-id test_therapy_v2 --school-name '认知行为疗法' --child-type intake\n"
-    "  python -m AutoSkill4Doc build --file ./cbt_docs --school-name '认知行为疗法' --profile-id test_therapy_v2 --taxonomy-axis '疗法'\n"
+    "  python -m AutoSkill4Doc retrieve-hierarchy --store-path SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name '认知行为疗法'\n"
+    "  python -m AutoSkill4Doc canonical-merge --store-path SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name '认知行为疗法' --child-type intake\n"
+    "  python -m AutoSkill4Doc build --file ./cbt_docs --domain psychology --domain-type psychology --family-name '认知行为疗法'\n"
     "  python -m AutoSkill4Doc extract --file ./docs/ --json\n"
     "  autoskill4doc migrate-layout --store-path SkillBank/DocSkill --json"
 )
 
 
+def _resolve_taxonomy_context(
+    *,
+    domain: str,
+    domain_type: str,
+    skill_taxonomy_path: str,
+    family_name: str = "",
+    profile_id: str = "",
+    taxonomy_axis: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> tuple[SkillTaxonomy, str, str, str]:
+    """Resolves taxonomy, family name, axis label, and profile id."""
+
+    taxonomy = load_skill_taxonomy(
+        domain_type=str(domain_type or domain or "").strip(),
+        taxonomy_path=str(skill_taxonomy_path or "").strip(),
+    )
+    resolved_family = taxonomy.resolve_family_name(
+        requested=str(family_name or "").strip(),
+        metadata=metadata,
+    )
+    resolved_axis = taxonomy.resolve_axis_label(requested=str(taxonomy_axis or "").strip())
+    resolved_profile_id = taxonomy.derive_profile_id(
+        requested=str(profile_id or "").strip(),
+        family_name=resolved_family,
+    )
+    return taxonomy, resolved_family, resolved_axis, resolved_profile_id
+
+
 def extract_from_doc(
     *,
     sdk: AutoSkill,
-    user_id: str,
+    user_id: str = DEFAULT_DOC_SKILL_USER_ID,
     data: Optional[Any] = None,
     file_path: str = "",
     title: str = "",
@@ -79,9 +114,11 @@ def extract_from_doc(
     max_documents: int = 0,
     max_candidates_per_unit: int = 3,
     max_units_per_document: int = 0,
-    school_name: str = "",
+    family_name: str = "",
     profile_id: str = "",
     taxonomy_axis: str = "",
+    domain_type: str = "",
+    skill_taxonomy_path: str = "",
 ) -> Dict[str, Any]:
     """
     Runs the staged offline document pipeline and returns a compact summary.
@@ -97,12 +134,23 @@ def extract_from_doc(
     md.setdefault("source_type", str(source_type or "").strip() or "document")
     if hint and str(hint).strip():
         md.setdefault("hint", str(hint).strip())
-    if str(school_name or "").strip():
-        md["school_name"] = str(school_name).strip()
-    if str(profile_id or "").strip():
-        md["profile_id"] = str(profile_id).strip()
-    if str(taxonomy_axis or "").strip():
-        md["taxonomy_axis"] = str(taxonomy_axis).strip()
+    taxonomy, resolved_family, resolved_axis, resolved_profile_id = _resolve_taxonomy_context(
+        domain=domain,
+        domain_type=domain_type,
+        skill_taxonomy_path=skill_taxonomy_path,
+        family_name=family_name,
+        profile_id=profile_id,
+        taxonomy_axis=taxonomy_axis,
+        metadata=md,
+    )
+    if resolved_family:
+        md["family_name"] = resolved_family
+    if resolved_profile_id:
+        md["profile_id"] = resolved_profile_id
+    if resolved_axis:
+        md["taxonomy_axis"] = resolved_axis
+    if str(domain_type or domain or "").strip():
+        md["domain_type"] = str(domain_type or domain).strip()
 
     pipeline = build_default_document_pipeline(
         sdk=sdk,
@@ -115,10 +163,13 @@ def extract_from_doc(
             overlap_chars=int(overlap_chars or 0),
             max_candidates_per_unit=int(max_candidates_per_unit or 0) or 3,
             max_units_per_document=int(max_units_per_document or 0),
+            domain_type=taxonomy.domain_type,
+            skill_taxonomy_path=str(skill_taxonomy_path or "").strip(),
+            taxonomy=taxonomy,
         ),
     )
     result = pipeline.build(
-        user_id=str(user_id or "").strip() or "u1",
+        user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
         data=data,
         file_path=str(file_path or "").strip(),
         title=str(title or "").strip(),
@@ -331,6 +382,14 @@ def _build_pipeline_from_args(args: argparse.Namespace) -> DocumentBuildPipeline
     """Constructs the default document pipeline for CLI commands."""
 
     sdk = _build_sdk_from_args(args)
+    taxonomy, _, _, _ = _resolve_taxonomy_context(
+        domain=str(getattr(args, "domain", "") or "").strip(),
+        domain_type=str(getattr(args, "domain_type", "") or "").strip(),
+        skill_taxonomy_path=str(getattr(args, "skill_taxonomy", "") or "").strip(),
+        family_name=str(getattr(args, "family_name", "") or "").strip(),
+        profile_id=str(getattr(args, "profile_id", "") or "").strip(),
+        taxonomy_axis=str(getattr(args, "taxonomy_axis", "") or "").strip(),
+    )
     return build_default_document_pipeline(
         sdk=sdk,
         registry_root=str(args.registry_root or "").strip(),
@@ -342,6 +401,9 @@ def _build_pipeline_from_args(args: argparse.Namespace) -> DocumentBuildPipeline
             overlap_chars=int(args.overlap_chars or 0),
             max_candidates_per_unit=int(args.max_candidates_per_unit or 0) or 3,
             max_units_per_document=int(args.max_units_per_document or 0),
+            domain_type=taxonomy.domain_type,
+            skill_taxonomy_path=str(getattr(args, "skill_taxonomy", "") or "").strip(),
+            taxonomy=taxonomy,
         ),
     )
 
@@ -352,12 +414,23 @@ def _base_metadata(args: argparse.Namespace) -> Dict[str, Any]:
     md = {"channel": "offline_extract_from_doc", "source_type": str(args.source_type or "").strip() or "document"}
     if str(args.hint or "").strip():
         md["hint"] = str(args.hint).strip()
-    if str(getattr(args, "school_name", "") or "").strip():
-        md["school_name"] = str(args.school_name).strip()
-    if str(getattr(args, "profile_id", "") or "").strip():
-        md["profile_id"] = str(args.profile_id).strip()
-    if str(getattr(args, "taxonomy_axis", "") or "").strip():
-        md["taxonomy_axis"] = str(args.taxonomy_axis).strip()
+    _, resolved_family, resolved_axis, resolved_profile_id = _resolve_taxonomy_context(
+        domain=str(getattr(args, "domain", "") or "").strip(),
+        domain_type=str(getattr(args, "domain_type", "") or "").strip(),
+        skill_taxonomy_path=str(getattr(args, "skill_taxonomy", "") or "").strip(),
+        family_name=str(getattr(args, "family_name", "") or "").strip(),
+        profile_id=str(getattr(args, "profile_id", "") or "").strip(),
+        taxonomy_axis=str(getattr(args, "taxonomy_axis", "") or "").strip(),
+        metadata=md,
+    )
+    if resolved_family:
+        md["family_name"] = resolved_family
+    if resolved_profile_id:
+        md["profile_id"] = resolved_profile_id
+    if resolved_axis:
+        md["taxonomy_axis"] = resolved_axis
+    if str(getattr(args, "domain_type", "") or getattr(args, "domain", "") or "").strip():
+        md["domain_type"] = str(getattr(args, "domain_type", "") or getattr(args, "domain", "")).strip()
     return md
 
 
@@ -388,6 +461,16 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--file", default="", help="Single file or directory containing offline documents.")
     parser.add_argument("--title", default="", help="Optional document title override for inline input.")
     parser.add_argument("--domain", default="", help="Optional domain hint, e.g. psychology or chemistry.")
+    parser.add_argument(
+        "--domain-type",
+        default="",
+        help="Selected taxonomy domain type. This is user-provided configuration rather than model output.",
+    )
+    parser.add_argument(
+        "--skill-taxonomy",
+        default="",
+        help=f"Optional custom skill taxonomy YAML path. Built-ins: {', '.join(list_builtin_skill_taxonomies())}.",
+    )
     parser.add_argument("--source-type", default="document", help="Generic source type label stored with imported documents.")
     parser.add_argument(
         "--extract-strategy",
@@ -405,22 +488,22 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="AutoSkill4Doc store path. Default: <repo_root>/SkillBank/DocSkill.",
     )
-    parser.add_argument("--user-id", default="u1", help="Target user id for resulting skill maintenance.")
+    parser.add_argument("--user-id", default=DEFAULT_DOC_SKILL_USER_ID, help=argparse.SUPPRESS)
     parser.add_argument("--hint", default="", help="Optional extraction hint stored in metadata.")
     parser.add_argument(
-        "--school-name",
+        "--family-name",
         default="",
-        help="Optional visible school/family name used for the exported parent/child skill tree, e.g. 认知行为疗法.",
+        help="Optional visible family name used for the exported parent/child skill tree, e.g. 认知行为疗法.",
     )
     parser.add_argument(
         "--profile-id",
         default="",
-        help="Optional profile id recorded into visible skill tags and manifests, e.g. test_therapy_v2.",
+        help="Optional profile id recorded into visible skill tags and manifests. If omitted, one is derived from taxonomy + family_name.",
     )
     parser.add_argument(
         "--taxonomy-axis",
         default="",
-        help="Optional taxonomy axis label recorded into visible skill tags and manifests, e.g. 疗法.",
+        help="Optional family axis label recorded into visible skill tags and manifests. If omitted, the selected taxonomy may provide a default.",
     )
     parser.set_defaults(continue_on_error=True)
     parser.add_argument(
@@ -578,21 +661,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retrieve_parser.add_argument("--store-path", default="", help="Document skill library root. Default: <repo_root>/SkillBank/DocSkill.")
     retrieve_parser.add_argument("--profile-id", default="", help="Optional profile id used to filter the hierarchy manifest.")
-    retrieve_parser.add_argument("--school-name", default="", help="Optional school/family name used to browse one subtree.")
-    retrieve_parser.add_argument("--query", default="", help="Optional query used to search child skills inside one school.")
+    retrieve_parser.add_argument(
+        "--family-name",
+        default="",
+        help="Optional family name used to browse one subtree.",
+    )
+    retrieve_parser.add_argument("--query", default="", help="Optional query used to search child skills inside one family.")
     retrieve_parser.add_argument("--limit", type=int, default=20, help="Maximum number of returned child hits.")
     retrieve_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
 
     merge_parser = subparsers.add_parser(
         "canonical-merge",
         help="Inspect the latest staged canonical results for one bucket.",
-        description="Load the most recent staging payloads written during document registration for one profile/school/child-type bucket.",
+        description="Load the most recent staging payloads written during document registration for one profile/family/child-type bucket.",
         epilog=_DOCUMENT_CLI_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     merge_parser.add_argument("--store-path", default="", help="Document skill library root. Default: <repo_root>/SkillBank/DocSkill.")
     merge_parser.add_argument("--profile-id", default="", help="Profile id for the staged canonical bucket.")
-    merge_parser.add_argument("--school-name", default="", help="Visible school/family name for the staged canonical bucket.")
+    merge_parser.add_argument(
+        "--family-name",
+        default="",
+        help="Visible family name for the staged canonical bucket.",
+    )
     merge_parser.add_argument("--child-type", default="", help="Child skill type for the staged canonical bucket.")
     merge_parser.add_argument("--run-id", default="", help="Optional staging run id. Defaults to the latest run in the bucket.")
     merge_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
@@ -631,7 +722,7 @@ def _run_build(args: argparse.Namespace) -> None:
 
     pipeline = _build_pipeline_from_args(args)
     result = pipeline.build(
-        user_id=str(args.user_id or "").strip() or "u1",
+        user_id=str(args.user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
         file_path=str(args.file or "").strip(),
         title=str(args.title or "").strip(),
         source_type=str(args.source_type or "").strip() or "document",
@@ -657,7 +748,7 @@ def _run_build(args: argparse.Namespace) -> None:
         f"skills={payload['total_skill_specs']} "
         f"changes={payload['change_events']} "
         f"staging={len(list(payload.get('staging_runs') or []))} "
-        f"schools={len(list((payload.get('visible_tree') or {}).get('affected_schools') or []))} "
+        f"families={len(list((payload.get('visible_tree') or {}).get('affected_families') or []))} "
         f"intermediate={'1' if (payload.get('intermediate') or {}).get('run_dir') else '0'}"
     )
     if (payload.get("intermediate") or {}).get("run_dir"):
@@ -796,7 +887,7 @@ def _run_retrieve_hierarchy(args: argparse.Namespace) -> None:
     payload = retrieve_hierarchy(
         store_root=str(args.store_path or "").strip() or default_store_path(),
         profile_id=str(args.profile_id or "").strip(),
-        school_name=str(args.school_name or "").strip(),
+        family_name=str(getattr(args, "family_name", "") or "").strip(),
         query=str(args.query or "").strip(),
         limit=int(args.limit or 20),
     )
@@ -805,16 +896,16 @@ def _run_retrieve_hierarchy(args: argparse.Namespace) -> None:
         return
     route = str(payload.get("route") or "retrieve_hierarchy")
     print(f"Hierarchy route={route}")
-    if payload.get("school_name"):
-        print(f"school={payload['school_name']}")
+    if payload.get("family_name"):
+        print(f"family={payload['family_name']}")
     parent = dict(payload.get("parent") or {})
     if parent.get("relative_path"):
         print(f"parent={parent.get('relative_path')}")
     hits = list(payload.get("hits") or [])
-    schools = list(payload.get("schools") or [])
-    if schools:
-        for idx, school in enumerate(schools[: int(args.limit or 20)], start=1):
-            print(f"{idx}. {school.get('school_name')} ({school.get('child_count', 0)} children)")
+    families = list(payload.get("families") or [])
+    if families:
+        for idx, family in enumerate(families[: int(args.limit or 20)], start=1):
+            print(f"{idx}. {family.get('family_name')} ({family.get('child_count', 0)} children)")
     else:
         for idx, hit in enumerate(hits, start=1):
             print(f"{idx}. {hit.get('name', '')} -> {hit.get('relative_path', '')}")
@@ -826,13 +917,13 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
 
     store_root = str(args.store_path or "").strip() or default_store_path()
     profile_id = str(args.profile_id or "").strip()
-    school_name = str(args.school_name or "").strip()
+    family_name = str(getattr(args, "family_name", "") or "").strip()
     child_type = str(args.child_type or "").strip()
-    if not child_type and profile_id and school_name:
+    if not child_type and profile_id and family_name:
         child_types = list_child_types(
             base_store_root=store_root,
             profile_id=profile_id,
-            school_id=school_name,
+            family_id=family_name,
         )
         if len(child_types) == 1:
             child_type = str(child_types[0] or "")
@@ -840,7 +931,7 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
             payload = available_merge_child_types(
                 store_root=store_root,
                 profile_id=profile_id,
-                school_id=school_name,
+                family_id=family_name,
                 child_types=child_types,
             )
             if bool(args.json):
@@ -853,7 +944,7 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
     payload = canonical_merge_from_staging(
         store_root=store_root,
         profile_id=profile_id,
-        school_id=school_name,
+        family_id=family_name,
         child_type=child_type,
         run_id=str(args.run_id or "").strip(),
     )
@@ -863,7 +954,7 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
     print("Canonical merge staging loaded.")
     print(
         f"profile={payload.get('profile_id') or ''} "
-        f"school={payload.get('school_id') or ''} "
+        f"family={payload.get('family_id') or ''} "
         f"child_type={payload.get('child_type') or ''} "
         f"run_id={payload.get('run_id') or ''}"
     )
@@ -905,8 +996,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if command == "canonical-merge":
         if not str(getattr(args, "profile_id", "") or "").strip():
             parser.error("--profile-id is required for canonical-merge.")
-        if not str(getattr(args, "school_name", "") or "").strip():
-            parser.error("--school-name is required for canonical-merge.")
+        if not str(getattr(args, "family_name", "") or "").strip():
+            parser.error("--family-name is required for canonical-merge.")
     if command in {"build", "llm-extract"}:
         _run_build(args)
         return

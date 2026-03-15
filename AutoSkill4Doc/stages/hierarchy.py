@@ -3,7 +3,7 @@ Visible hierarchy browse/retrieve helpers for AutoSkill4Doc.
 
 Fallback order:
 1. `.runtime/library_manifest.json`
-2. visible school scan
+2. visible family scan
 3. runtime registry scan
 """
 
@@ -15,7 +15,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..models import SkillSpec, VersionState
-from ..store.layout import library_manifest_path, normalize_library_root, safe_school_name, safe_visible_name
+from ..store.layout import library_manifest_path, normalize_library_root, safe_family_name, safe_visible_name
 from ..store.registry import DocumentRegistry
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]{1,4}", re.IGNORECASE)
@@ -32,7 +32,7 @@ def retrieve_hierarchy(
     *,
     store_root: str,
     profile_id: str = "",
-    school_name: str = "",
+    family_name: str = "",
     query: str = "",
     limit: int = 20,
 ) -> Dict[str, Any]:
@@ -40,73 +40,73 @@ def retrieve_hierarchy(
 
     root = normalize_library_root(store_root)
     profile_key = str(profile_id or "").strip()
-    school_key = str(school_name or "").strip()
+    family_key = str(family_name or "").strip()
     query_text = str(query or "").strip()
 
-    schools = _schools_from_manifest(root=root, profile_id=profile_key)
+    families = _families_from_manifest(root=root, profile_id=profile_key)
     route = "manifest"
-    if not schools:
-        schools = _schools_from_visible_scan(root=root, school_name=school_key)
+    if not families:
+        families = _families_from_visible_scan(root=root, family_name=family_key)
         route = "visible_scan"
-    if not schools:
-        schools = _schools_from_runtime_registry(root=root, school_name=school_key)
+    if not families:
+        families = _families_from_runtime_registry(root=root, family_name=family_key)
         route = "runtime_scan"
 
-    if not schools:
+    if not families:
         return {
             "route": "not_found",
             "fallback": route,
             "profile_id": profile_key or None,
-            "school_name": school_key or None,
+            "family_name": family_key or None,
             "parent": None,
             "hits": [],
-            "schools": [],
-            "errors": [{"stage": "retrieve_hierarchy", "error": "no school hierarchy found"}],
+            "families": [],
+            "errors": [{"stage": "retrieve_hierarchy", "error": "no family hierarchy found"}],
         }
 
-    if not query_text and not school_key:
+    if not query_text and not family_key:
         return {
-            "route": "school_list",
+            "route": "family_list",
             "fallback": route,
             "profile_id": profile_key or None,
-            "school_name": None,
+            "family_name": None,
             "parent": None,
             "hits": [],
-            "schools": [
+            "families": [
                 {
-                    "school_name": item["school_name"],
-                    "relative_root": item.get("relative_root") or item["school_name"],
+                    "family_name": item["family_name"],
+                    "relative_root": item.get("relative_root") or item["family_name"],
                     "child_count": len(list(item.get("children") or [])),
                     "parent_relative_path": (item.get("parent") or {}).get("relative_path"),
                 }
-                for item in schools
+                for item in families
             ],
             "errors": [],
         }
 
-    chosen = _choose_school_entry(schools=schools, school_name=school_key, query=query_text)
+    chosen = _choose_family_entry(families=families, family_name=family_key, query=query_text)
     if chosen is None:
         return {
-            "route": "school_not_found",
+            "route": "family_not_found",
             "fallback": route,
             "profile_id": profile_key or None,
-            "school_name": school_key or None,
+            "family_name": family_key or None,
             "parent": None,
             "hits": [],
-            "schools": [],
-            "errors": [{"stage": "retrieve_hierarchy", "error": "requested school was not found"}],
+            "families": [],
+            "errors": [{"stage": "retrieve_hierarchy", "error": "requested family was not found"}],
         }
 
     if not query_text:
         hits = _browse_child_hits(chosen)
         return {
-            "route": "school_hierarchy",
+            "route": "family_hierarchy",
             "fallback": route,
             "profile_id": profile_key or None,
-            "school_name": chosen["school_name"],
+            "family_name": chosen["family_name"],
             "parent": dict(chosen.get("parent") or {}),
             "hits": hits[: max(1, int(limit or 20))],
-            "schools": [],
+            "families": [],
             "errors": [],
         }
 
@@ -115,15 +115,15 @@ def retrieve_hierarchy(
         "route": "query_hits",
         "fallback": route,
         "profile_id": profile_key or None,
-        "school_name": chosen["school_name"],
+        "family_name": chosen["family_name"],
         "parent": dict(chosen.get("parent") or {}),
         "hits": hits,
-        "schools": [],
+        "families": [],
         "errors": [],
     }
 
 
-def _schools_from_manifest(*, root: str, profile_id: str) -> List[Dict[str, Any]]:
+def _families_from_manifest(*, root: str, profile_id: str) -> List[Dict[str, Any]]:
     path = library_manifest_path(root)
     if not os.path.isfile(path):
         return []
@@ -141,31 +141,31 @@ def _schools_from_manifest(*, root: str, profile_id: str) -> List[Dict[str, Any]
             if not isinstance(profile, dict):
                 continue
             if str(profile.get("profile_id") or "").strip() == profile_id:
-                return _normalize_school_entries(list(profile.get("schools") or []))
+                return _normalize_family_entries(list(profile.get("families") or profile.get("schools") or []))
         return []
-    schools = list(payload.get("schools") or [])
-    return _normalize_school_entries(schools)
+    families = list(payload.get("families") or payload.get("schools") or [])
+    return _normalize_family_entries(families)
 
 
-def _schools_from_visible_scan(*, root: str, school_name: str) -> List[Dict[str, Any]]:
-    schools: List[Dict[str, Any]] = []
+def _families_from_visible_scan(*, root: str, family_name: str) -> List[Dict[str, Any]]:
+    families: List[Dict[str, Any]] = []
     if not os.path.isdir(root):
-        return schools
-    want_name = str(school_name or "").strip().lower()
+        return families
+    want_name = str(family_name or "").strip().lower()
     for name in sorted(os.listdir(root)):
         if not name or name.startswith("."):
             continue
-        school_dir = os.path.join(root, name)
-        if not os.path.isdir(school_dir):
+        family_dir = os.path.join(root, name)
+        if not os.path.isdir(family_dir):
             continue
         if want_name and name.lower() != want_name:
             continue
         parent_relative_path = ""
-        parent_path = os.path.join(school_dir, "总技能", "SKILL.md")
+        parent_path = os.path.join(family_dir, "总技能", "SKILL.md")
         if os.path.isfile(parent_path):
             parent_relative_path = os.path.relpath(parent_path, root).replace(os.sep, "/")
         children: List[Dict[str, Any]] = []
-        manifest_path = os.path.join(school_dir, "总技能", "references", "children_manifest.json")
+        manifest_path = os.path.join(family_dir, "总技能", "references", "children_manifest.json")
         if os.path.isfile(manifest_path):
             try:
                 with open(manifest_path, "r", encoding="utf-8") as f:
@@ -176,7 +176,7 @@ def _schools_from_visible_scan(*, root: str, school_name: str) -> List[Dict[str,
             except Exception:
                 children = []
         if not children:
-            children_root = os.path.join(school_dir, "子技能")
+            children_root = os.path.join(family_dir, "子技能")
             if os.path.isdir(children_root):
                 for child_name in sorted(os.listdir(children_root)):
                     md_path = os.path.join(children_root, child_name, "SKILL.md")
@@ -192,19 +192,19 @@ def _schools_from_visible_scan(*, root: str, school_name: str) -> List[Dict[str,
                         )
         if not children and not parent_relative_path:
             continue
-        schools.append(
+        families.append(
             {
-                "school_name": name,
+                "family_name": name,
                 "relative_root": name,
                 "parent": {"name": name, "relative_path": parent_relative_path},
                 "children": children,
                 "terms": [name],
             }
         )
-    return _normalize_school_entries(schools)
+    return _normalize_family_entries(families)
 
 
-def _schools_from_runtime_registry(*, root: str, school_name: str) -> List[Dict[str, Any]]:
+def _families_from_runtime_registry(*, root: str, family_name: str) -> List[Dict[str, Any]]:
     registry_root = os.path.join(root, ".runtime", "document_registry")
     if not os.path.isdir(registry_root):
         return []
@@ -213,10 +213,10 @@ def _schools_from_runtime_registry(*, root: str, school_name: str) -> List[Dict[
     for skill in registry.list_skills():
         if skill.status not in _RUNTIME_VISIBLE_STATES:
             continue
-        school = _runtime_school_name(skill)
-        grouped.setdefault(school, []).append(skill)
-    schools: List[Dict[str, Any]] = []
-    want_name = str(school_name or "").strip().lower()
+        family = _runtime_family_name(skill)
+        grouped.setdefault(family, []).append(skill)
+    families: List[Dict[str, Any]] = []
+    want_name = str(family_name or "").strip().lower()
     for name, skills in sorted(grouped.items(), key=lambda item: item[0].lower()):
         if want_name and name.lower() != want_name:
             continue
@@ -235,21 +235,22 @@ def _schools_from_runtime_registry(*, root: str, school_name: str) -> List[Dict[
                 }
             )
         parent_relative_path = os.path.join(name, "总技能", "SKILL.md").replace(os.sep, "/")
-        schools.append(
+        families.append(
             {
-                "school_name": name,
+                "family_name": name,
                 "relative_root": name,
                 "parent": {"name": name, "relative_path": parent_relative_path},
                 "children": children,
                 "terms": [name],
             }
         )
-    return _normalize_school_entries(schools)
+    return _normalize_family_entries(families)
 
 
-def _runtime_school_name(skill: SkillSpec) -> str:
+def _runtime_family_name(skill: SkillSpec) -> str:
     metadata = dict(skill.metadata or {})
     for candidate in [
+        str(metadata.get("family_name") or "").strip(),
         str(metadata.get("school_name") or "").strip(),
         str(metadata.get("taxonomy_class") or "").strip(),
         str(skill.domain or "").strip(),
@@ -257,16 +258,16 @@ def _runtime_school_name(skill: SkillSpec) -> str:
         "未分类技能",
     ]:
         if candidate:
-            return safe_school_name(candidate)
-    return safe_school_name("未分类技能")
+            return safe_family_name(candidate)
+    return safe_family_name("未分类技能")
 
 
-def _normalize_school_entries(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_family_entries(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for raw in entries or []:
         if not isinstance(raw, dict):
             continue
-        school_name = str(raw.get("school_name") or "").strip() or "未命名流派"
+        family_name = str(raw.get("family_name") or raw.get("school_name") or "").strip() or "未命名家族"
         parent = dict(raw.get("parent") or {})
         children: List[Dict[str, Any]] = []
         for child in list(raw.get("children") or []):
@@ -286,33 +287,33 @@ def _normalize_school_entries(entries: Iterable[Dict[str, Any]]) -> List[Dict[st
             )
         out.append(
             {
-                "school_name": school_name,
-                "relative_root": str(raw.get("relative_root") or school_name).strip() or school_name,
+                "family_name": family_name,
+                "relative_root": str(raw.get("relative_root") or family_name).strip() or family_name,
                 "profile_id": str(raw.get("profile_id") or "").strip(),
                 "taxonomy_axis": str(raw.get("taxonomy_axis") or "").strip(),
-                "terms": [str(item).strip() for item in list(raw.get("terms") or []) if str(item).strip()] or [school_name],
+                "terms": [str(item).strip() for item in list(raw.get("terms") or []) if str(item).strip()] or [family_name],
                 "parent": {
-                    "name": str(parent.get("name") or school_name).strip() or school_name,
+                    "name": str(parent.get("name") or family_name).strip() or family_name,
                     "relative_path": str(parent.get("relative_path") or raw.get("parent_relative_path") or "").strip() or None,
                 },
                 "children": children,
             }
         )
-    out.sort(key=lambda item: str(item.get("school_name") or "").lower())
+    out.sort(key=lambda item: str(item.get("family_name") or "").lower())
     return out
 
 
-def _choose_school_entry(*, schools: Iterable[Dict[str, Any]], school_name: str, query: str) -> Optional[Dict[str, Any]]:
-    school_entries = [dict(entry) for entry in schools or [] if isinstance(entry, dict)]
-    want_name = str(school_name or "").strip().lower()
+def _choose_family_entry(*, families: Iterable[Dict[str, Any]], family_name: str, query: str) -> Optional[Dict[str, Any]]:
+    family_entries = [dict(entry) for entry in families or [] if isinstance(entry, dict)]
+    want_name = str(family_name or "").strip().lower()
     if want_name:
-        for entry in school_entries:
-            if str(entry.get("school_name") or "").strip().lower() == want_name:
+        for entry in family_entries:
+            if str(entry.get("family_name") or entry.get("school_name") or "").strip().lower() == want_name:
                 return entry
         return None
     query_low = str(query or "").strip().lower()
     best: Optional[Tuple[int, Dict[str, Any]]] = None
-    for entry in school_entries:
+    for entry in family_entries:
         score = 0
         for term in list(entry.get("terms") or []):
             token = str(term or "").strip().lower()
@@ -322,7 +323,7 @@ def _choose_school_entry(*, schools: Iterable[Dict[str, Any]], school_name: str,
             best = (score, entry)
     if best is not None:
         return best[1]
-    return school_entries[0] if school_entries else None
+    return family_entries[0] if family_entries else None
 
 
 def _browse_child_hits(entry: Dict[str, Any]) -> List[Dict[str, Any]]:

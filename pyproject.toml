@@ -29,4 +29,4 @@ include = ["autoskill*", "AutoSkill4Doc*"]
 
 [tool.setuptools.package-data]
 autoskill = ["py.typed"]
-AutoSkill4Doc = ["domain_profiles/*.json"]
+AutoSkill4Doc = ["skill_taxonomies/*.yaml"]

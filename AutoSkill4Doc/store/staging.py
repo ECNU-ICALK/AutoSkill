@@ -28,7 +28,7 @@ class StagingRunSummary:
     """Compact summary for one written or loaded staging run."""
 
     profile_id: str
-    school_id: str
+    family_id: str
     child_type: str
     run_id: str
     run_dir: str
@@ -39,7 +39,7 @@ class StagingRunSummary:
 
         return {
             "profile_id": self.profile_id,
-            "school_id": self.school_id,
+            "family_id": self.family_id,
             "child_type": self.child_type,
             "run_id": self.run_id,
             "run_dir": self.run_dir,
@@ -67,15 +67,15 @@ def document_merge_staging_root(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
 ) -> str:
-    """Returns the staging root for one profile/school/child-type bucket."""
+    """Returns the staging root for one profile/family/child-type bucket."""
 
     return os.path.join(
         staging_root(normalize_library_root(base_store_root)),
         safe_dir_component(profile_id or _DEFAULT_PROFILE_ID),
-        safe_dir_component(school_id or "unknown_school"),
+        safe_dir_component(family_id or "unknown_family"),
         safe_dir_component(child_type or "general_child"),
     )
 
@@ -84,7 +84,7 @@ def document_merge_run_dir(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
     run_id: str,
 ) -> str:
@@ -94,7 +94,7 @@ def document_merge_run_dir(
         document_merge_staging_root(
             base_store_root=base_store_root,
             profile_id=profile_id,
-            school_id=school_id,
+            family_id=family_id,
             child_type=child_type,
         ),
         safe_run_id(run_id),
@@ -105,7 +105,7 @@ def write_run_payload(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
     run_id: str,
     name: str,
@@ -116,7 +116,7 @@ def write_run_payload(
     run_dir = document_merge_run_dir(
         base_store_root=base_store_root,
         profile_id=profile_id,
-        school_id=school_id,
+        family_id=family_id,
         child_type=child_type,
         run_id=run_id,
     )
@@ -134,7 +134,7 @@ def read_run_payload(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
     run_id: str,
     name: str,
@@ -148,7 +148,7 @@ def read_run_payload(
         document_merge_run_dir(
             base_store_root=base_store_root,
             profile_id=profile_id,
-            school_id=school_id,
+            family_id=family_id,
             child_type=child_type,
             run_id=run_id,
         ),
@@ -168,14 +168,14 @@ def list_child_types(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
 ) -> List[str]:
-    """Lists all staged child types for one profile/school bucket."""
+    """Lists all staged child types for one profile/family bucket."""
 
     root = os.path.join(
         staging_root(normalize_library_root(base_store_root)),
         safe_dir_component(profile_id or _DEFAULT_PROFILE_ID),
-        safe_dir_component(school_id or "unknown_school"),
+        safe_dir_component(family_id or "unknown_family"),
     )
     if not os.path.isdir(root):
         return []
@@ -186,7 +186,7 @@ def list_run_ids(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
 ) -> List[str]:
     """Lists all run ids under one staging bucket."""
@@ -194,7 +194,7 @@ def list_run_ids(
     root = document_merge_staging_root(
         base_store_root=base_store_root,
         profile_id=profile_id,
-        school_id=school_id,
+        family_id=family_id,
         child_type=child_type,
     )
     if not os.path.isdir(root):
@@ -206,7 +206,7 @@ def latest_run_id(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
 ) -> str:
     """Returns the most recent run id for one staging bucket."""
@@ -214,7 +214,7 @@ def latest_run_id(
     runs = list_run_ids(
         base_store_root=base_store_root,
         profile_id=profile_id,
-        school_id=school_id,
+        family_id=family_id,
         child_type=child_type,
     )
     if not runs:
@@ -225,7 +225,7 @@ def latest_run_id(
             document_merge_run_dir(
                 base_store_root=base_store_root,
                 profile_id=profile_id,
-                school_id=school_id,
+                family_id=family_id,
                 child_type=child_type,
                 run_id=run,
             )
@@ -239,7 +239,7 @@ def write_registration_staging(
     *,
     base_store_root: str,
     profile_id: str,
-    school_id: str,
+    family_id: str,
     child_type: str,
     run_id: str,
     documents: Sequence[Dict[str, Any]],
@@ -287,7 +287,7 @@ def write_registration_staging(
             write_run_payload(
                 base_store_root=base_store_root,
                 profile_id=profile_id,
-                school_id=school_id,
+                family_id=family_id,
                 child_type=child_type,
                 run_id=resolved_run_id,
                 name=name,
@@ -296,13 +296,13 @@ def write_registration_staging(
         )
     return StagingRunSummary(
         profile_id=str(profile_id or _DEFAULT_PROFILE_ID),
-        school_id=str(school_id or "unknown_school"),
+        family_id=str(family_id or "unknown_family"),
         child_type=str(child_type or "general_child"),
         run_id=resolved_run_id,
         run_dir=document_merge_run_dir(
             base_store_root=base_store_root,
             profile_id=profile_id,
-            school_id=school_id,
+            family_id=family_id,
             child_type=child_type,
             run_id=resolved_run_id,
         ),
@@ -315,14 +315,21 @@ def group_skills_by_staging_bucket(
     skills: Sequence[SkillSpec],
     profile_id: str,
 ) -> Dict[str, List[SkillSpec]]:
-    """Groups skills into stable `school_id::child_type` staging buckets."""
+    """Groups skills into stable `family_id::child_type` staging buckets."""
 
     out: Dict[str, List[SkillSpec]] = {}
     for skill in skills or []:
         metadata = dict(skill.metadata or {})
-        school_id = str(metadata.get("school_name") or metadata.get("taxonomy_class") or skill.domain or skill.method_family or "unknown_school").strip()
+        family_id = str(
+            metadata.get("family_name")
+            or metadata.get("school_name")
+            or metadata.get("taxonomy_class")
+            or skill.domain
+            or skill.method_family
+            or "unknown_family"
+        ).strip()
         child_type = str(metadata.get("child_type") or skill.task_family or skill.asset_type or "general_child").strip()
-        key = f"{safe_dir_component(profile_id or _DEFAULT_PROFILE_ID)}::{safe_dir_component(school_id)}::{safe_dir_component(child_type)}"
+        key = f"{safe_dir_component(profile_id or _DEFAULT_PROFILE_ID)}::{safe_dir_component(family_id)}::{safe_dir_component(child_type)}"
         out.setdefault(key, []).append(skill)
     return out
 

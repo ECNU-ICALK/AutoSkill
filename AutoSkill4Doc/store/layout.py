@@ -3,7 +3,7 @@ Shared library/runtime path helpers for AutoSkill4Doc.
 
 The document skill library exposes two layers:
 
-- visible layer under `<store_root>/<school_name>/...`
+- visible layer under `<store_root>/<family_name>/...`
 - runtime layer under `<store_root>/.runtime/...`
 
 These helpers centralize path rules so visible tree sync, staging, hierarchy
@@ -90,22 +90,22 @@ def legacy_backup_root(base_store_root: str = "") -> str:
     return os.path.join(runtime_root(base_store_root), "legacy_backup")
 
 
-def school_visible_root(*, base_store_root: str, school_name: str) -> str:
-    """Returns the visible root directory for one school/family."""
+def family_visible_root(*, base_store_root: str, family_name: str) -> str:
+    """Returns the visible root directory for one family."""
 
-    return os.path.join(normalize_library_root(base_store_root), safe_school_name(school_name or "未命名流派"))
-
-
-def school_parent_visible_root(*, base_store_root: str, school_name: str) -> str:
-    """Returns the visible `总技能` directory for one school."""
-
-    return os.path.join(school_visible_root(base_store_root=base_store_root, school_name=school_name), "总技能")
+    return os.path.join(normalize_library_root(base_store_root), safe_family_name(family_name or "未命名家族"))
 
 
-def school_children_visible_root(*, base_store_root: str, school_name: str) -> str:
-    """Returns the visible `子技能` directory for one school."""
+def family_parent_visible_root(*, base_store_root: str, family_name: str) -> str:
+    """Returns the visible `总技能` directory for one family."""
 
-    return os.path.join(school_visible_root(base_store_root=base_store_root, school_name=school_name), "子技能")
+    return os.path.join(family_visible_root(base_store_root=base_store_root, family_name=family_name), "总技能")
+
+
+def family_children_visible_root(*, base_store_root: str, family_name: str) -> str:
+    """Returns the visible `子技能` directory for one family."""
+
+    return os.path.join(family_visible_root(base_store_root=base_store_root, family_name=family_name), "子技能")
 
 
 def safe_dir_component(value: str) -> str:
@@ -123,7 +123,7 @@ def safe_dir_component(value: str) -> str:
 
 
 def safe_visible_name(value: str) -> str:
-    """Converts one visible school/skill name into a safe readable directory name."""
+    """Converts one visible family/skill name into a safe readable directory name."""
 
     s = str(value or "").strip()
     if not s:
@@ -136,10 +136,10 @@ def safe_visible_name(value: str) -> str:
     return s or "未命名"
 
 
-def safe_school_name(value: str) -> str:
-    """Converts a visible school/family name into a root-safe directory name."""
+def safe_family_name(value: str) -> str:
+    """Converts a visible family name into a root-safe directory name."""
 
-    name = safe_visible_name(value or "未命名流派")
+    name = safe_visible_name(value or "未命名家族")
     if str(name or "").strip().lower() in _RESERVED_VISIBLE_ROOT_NAMES:
         return f"{name}-skills"
     return name

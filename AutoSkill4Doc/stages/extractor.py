@@ -32,6 +32,7 @@ from ..models import (
     TextSpan,
 )
 from ..prompts import OFFLINE_CHANNEL_DOC, maybe_offline_prompt
+from ..taxonomy import SkillTaxonomy, load_skill_taxonomy
 
 _WORKFLOW_PATTERNS = [r"^\s*[\-\*\u2022]\s+", r"^\s*\d+[\.\)]\s+"]
 _DEFAULT_SECTION_CHARS = 2400
@@ -531,6 +532,7 @@ class DocumentSkillExtractor(Protocol):
         windows: Optional[List[StrictWindow]],
         logger: StageLogger,
         progress_callback: ExtractionProgressCallback = None,
+        accumulate_result: bool = True,
     ) -> SkillExtractionResult:
         """Extracts support records and skill drafts from normalized documents."""
 
@@ -547,12 +549,19 @@ class LLMDocumentSkillExtractor:
         overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
         max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
         max_units_per_document: int = 0,
+        domain_type: str = "",
+        skill_taxonomy_path: str = "",
+        taxonomy: Optional[SkillTaxonomy] = None,
     ) -> None:
         self._llm = llm or build_llm(dict(llm_config or {"provider": "mock"}))
         self.max_section_chars = max(200, int(max_section_chars or _DEFAULT_SECTION_CHARS))
         self.overlap_chars = max(0, int(overlap_chars or 0))
         self.max_candidates_per_unit = max(1, int(max_candidates_per_unit or _DEFAULT_MAX_CANDIDATES_PER_UNIT))
         self.max_units_per_document = max(0, int(max_units_per_document or 0))
+        self.taxonomy = taxonomy or load_skill_taxonomy(
+            domain_type=str(domain_type or "").strip(),
+            taxonomy_path=str(skill_taxonomy_path or "").strip(),
+        )
 
     def _extract_unit_skills(
         self,
@@ -582,16 +591,19 @@ class LLMDocumentSkillExtractor:
             },
             "excerpt": str(unit_text or "").strip(),
             "max_candidates": self.max_candidates_per_unit,
+            "taxonomy": self.taxonomy.to_dict(),
         }
         system = maybe_offline_prompt(
             channel=OFFLINE_CHANNEL_DOC,
             kind="extract",
             max_candidates=self.max_candidates_per_unit,
+            taxonomy=self.taxonomy,
         )
         repair_system = maybe_offline_prompt(
             channel=OFFLINE_CHANNEL_DOC,
             kind="repair",
             max_candidates=self.max_candidates_per_unit,
+            taxonomy=self.taxonomy,
         )
         repaired_payload = (
             f"DATA:\n{json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -658,7 +670,7 @@ class LLMDocumentSkillExtractor:
             doc_id=record.doc_id,
             name=name,
             description=description,
-            asset_type=str(item.get("asset_type") or "").strip(),
+            asset_type=self.taxonomy.normalize_asset_type(item.get("asset_type")),
             granularity=str(item.get("granularity") or "").strip(),
             objective=objective,
             domain=str(item.get("domain") or record.domain or "").strip(),
@@ -684,6 +696,8 @@ class LLMDocumentSkillExtractor:
                 "resources": maybe_json_dict(item.get("resources")),
                 "source_sections": [section_heading],
                 "extraction_unit": unit_type,
+                "domain_type": self.taxonomy.domain_type,
+                "taxonomy_id": self.taxonomy.taxonomy_id,
                 **dict(unit_metadata or {}),
             },
         )
@@ -708,6 +722,8 @@ class LLMDocumentSkillExtractor:
                 "task_family": draft.task_family,
                 "method_family": draft.method_family,
                 "stage": draft.stage,
+                "domain_type": self.taxonomy.domain_type,
+                "taxonomy_id": self.taxonomy.taxonomy_id,
                 **dict(unit_metadata or {}),
             },
         )
@@ -816,10 +832,11 @@ class LLMDocumentSkillExtractor:
         windows: Optional[List[StrictWindow]],
         logger: StageLogger,
         progress_callback: ExtractionProgressCallback = None,
+        accumulate_result: bool = True,
     ) -> SkillExtractionResult:
         result = SkillExtractionResult(
-            documents=list(documents or []),
-            windows=list(windows or []),
+            documents=list(documents or []) if accumulate_result else [],
+            windows=list(windows or []) if accumulate_result else [],
             extractor_name="llm",
         )
         windows_by_doc: Dict[str, List[StrictWindow]] = {}
@@ -838,8 +855,9 @@ class LLMDocumentSkillExtractor:
                     supports, drafts = self._extract_from_windows(record=record, windows=doc_windows)
                 else:
                     supports, drafts = self._extract_from_document(record)
-                result.support_records.extend(supports)
-                result.skill_drafts.extend(drafts)
+                if accumulate_result:
+                    result.support_records.extend(supports)
+                    result.skill_drafts.extend(drafts)
                 if progress_callback is not None:
                     progress_callback(record, list(supports or []), list(drafts or []), result)
                 emit_stage_log(
@@ -864,6 +882,9 @@ def build_document_skill_extractor(
     overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
     max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
     max_units_per_document: int = 0,
+    domain_type: str = "",
+    skill_taxonomy_path: str = "",
+    taxonomy: Optional[SkillTaxonomy] = None,
 ) -> DocumentSkillExtractor:
     """Builds a concrete document-to-skill extractor implementation."""
 
@@ -876,6 +897,9 @@ def build_document_skill_extractor(
             overlap_chars=overlap_chars,
             max_candidates_per_unit=max_candidates_per_unit,
             max_units_per_document=max_units_per_document,
+            domain_type=domain_type,
+            skill_taxonomy_path=skill_taxonomy_path,
+            taxonomy=taxonomy,
         )
     raise ValueError(f"unsupported document skill extractor: {kind}")
 
@@ -887,6 +911,7 @@ def extract_skills(
     extractor: DocumentSkillExtractor | None = None,
     logger: StageLogger = None,
     progress_callback: ExtractionProgressCallback = None,
+    accumulate_result: bool = True,
 ) -> SkillExtractionResult:
     """Public functional wrapper for the direct skill extraction stage."""
 
@@ -896,4 +921,5 @@ def extract_skills(
         windows=list(windows or []),
         logger=logger,
         progress_callback=progress_callback,
+        accumulate_result=accumulate_result,
     )

@@ -288,7 +288,7 @@ class DocumentPipelineTest(unittest.TestCase):
                 domain="psychology",
                 metadata={
                     "channel": "offline_extract_from_doc",
-                    "school_name": "认知行为疗法",
+                    "family_name": "认知行为疗法",
                     "profile_id": "test_therapy_v2",
                     "taxonomy_axis": "疗法",
                 },
@@ -326,6 +326,44 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertEqual(result["skills"][0]["asset_type"], "session_skill")
             self.assertEqual(result["skills"][0]["granularity"], "session")
             self.assertEqual(result["intermediate"], {})
+
+    def test_extract_from_doc_uses_internal_default_user_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+
+            result = extract_from_doc(
+                sdk=sdk,
+                data=_DOC_TEXT,
+                title="Intake Workflow",
+                domain="psychology",
+                metadata={"channel": "offline_extract_from_doc"},
+                dry_run=False,
+            )
+
+            self.assertEqual(result["total_documents"], 1)
+            self.assertGreaterEqual(len(sdk.store.list(user_id="u1")), 1)
+
+    def test_extract_from_doc_derives_profile_and_axis_from_taxonomy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+
+            result = extract_from_doc(
+                sdk=sdk,
+                user_id="u1",
+                data=_DOC_TEXT,
+                title="Intake Workflow",
+                domain="psychology",
+                domain_type="psychology",
+                family_name="认知行为疗法",
+                dry_run=False,
+            )
+
+            self.assertEqual(result["visible_tree"]["affected_families"], ["认知行为疗法"])
+            manifest_path = os.path.join(tmpdir, ".runtime", "library_manifest.json")
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            self.assertEqual(manifest.get("active_family_name"), "认知行为疗法")
+            self.assertEqual(manifest.get("active_profile_id"), "psychology::认知行为疗法")
 
     def test_document_build_result_dict_includes_windows_and_compiled_supports(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

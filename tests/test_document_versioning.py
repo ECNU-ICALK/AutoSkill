@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from autoskill.llm.mock import MockLLM
+from autoskill.models import Skill, SkillStatus
 from AutoSkill4Doc.models import (
     DocumentRecord,
     SkillSpec,
@@ -15,6 +16,7 @@ from AutoSkill4Doc.models import (
     VersionState,
 )
 from AutoSkill4Doc.store.registry import DocumentRegistry
+from AutoSkill4Doc.store.visible_tree import sync_visible_skill_tree
 from AutoSkill4Doc.store.versioning import register_versions
 
 
@@ -481,7 +483,7 @@ class DocumentVersioningTest(unittest.TestCase):
                 supports=[support],
                 skills=[skill],
                 metadata={
-                    "school_name": "认知行为疗法",
+                    "family_name": "认知行为疗法",
                     "profile_id": "test_therapy_v2",
                     "taxonomy_axis": "疗法",
                 },
@@ -526,7 +528,7 @@ class DocumentVersioningTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(evidence_md))
             self.assertTrue(os.path.isfile(evidence_manifest))
             self.assertTrue(os.path.isfile(library_manifest))
-            self.assertEqual(result.visible_tree.get("affected_schools"), ["认知行为疗法"])
+            self.assertEqual(result.visible_tree.get("affected_families"), ["认知行为疗法"])
             self.assertEqual(len(list(result.staging_runs or [])), 1)
             self.assertTrue(os.path.isdir(result.staging_runs[0]["run_dir"]))
             self.assertTrue(
@@ -540,7 +542,7 @@ class DocumentVersioningTest(unittest.TestCase):
 
             with open(children_manifest, "r", encoding="utf-8") as f:
                 payload = json.load(f)
-            self.assertEqual(payload.get("school_name"), "认知行为疗法")
+            self.assertEqual(payload.get("family_name"), "认知行为疗法")
             self.assertEqual(len(list(payload.get("children") or [])), 1)
             self.assertEqual(
                 payload["children"][0]["relative_path"],
@@ -555,7 +557,7 @@ class DocumentVersioningTest(unittest.TestCase):
             with open(library_manifest, "r", encoding="utf-8") as f:
                 manifest_payload = json.load(f)
             self.assertEqual(manifest_payload.get("active_profile_id"), "test_therapy_v2")
-            self.assertEqual(manifest_payload.get("active_school_name"), "认知行为疗法")
+            self.assertEqual(manifest_payload.get("active_family_name"), "认知行为疗法")
             self.assertEqual(manifest_payload["profiles"][0]["profile_id"], "test_therapy_v2")
 
     def test_visible_tree_avoids_reserved_root_name_collisions(self) -> None:
@@ -579,12 +581,78 @@ class DocumentVersioningTest(unittest.TestCase):
                 documents=[document],
                 supports=[support],
                 skills=[skill],
-                metadata={"school_name": "Users"},
+                metadata={"family_name": "Users"},
             )
 
-            self.assertEqual(result.visible_tree.get("affected_schools"), ["Users-skills"])
+            self.assertEqual(result.visible_tree.get("affected_families"), ["Users-skills"])
             self.assertTrue(os.path.isfile(os.path.join(tmpdir, "Users-skills", "总技能", "SKILL.md")))
             self.assertFalse(os.path.isfile(os.path.join(tmpdir, "Users", "总技能", "SKILL.md")))
+
+    def test_visible_tree_prefers_store_final_skills_over_registry_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = DocumentRegistry(root_dir=os.path.join(tmpdir, ".runtime", "document_registry"))
+            document = self._document(doc_id="doc-1", title="Merged Tree")
+            support_a = self._support(
+                support_id="sup-a",
+                doc_id=document.doc_id,
+                excerpt="Use ABC mapping to identify belief patterns.",
+            )
+            support_b = self._support(
+                support_id="sup-b",
+                doc_id=document.doc_id,
+                excerpt="Use diaphragmatic breathing to regulate arousal.",
+            )
+            skill_a = self._skill(
+                skill_id="cand-a",
+                name="ABC模型结构化识别与不合理信念标注",
+                workflow_steps=["识别A。", "识别B。", "识别C。", "完成标注。"],
+                support_ids=[support_a.support_id],
+            )
+            skill_b = self._skill(
+                skill_id="cand-b",
+                name="腹式呼吸放松法标准化指导",
+                workflow_steps=["调整姿势。", "建立节律。", "完成练习。", "布置作业。"],
+                support_ids=[support_b.support_id],
+            )
+            registry.upsert_document(document)
+            registry.upsert_support(support_a)
+            registry.upsert_support(support_b)
+            registry.upsert_skill(skill_a)
+            registry.upsert_skill(skill_b)
+
+            merged_store_skill = Skill(
+                id="store-1",
+                user_id="u1",
+                name="结构化短期咨询框架确立与首次评估会话（5次CBT）",
+                description="Merged final store skill.",
+                instructions="# Goal\nUse the merged final store skill.",
+                triggers=["首次评估", "短期咨询框架"],
+                tags=["CBT", "认知行为疗法"],
+                status=SkillStatus.ACTIVE,
+                version="0.1.3",
+                files={},
+            )
+
+            result = sync_visible_skill_tree(
+                registry=registry,
+                store_root=tmpdir,
+                documents=[document],
+                support_records=[support_a, support_b],
+                skill_specs=[skill_a, skill_b],
+                user_id="u1",
+                metadata={"family_name": "认知行为疗法", "profile_id": "test_therapy_v2", "taxonomy_axis": "疗法"},
+                store_skills=[merged_store_skill],
+            )
+
+            self.assertEqual(result.affected_families, ["认知行为疗法"])
+            child_root = os.path.join(tmpdir, "认知行为疗法", "子技能")
+            child_dirs = sorted(name for name in os.listdir(child_root) if os.path.isdir(os.path.join(child_root, name)))
+            self.assertEqual(len(child_dirs), 1)
+            child_md = os.path.join(child_root, child_dirs[0], "SKILL.md")
+            with open(child_md, "r", encoding="utf-8") as f:
+                child_text = f.read()
+            self.assertIn("结构化短期咨询框架确立与首次评估会话（5次CBT）", child_text)
+            self.assertNotIn("ABC模型结构化识别与不合理信念标注", child_text)
 
 
 if __name__ == "__main__":

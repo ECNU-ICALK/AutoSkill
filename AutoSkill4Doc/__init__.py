@@ -34,6 +34,10 @@ __all__ = [
     "SkillLifecycle",
     "VersionState",
     "TextSpan",
+    "SkillTaxonomy",
+    "TaxonomyAssetType",
+    "load_skill_taxonomy",
+    "list_builtin_skill_taxonomies",
     "DocumentRegistry",
     "build_registry_from_store_config",
     "normalize_library_root",
@@ -157,6 +161,21 @@ def __getattr__(name: str) -> Any:
             "SkillLifecycle": SkillLifecycle,
             "VersionState": VersionState,
             "TextSpan": TextSpan,
+        }
+        return mapping[name]
+    if name in {
+        "SkillTaxonomy",
+        "TaxonomyAssetType",
+        "load_skill_taxonomy",
+        "list_builtin_skill_taxonomies",
+    }:
+        from .taxonomy import SkillTaxonomy, TaxonomyAssetType, list_builtin_skill_taxonomies, load_skill_taxonomy
+
+        mapping = {
+            "SkillTaxonomy": SkillTaxonomy,
+            "TaxonomyAssetType": TaxonomyAssetType,
+            "load_skill_taxonomy": load_skill_taxonomy,
+            "list_builtin_skill_taxonomies": list_builtin_skill_taxonomies,
         }
         return mapping[name]
     if name in {

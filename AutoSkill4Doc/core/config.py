@@ -11,6 +11,7 @@ import os
 
 DEFAULT_EXTRACT_STRATEGY = "recommended"
 SUPPORTED_EXTRACT_STRATEGIES = ("recommended", "strict", "chunk")
+DEFAULT_DOC_SKILL_USER_ID = "u1"
 
 
 def repo_root() -> str:

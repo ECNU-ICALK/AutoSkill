@@ -1,0 +1,46 @@
+{
+  "taxonomy_id": "chemistry",
+  "domain_type": "chemistry",
+  "display_name": "Chemistry",
+  "default_base_type": "session_skill",
+  "family_axis": "实验路线",
+  "default_family_name": "通用化学流程",
+  "family_candidates": [
+    {
+      "id": "organic_synthesis",
+      "name": "有机合成",
+      "aliases": ["有机合成", "organic synthesis"]
+    },
+    {
+      "id": "analytical_chemistry",
+      "name": "分析化学",
+      "aliases": ["分析化学", "analytical chemistry"]
+    }
+  ],
+  "asset_types": [
+    {
+      "base_type": "macro_protocol",
+      "label": "experiment_protocol",
+      "description": "A multi-stage experimental or preparation protocol.",
+      "aliases": ["experiment_protocol", "synthesis_protocol", "macro_protocol"]
+    },
+    {
+      "base_type": "session_skill",
+      "label": "experiment_workflow",
+      "description": "One reusable experiment or analysis workflow.",
+      "aliases": ["experiment_workflow", "analysis_workflow", "workflow_skill", "session_skill"]
+    },
+    {
+      "base_type": "micro_skill",
+      "label": "lab_micro_step",
+      "description": "One tightly scoped lab operation or micro-step.",
+      "aliases": ["lab_micro_step", "micro_step", "micro_skill"]
+    },
+    {
+      "base_type": "safety_rule",
+      "label": "reagent_safety_rule",
+      "description": "Safety and handling rules for reagents, equipment, or waste.",
+      "aliases": ["reagent_safety_rule", "lab_safety_rule", "safety_rule"]
+    }
+  ]
+}
