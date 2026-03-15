@@ -34,10 +34,6 @@ __all__ = [
     "SkillLifecycle",
     "VersionState",
     "TextSpan",
-    "DomainProfile",
-    "KeywordGroup",
-    "load_domain_profile",
-    "list_builtin_domain_profiles",
     "DocumentRegistry",
     "build_registry_from_store_config",
     "normalize_library_root",
@@ -161,16 +157,6 @@ def __getattr__(name: str) -> Any:
             "SkillLifecycle": SkillLifecycle,
             "VersionState": VersionState,
             "TextSpan": TextSpan,
-        }
-        return mapping[name]
-    if name in {"DomainProfile", "KeywordGroup", "load_domain_profile", "list_builtin_domain_profiles"}:
-        from .profile import DomainProfile, KeywordGroup, list_builtin_domain_profiles, load_domain_profile
-
-        mapping = {
-            "DomainProfile": DomainProfile,
-            "KeywordGroup": KeywordGroup,
-            "load_domain_profile": load_domain_profile,
-            "list_builtin_domain_profiles": list_builtin_domain_profiles,
         }
         return mapping[name]
     if name in {

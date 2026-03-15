@@ -215,7 +215,6 @@ class DocumentIngestor(Protocol):
         dry_run: bool,
         max_documents: int,
         extract_strategy: str,
-        domain_profile_path: str,
         logger: StageLogger,
     ) -> DocumentIngestResult:
         """Runs the ingestion stage and returns normalized document records."""
@@ -238,7 +237,6 @@ class HeuristicDocumentIngestor:
         dry_run: bool,
         max_documents: int,
         extract_strategy: str,
-        domain_profile_path: str,
         logger: StageLogger,
     ) -> DocumentIngestResult:
         """Normalizes input into DocumentRecord objects and performs incremental skipping."""
@@ -305,7 +303,6 @@ class HeuristicDocumentIngestor:
                     build_windows_for_record(
                         built,
                         strategy=extract_strategy,
-                        domain_profile_path=domain_profile_path,
                     )
                 )
                 result.documents.append(built)
@@ -429,7 +426,6 @@ def ingest_document(
     dry_run: bool = False,
     max_documents: int = 0,
     extract_strategy: str = DEFAULT_EXTRACT_STRATEGY,
-    domain_profile_path: str = "",
     logger: StageLogger = None,
 ) -> DocumentIngestResult:
     """Public functional wrapper for the document ingestion stage."""
@@ -447,6 +443,5 @@ def ingest_document(
         dry_run=bool(dry_run),
         max_documents=int(max_documents or 0),
         extract_strategy=normalize_extract_strategy(extract_strategy),
-        domain_profile_path=str(domain_profile_path or "").strip(),
         logger=logger,
     )

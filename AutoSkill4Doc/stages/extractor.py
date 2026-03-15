@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import json
 import re
 import uuid
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
 from autoskill.llm.base import LLM
 from autoskill.llm.factory import build_llm
@@ -31,13 +31,73 @@ from ..models import (
     SupportRelation,
     TextSpan,
 )
-from ..profile import DomainProfile, load_domain_profile
 from ..prompts import OFFLINE_CHANNEL_DOC, maybe_offline_prompt
 
 _WORKFLOW_PATTERNS = [r"^\s*[\-\*\u2022]\s+", r"^\s*\d+[\.\)]\s+"]
 _DEFAULT_SECTION_CHARS = 2400
 _DEFAULT_CHUNK_OVERLAP_CHARS = 200
 _DEFAULT_MAX_CANDIDATES_PER_UNIT = 3
+_DEFAULT_SECTION_PRIORITY_TERMS = (
+    "goal",
+    "session goal",
+    "treatment goal",
+    "intervention",
+    "session intervention",
+    "stage",
+    "session",
+    "homework",
+    "worksheet",
+    "work sheet",
+    "risk",
+    "safety",
+    "relapse prevention",
+    "protocol",
+    "procedure",
+    "technique",
+    "workflow",
+    "step-by-step",
+    "目标",
+    "干预",
+    "阶段",
+    "会谈",
+    "作业",
+    "工作表",
+    "清单",
+    "风险",
+    "安全计划",
+    "复发预防",
+    "技术",
+    "流程",
+    "步骤",
+)
+_DEFAULT_SECTION_DEPRIORITIZE_TERMS = (
+    "demographics",
+    "growth history",
+    "background",
+    "abstract",
+    "summary",
+    "keywords",
+    "references",
+    "reference",
+    "bibliography",
+    "appendix",
+    "author contributions",
+    "funding",
+    "acknowledg",
+    "ethics",
+    "conflict of interest",
+    "人口统计",
+    "成长史",
+    "背景",
+    "摘要",
+    "关键词",
+    "参考文献",
+    "附录",
+    "基金",
+    "致谢",
+    "伦理",
+    "利益冲突",
+)
 
 
 def _split_section_blocks(text: str) -> List[str]:
@@ -156,12 +216,16 @@ def _plan_section_units(
     return units
 
 
-def _profile_section_priority_terms(profile: DomainProfile, *, key: str) -> List[str]:
-    """Returns normalized section-priority terms from profile metadata."""
+def _default_section_priority_terms() -> List[str]:
+    """Returns normalized built-in terms for budget-aware section ordering."""
 
-    metadata = dict(profile.metadata or {})
-    raw = metadata.get(key)
-    return compact_text_list(coerce_str_list(raw), limit=64)
+    return compact_text_list(list(_DEFAULT_SECTION_PRIORITY_TERMS), limit=64)
+
+
+def _default_section_deprioritize_terms() -> List[str]:
+    """Returns normalized built-in low-value section terms."""
+
+    return compact_text_list(list(_DEFAULT_SECTION_DEPRIORITIZE_TERMS), limit=64)
 
 
 def _section_priority_score(
@@ -195,14 +259,14 @@ def _section_priority_score(
     return score
 
 
-def _ordered_sections_for_budget(record: DocumentRecord, *, profile: DomainProfile, max_units_per_document: int) -> List[object]:
+def _ordered_sections_for_budget(record: DocumentRecord, *, max_units_per_document: int) -> List[object]:
     """Reorders sections when a unit budget is active so higher-value sections go first."""
 
     sections = list(record.sections or [])
     if max_units_per_document <= 0 or not sections:
         return sections
-    priority_terms = _profile_section_priority_terms(profile, key="section_priority_keywords")
-    deprioritize_terms = _profile_section_priority_terms(profile, key="section_deprioritize_keywords")
+    priority_terms = _default_section_priority_terms()
+    deprioritize_terms = _default_section_deprioritize_terms()
     if not priority_terms and not deprioritize_terms:
         return sections
     ranked: List[Tuple[int, int, object]] = []
@@ -452,6 +516,11 @@ class SkillExtractionResult:
     extractor_name: str = "llm"
 
 
+ExtractionProgressCallback = Optional[
+    Callable[[DocumentRecord, List[SupportRecord], List[SkillDraft], SkillExtractionResult], None]
+]
+
+
 class DocumentSkillExtractor(Protocol):
     """Pluggable document-to-skill extractor interface."""
 
@@ -461,6 +530,7 @@ class DocumentSkillExtractor(Protocol):
         documents: List[DocumentRecord],
         windows: Optional[List[StrictWindow]],
         logger: StageLogger,
+        progress_callback: ExtractionProgressCallback = None,
     ) -> SkillExtractionResult:
         """Extracts support records and skill drafts from normalized documents."""
 
@@ -475,26 +545,14 @@ class LLMDocumentSkillExtractor:
         llm_config: Optional[Dict[str, object]] = None,
         max_section_chars: int = _DEFAULT_SECTION_CHARS,
         overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
-        domain_profile_path: str = "",
         max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
         max_units_per_document: int = 0,
     ) -> None:
         self._llm = llm or build_llm(dict(llm_config or {"provider": "mock"}))
         self.max_section_chars = max(200, int(max_section_chars or _DEFAULT_SECTION_CHARS))
         self.overlap_chars = max(0, int(overlap_chars or 0))
-        self.domain_profile_path = str(domain_profile_path or "").strip()
         self.max_candidates_per_unit = max(1, int(max_candidates_per_unit or _DEFAULT_MAX_CANDIDATES_PER_UNIT))
         self.max_units_per_document = max(0, int(max_units_per_document or 0))
-        self._profile_cache: Dict[str, DomainProfile] = {}
-
-    def _profile_for_domain(self, domain: str) -> DomainProfile:
-        key = str(domain or "").strip().lower() or "default"
-        cached = self._profile_cache.get(key)
-        if cached is not None:
-            return cached
-        profile = load_domain_profile(domain=key, profile_path=self.domain_profile_path)
-        self._profile_cache[key] = profile
-        return profile
 
     def _extract_unit_skills(
         self,
@@ -505,7 +563,6 @@ class LLMDocumentSkillExtractor:
         span: TextSpan,
         unit_text: str,
         unit_type: str,
-        profile: DomainProfile,
     ) -> List[Dict[str, object]]:
         payload = {
             "document": {
@@ -524,7 +581,6 @@ class LLMDocumentSkillExtractor:
                 "unit_type": unit_type,
             },
             "excerpt": str(unit_text or "").strip(),
-            "domain_profile": profile.to_dict(),
             "max_candidates": self.max_candidates_per_unit,
         }
         system = maybe_offline_prompt(
@@ -562,7 +618,6 @@ class LLMDocumentSkillExtractor:
         span: TextSpan,
         unit_text: str,
         unit_type: str,
-        profile: DomainProfile,
         item: Dict[str, object],
         unit_metadata: Optional[Dict[str, object]] = None,
     ) -> Tuple[Optional[SupportRecord], Optional[SkillDraft]]:
@@ -627,7 +682,6 @@ class LLMDocumentSkillExtractor:
                 "tags": tags,
                 "files": maybe_json_dict(item.get("files")),
                 "resources": maybe_json_dict(item.get("resources")),
-                "domain_profile": profile.domain,
                 "source_sections": [section_heading],
                 "extraction_unit": unit_type,
                 **dict(unit_metadata or {}),
@@ -646,7 +700,6 @@ class LLMDocumentSkillExtractor:
             metadata={
                 "document_title": record.title,
                 "domain": record.domain,
-                "domain_profile": profile.domain,
                 "extraction_unit": unit_type,
                 "skill_name": name,
                 "asset_type": draft.asset_type,
@@ -668,7 +721,6 @@ class LLMDocumentSkillExtractor:
     ) -> Tuple[List[SupportRecord], List[SkillDraft]]:
         supports: List[SupportRecord] = []
         drafts: List[SkillDraft] = []
-        profile = self._profile_for_domain(str(record.domain or ""))
         active_windows = list(windows or [])
         if self.max_units_per_document > 0:
             active_windows = active_windows[: self.max_units_per_document]
@@ -680,7 +732,6 @@ class LLMDocumentSkillExtractor:
                 span=window.span,
                 unit_text=window.text,
                 unit_type="window",
-                profile=profile,
             )
             for item in raw_skills:
                 support, draft = self._build_support_and_draft(
@@ -689,7 +740,6 @@ class LLMDocumentSkillExtractor:
                     span=window.span,
                     unit_text=window.text,
                     unit_type="window",
-                    profile=profile,
                     item=item,
                     unit_metadata={
                         "window_id": window.window_id,
@@ -710,11 +760,9 @@ class LLMDocumentSkillExtractor:
     def _extract_from_document(self, record: DocumentRecord) -> Tuple[List[SupportRecord], List[SkillDraft]]:
         supports: List[SupportRecord] = []
         drafts: List[SkillDraft] = []
-        profile = self._profile_for_domain(str(record.domain or ""))
         units_seen = 0
         ordered_sections = _ordered_sections_for_budget(
             record,
-            profile=profile,
             max_units_per_document=self.max_units_per_document,
         )
         for section in ordered_sections:
@@ -740,7 +788,6 @@ class LLMDocumentSkillExtractor:
                     span=span,
                     unit_text=unit_text,
                     unit_type=unit_type,
-                    profile=profile,
                 )
                 for item in raw_skills:
                     support, draft = self._build_support_and_draft(
@@ -749,7 +796,6 @@ class LLMDocumentSkillExtractor:
                         span=span,
                         unit_text=unit_text,
                         unit_type=unit_type,
-                        profile=profile,
                         item=item,
                     )
                     if support is None or draft is None:
@@ -769,6 +815,7 @@ class LLMDocumentSkillExtractor:
         documents: List[DocumentRecord],
         windows: Optional[List[StrictWindow]],
         logger: StageLogger,
+        progress_callback: ExtractionProgressCallback = None,
     ) -> SkillExtractionResult:
         result = SkillExtractionResult(
             documents=list(documents or []),
@@ -793,6 +840,8 @@ class LLMDocumentSkillExtractor:
                     supports, drafts = self._extract_from_document(record)
                 result.support_records.extend(supports)
                 result.skill_drafts.extend(drafts)
+                if progress_callback is not None:
+                    progress_callback(record, list(supports or []), list(drafts or []), result)
                 emit_stage_log(
                     logger,
                     f"[extract_skills] done {document_progress_label(doc_id=record.doc_id, title=record.title, source_file=str((record.metadata or {}).get('source_file') or ''))} windows={len(doc_windows)} supports={len(supports)} drafts={len(drafts)} names={summarize_names([draft.name for draft in drafts])}",
@@ -813,7 +862,6 @@ def build_document_skill_extractor(
     llm_config: Optional[Dict[str, object]] = None,
     max_section_chars: int = _DEFAULT_SECTION_CHARS,
     overlap_chars: int = _DEFAULT_CHUNK_OVERLAP_CHARS,
-    domain_profile_path: str = "",
     max_candidates_per_unit: int = _DEFAULT_MAX_CANDIDATES_PER_UNIT,
     max_units_per_document: int = 0,
 ) -> DocumentSkillExtractor:
@@ -826,7 +874,6 @@ def build_document_skill_extractor(
             llm_config=llm_config,
             max_section_chars=max_section_chars,
             overlap_chars=overlap_chars,
-            domain_profile_path=domain_profile_path,
             max_candidates_per_unit=max_candidates_per_unit,
             max_units_per_document=max_units_per_document,
         )
@@ -839,8 +886,14 @@ def extract_skills(
     windows: Optional[List[StrictWindow]] = None,
     extractor: DocumentSkillExtractor | None = None,
     logger: StageLogger = None,
+    progress_callback: ExtractionProgressCallback = None,
 ) -> SkillExtractionResult:
     """Public functional wrapper for the direct skill extraction stage."""
 
     impl = extractor or LLMDocumentSkillExtractor()
-    return impl.extract(documents=list(documents or []), windows=list(windows or []), logger=logger)
+    return impl.extract(
+        documents=list(documents or []),
+        windows=list(windows or []),
+        logger=logger,
+        progress_callback=progress_callback,
+    )

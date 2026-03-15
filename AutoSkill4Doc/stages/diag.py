@@ -27,7 +27,6 @@ def run_document_diag(
     continue_on_error: bool = True,
     max_documents: int = 0,
     extract_strategy: str = "recommended",
-    domain_profile_path: str = "",
     report_path: str = "",
     report_limit: int = 0,
 ) -> Dict[str, Any]:
@@ -43,7 +42,6 @@ def run_document_diag(
         dry_run=True,
         max_documents=int(max_documents or 0),
         extract_strategy=str(extract_strategy or "").strip() or "recommended",
-        domain_profile_path=str(domain_profile_path or "").strip(),
     )
     extracted_result = pipeline.extract_skills(documents=ingest_result.documents, windows=ingest_result.windows)
 

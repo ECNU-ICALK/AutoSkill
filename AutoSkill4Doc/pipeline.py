@@ -11,7 +11,7 @@ any stage independently:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from autoskill import AutoSkill
@@ -38,6 +38,7 @@ from .ingest import (
 )
 from .models import DocumentRecord, SkillDraft, SkillSpec, SupportRecord, VersionState
 from .models import StrictWindow
+from .store.intermediate import IntermediateRunWriter, new_intermediate_run_id
 from .store.registry import DocumentRegistry, build_registry_from_store_config
 from .store.versioning import VersionRegistrationResult, register_versions
 
@@ -51,6 +52,7 @@ class DocumentBuildResult:
     compiled: SkillCompilationResult
     registration: VersionRegistrationResult
     dry_run: bool = False
+    intermediate: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a compact build summary suitable for CLI/API output."""
@@ -71,6 +73,7 @@ class DocumentBuildResult:
             "staging_runs": len(self.registration.staging_runs),
             "visible_schools": len(list((self.registration.visible_tree or {}).get("affected_schools") or [])),
             "visible_children": len(list((self.registration.visible_tree or {}).get("child_paths") or [])),
+            "intermediate": dict(self.intermediate or {}),
             "errors": (
                 list(self.ingest.errors)
                 + list(self.extracted.errors)
@@ -115,7 +118,6 @@ class DocumentBuildPipeline:
         dry_run: bool = False,
         max_documents: int = 0,
         extract_strategy: str = DEFAULT_EXTRACT_STRATEGY,
-        domain_profile_path: str = "",
     ) -> DocumentIngestResult:
         """Runs the ingestion stage only."""
 
@@ -132,7 +134,6 @@ class DocumentBuildPipeline:
             dry_run=dry_run,
             max_documents=max_documents,
             extract_strategy=extract_strategy,
-            domain_profile_path=domain_profile_path,
             logger=self.logger,
         )
 
@@ -141,6 +142,7 @@ class DocumentBuildPipeline:
         *,
         documents: List[DocumentRecord],
         windows: Optional[List[StrictWindow]] = None,
+        progress_callback=None,
     ) -> SkillExtractionResult:
         """Runs the direct skill extraction stage only."""
 
@@ -149,6 +151,7 @@ class DocumentBuildPipeline:
             windows=list(windows or []),
             extractor=self.document_skill_extractor,
             logger=self.logger,
+            progress_callback=progress_callback,
         )
 
     def compile_skills(
@@ -209,11 +212,28 @@ class DocumentBuildPipeline:
         target_state: Optional[VersionState] = None,
         max_documents: int = 0,
         extract_strategy: str = DEFAULT_EXTRACT_STRATEGY,
-        domain_profile_path: str = "",
     ) -> DocumentBuildResult:
         """Runs the full offline document build pipeline."""
 
         effective_state = target_state or (VersionState.DRAFT if dry_run else VersionState.ACTIVE)
+        intermediate_writer = None
+        intermediate_summary: Dict[str, Any] = {}
+        if not dry_run:
+            store_root = ""
+            if self.sdk is not None:
+                store_root = str(getattr(getattr(self.sdk, "config", None), "store", {}).get("path") or "").strip()
+            if not store_root:
+                registry_root = os.path.abspath(os.path.expanduser(str(self.registry.root_dir or "").strip()))
+                runtime_dir = os.path.dirname(registry_root)
+                if os.path.basename(runtime_dir) == ".runtime":
+                    store_root = os.path.dirname(runtime_dir)
+            if store_root:
+                intermediate_writer = IntermediateRunWriter(
+                    base_store_root=store_root,
+                    run_id=new_intermediate_run_id(),
+                    metadata=metadata,
+                )
+                intermediate_summary = intermediate_writer.summary().to_dict()
         ingest_result = self.ingest_document(
             data=data,
             file_path=file_path,
@@ -225,30 +245,66 @@ class DocumentBuildPipeline:
             dry_run=dry_run,
             max_documents=max_documents,
             extract_strategy=extract_strategy,
-            domain_profile_path=domain_profile_path,
         )
-        extracted_result = self.extract_skills(documents=ingest_result.documents, windows=ingest_result.windows)
-        compiled_result = self.compile_skills(
-            skill_drafts=extracted_result.skill_drafts,
-            support_records=extracted_result.support_records,
-            target_state=effective_state,
-        )
-        registration_result = self.register_versions(
-            documents=ingest_result.documents,
-            support_records=compiled_result.support_records,
-            skill_specs=compiled_result.skill_specs,
-            user_id=user_id,
-            metadata=metadata,
-            dry_run=dry_run,
-            target_state=effective_state,
-        )
-        return DocumentBuildResult(
-            ingest=ingest_result,
-            extracted=extracted_result,
-            compiled=compiled_result,
-            registration=registration_result,
-            dry_run=bool(dry_run),
-        )
+        if intermediate_writer is not None:
+            intermediate_writer.write_ingest(ingest_result)
+            intermediate_summary = intermediate_writer.summary().to_dict()
+        try:
+            extracted_result = self.extract_skills(
+                documents=ingest_result.documents,
+                windows=ingest_result.windows,
+                progress_callback=(
+                    None
+                    if intermediate_writer is None
+                    else lambda record, supports, drafts, cumulative: intermediate_writer.write_extract_progress(
+                        record=record,
+                        supports=supports,
+                        drafts=drafts,
+                        cumulative=cumulative,
+                        total_documents=len(ingest_result.documents),
+                    )
+                ),
+            )
+            if intermediate_writer is not None:
+                intermediate_writer.write_extract(extracted_result)
+                intermediate_summary = intermediate_writer.summary().to_dict()
+            compiled_result = self.compile_skills(
+                skill_drafts=extracted_result.skill_drafts,
+                support_records=extracted_result.support_records,
+                target_state=effective_state,
+            )
+            if intermediate_writer is not None:
+                intermediate_writer.write_compile(compiled_result)
+                intermediate_summary = intermediate_writer.summary().to_dict()
+            registration_result = self.register_versions(
+                documents=ingest_result.documents,
+                support_records=compiled_result.support_records,
+                skill_specs=compiled_result.skill_specs,
+                user_id=user_id,
+                metadata=metadata,
+                dry_run=dry_run,
+                target_state=effective_state,
+            )
+            if intermediate_writer is not None:
+                intermediate_writer.write_registration(registration_result)
+                intermediate_summary = intermediate_writer.summary().to_dict()
+            build_result = DocumentBuildResult(
+                ingest=ingest_result,
+                extracted=extracted_result,
+                compiled=compiled_result,
+                registration=registration_result,
+                dry_run=bool(dry_run),
+                intermediate=dict(intermediate_summary or {}),
+            )
+            if intermediate_writer is not None:
+                intermediate_writer.complete(summary=build_result.to_dict())
+                intermediate_summary = intermediate_writer.summary().to_dict()
+                build_result.intermediate = dict(intermediate_summary or {})
+            return build_result
+        except Exception as exc:
+            if intermediate_writer is not None:
+                intermediate_writer.fail(error=str(exc))
+            raise
 
 
 def build_default_document_pipeline(

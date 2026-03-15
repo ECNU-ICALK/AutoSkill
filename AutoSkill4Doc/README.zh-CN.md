@@ -36,8 +36,8 @@ document
 - 支持 dry-run 和分阶段执行
 - 支持 provenance/change log/version history
 - 支持生命周期状态：`candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
-- 支持 domain profile 抽取先验（`domain_profiles/*.json`）
 - 支持在文档技能库根目录下生成 `总技能/子技能/references` 可见树
+- 非 `dry-run` 构建过程中会把中间结果写到 `.runtime/intermediate_runs/<run_id>/`
 
 输入说明：
 - `text / markdown / json / jsonl` 可直接读取
@@ -60,6 +60,12 @@ document
 <store_root>/.runtime/document_registry/
 ```
 
+默认中间结果路径：
+
+```text
+<store_root>/.runtime/intermediate_runs/
+```
+
 可见输出结构：
 
 ```text
@@ -79,6 +85,7 @@ document
           evidence_manifest.json
   .runtime/
     document_registry/
+    intermediate_runs/
     staging/
     library_manifest.json
 ```
@@ -165,6 +172,7 @@ python3 -m AutoSkill4Doc build \
 
 说明：
 - `diag` 始终以 dry-run 观察模式运行，不会写入 registry 或 skill store。
+- 非 `dry-run` 的 `build / llm-extract` 会把 ingest / extract / compile / register 的阶段快照写到 `.runtime/intermediate_runs/<run_id>/`。
 - `canonical-merge` 当前用于查看 staging 结果，必须显式传 `--profile-id` 和 `--school-name`。
 
 ## Python API
@@ -218,7 +226,6 @@ compiled = pipeline.compile_skills(
 - `store/staging.py`：canonical merge staging 读写辅助
 - `core/config.py`：AutoSkill4Doc 独立默认路径与配置
 - `core/provider_config.py`：独立 provider 配置辅助
-- `profile.py`：领域 profile 加载与合并
 - `models.py`：核心数据模型
 - `prompts.py`：offline prompt 构造与运行时 prompt 替换
 

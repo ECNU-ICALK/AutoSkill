@@ -67,7 +67,6 @@ AutoSkill4Doc/
   extract.py
   pipeline.py
   models.py
-  profile.py
   prompts.py
   core/
     config.py
@@ -80,5 +79,4 @@ AutoSkill4Doc/
   store/
     versioning.py
     registry.py
-  domain_profiles/
 ```

@@ -15,7 +15,6 @@ from typing import List, Sequence, Tuple
 from ..core.common import dedupe_strings, normalize_text
 from ..core.config import normalize_extract_strategy
 from ..models import DocumentRecord, DocumentSection, StrictWindow, TextSpan
-from ..profile import DomainProfile, load_domain_profile
 
 _DEFAULT_NOISE_SECTION_MARKERS = (
     "abstract",
@@ -125,38 +124,16 @@ class ParagraphBlock:
     anchor_hits: Tuple[str, ...]
 
 
-def _profile_terms(profile: DomainProfile, *, metadata_key: str) -> List[str]:
-    raw = profile.metadata.get(metadata_key)
-    if isinstance(raw, list):
-        return dedupe_strings([str(item or "").strip() for item in raw if str(item or "").strip()], lower=True)
-    if isinstance(raw, str) and raw.strip():
-        return [raw.strip()]
-    return []
+def _noise_section_markers() -> List[str]:
+    return dedupe_strings(list(_DEFAULT_NOISE_SECTION_MARKERS), lower=True)
 
 
-def _noise_section_markers(profile: DomainProfile) -> List[str]:
-    return dedupe_strings(
-        list(_DEFAULT_NOISE_SECTION_MARKERS) + _profile_terms(profile, metadata_key="noise_section_keywords"),
-        lower=True,
-    )
+def _priority_markers() -> List[str]:
+    return dedupe_strings(list(_DEFAULT_PRIORITY_MARKERS), lower=True)
 
 
-def _priority_markers(profile: DomainProfile) -> List[str]:
-    return dedupe_strings(
-        list(_DEFAULT_PRIORITY_MARKERS)
-        + _profile_terms(profile, metadata_key="section_priority_keywords")
-        + [alias for _, aliases in profile.family_mapping("task_keywords") for alias in aliases[:8]],
-        lower=True,
-    )
-
-
-def _anchor_markers(profile: DomainProfile) -> List[str]:
-    extras = []
-    for field_name in ("task_keywords", "method_keywords", "stage_keywords"):
-        for _, aliases in profile.family_mapping(field_name):
-            extras.extend(list(aliases[:12]))
-    extras.extend(_profile_terms(profile, metadata_key="strict_window_anchor_keywords"))
-    return dedupe_strings(list(_DEFAULT_ANCHORS) + extras, lower=True)
+def _anchor_markers() -> List[str]:
+    return dedupe_strings(list(_DEFAULT_ANCHORS), lower=True)
 
 
 def _paragraphs_from_section(section: DocumentSection) -> List[Tuple[str, TextSpan]]:
@@ -318,15 +295,13 @@ def build_windows_for_record(
     record: DocumentRecord,
     *,
     strategy: str = "recommended",
-    domain_profile_path: str = "",
     max_chars: int = 2400,
 ) -> List[StrictWindow]:
     """Builds strict/recommended windows for one normalized document."""
 
-    profile = load_domain_profile(domain=record.domain, profile_path=domain_profile_path)
-    noise_markers = _noise_section_markers(profile)
-    priority_markers = _priority_markers(profile)
-    anchor_markers = _anchor_markers(profile)
+    noise_markers = _noise_section_markers()
+    priority_markers = _priority_markers()
+    anchor_markers = _anchor_markers()
     effective_strategy = _effective_strategy(strategy)
     windows: List[StrictWindow] = []
 

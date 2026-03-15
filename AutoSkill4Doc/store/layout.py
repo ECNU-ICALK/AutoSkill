@@ -66,6 +66,18 @@ def staging_root(base_store_root: str = "") -> str:
     return os.path.join(runtime_root(base_store_root), "staging")
 
 
+def intermediate_runs_root(base_store_root: str = "") -> str:
+    """Returns the intermediate run root for incremental stage artifacts."""
+
+    return os.path.join(runtime_root(base_store_root), "intermediate_runs")
+
+
+def intermediate_run_dir(*, base_store_root: str, run_id: str) -> str:
+    """Returns the directory for one intermediate extraction run."""
+
+    return os.path.join(intermediate_runs_root(base_store_root), safe_dir_component(run_id or "run"))
+
+
 def previews_root(base_store_root: str = "") -> str:
     """Returns the preview export root."""
 

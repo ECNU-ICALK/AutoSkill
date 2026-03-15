@@ -12,6 +12,7 @@ from AutoSkill4Doc.extract import extract_from_doc
 from AutoSkill4Doc.models import SkillDraft, SupportRecord, SupportRelation, TextSpan, VersionState
 from AutoSkill4Doc.pipeline import build_default_document_pipeline
 from AutoSkill4Doc.prompts import OFFLINE_CHANNEL_DOC, build_offline_extract_prompt
+from AutoSkill4Doc.store.layout import intermediate_runs_root
 
 
 _DOC_TEXT = """
@@ -208,6 +209,21 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertIn("## Applicable Signals", stored_skills[0].instructions)
             self.assertIn("## Example Therapist Responses", stored_skills[0].instructions)
             self.assertGreaterEqual(len(stored_skills[0].examples), 1)
+            self.assertTrue(os.path.isdir(result.intermediate.get("run_dir", "")))
+            self.assertTrue(os.path.isfile(os.path.join(result.intermediate["run_dir"], "ingest", "result.json")))
+            self.assertTrue(os.path.isfile(os.path.join(result.intermediate["run_dir"], "extract", "result.json")))
+            self.assertTrue(os.path.isfile(os.path.join(result.intermediate["run_dir"], "compile", "result.json")))
+            self.assertTrue(os.path.isfile(os.path.join(result.intermediate["run_dir"], "register", "result.json")))
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        result.intermediate["run_dir"],
+                        "extract",
+                        "documents",
+                        f"{result.ingest.documents[0].doc_id}.json",
+                    )
+                )
+            )
             self.assertTrue(any("[ingest_document]" in line for line in logs))
             self.assertTrue(any("[extract_skills]" in line for line in logs))
             self.assertTrue(any("[compile_skills]" in line for line in logs))
@@ -257,6 +273,8 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertEqual(manifest["entities"]["documents"]["count"], 0)
             self.assertEqual(manifest["entities"]["skills"]["count"], 0)
             self.assertEqual(len(sdk.store.list(user_id="u1")), 0)
+            self.assertEqual(result.intermediate, {})
+            self.assertFalse(os.path.isdir(intermediate_runs_root(tmpdir)))
 
     def test_full_build_writes_visible_parent_child_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -307,6 +325,7 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertTrue(result["dry_run"])
             self.assertEqual(result["skills"][0]["asset_type"], "session_skill")
             self.assertEqual(result["skills"][0]["granularity"], "session")
+            self.assertEqual(result["intermediate"], {})
 
     def test_document_build_result_dict_includes_windows_and_compiled_supports(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -509,29 +528,6 @@ Do not push interpretation before the client is ready.
         with tempfile.TemporaryDirectory() as tmpdir:
             sdk = self._build_sdk(store_path=tmpdir)
             pipeline = build_default_document_pipeline(sdk=sdk)
-            profile_path = os.path.join(tmpdir, "custom_profile.json")
-            with open(profile_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "domain": "psychology",
-                        "task_keywords": [
-                            {"label": "goal_setting", "aliases": ["goal setting", "session intervention"]}
-                        ],
-                        "method_keywords": [
-                            {"label": "solution_focused", "aliases": ["scaling question"]}
-                        ],
-                        "stage_keywords": [
-                            {"label": "intervention", "aliases": ["session intervention"]}
-                        ],
-                        "metadata": {
-                            "section_priority_keywords": ["session intervention"],
-                            "section_deprioritize_keywords": ["demographics", "growth history"]
-                        },
-                    },
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
 
             text = """
 # Demographics
@@ -555,7 +551,6 @@ Use a scaling question to help the client rate progress and define the next step
                 extractor=build_document_skill_extractor(
                     "llm",
                     llm_config={"provider": "mock", "response": _budget_response},
-                    domain_profile_path=profile_path,
                     max_units_per_document=1,
                 ),
             )

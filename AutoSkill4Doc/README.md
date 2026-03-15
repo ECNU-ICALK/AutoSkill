@@ -36,8 +36,8 @@ Core layers:
 - dry-run and stage-by-stage execution
 - support-backed provenance and change logs
 - lifecycle-aware versioning: `candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
-- domain profile based extraction priors (`domain_profiles/*.json`)
 - visible parent/child output tree under the document skill library root
+- incremental intermediate snapshots under `.runtime/intermediate_runs/<run_id>/` during non-dry-run builds
 
 Input notes:
 - text / markdown / json / jsonl are read directly
@@ -60,6 +60,12 @@ Default registry root:
 <store_root>/.runtime/document_registry/
 ```
 
+Default intermediate run root:
+
+```text
+<store_root>/.runtime/intermediate_runs/
+```
+
 Visible output tree:
 
 ```text
@@ -79,6 +85,7 @@ Visible output tree:
           evidence_manifest.json
   .runtime/
     document_registry/
+    intermediate_runs/
     staging/
     library_manifest.json
 ```
@@ -163,6 +170,7 @@ python3 -m AutoSkill4Doc build \
 
 Notes:
 - `diag` always runs in non-persisting dry-run mode.
+- non-`dry-run` `build` / `llm-extract` writes ingest/extract/compile/register snapshots to `.runtime/intermediate_runs/<run_id>/`.
 - `canonical-merge` currently inspects staged results and requires `--profile-id` plus `--school-name`.
 
 ## Python API
@@ -216,7 +224,6 @@ compiled = pipeline.compile_skills(
 - `store/staging.py`: canonical-merge staging payload helpers
 - `core/config.py`: standalone AutoSkill4Doc defaults and paths
 - `core/provider_config.py`: standalone provider configuration helpers
-- `profile.py`: domain profile loading/merge
 - `models.py`: core data models
 - `prompts.py`: offline prompt builders plus runtime prompt switching
 

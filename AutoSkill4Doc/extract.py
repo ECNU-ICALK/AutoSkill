@@ -72,7 +72,6 @@ def extract_from_doc(
     domain: str = "",
     source_type: str = "document",
     registry_root: str = "",
-    domain_profile_path: str = "",
     extract_strategy: str = DEFAULT_EXTRACT_STRATEGY,
     dry_run: bool = False,
     target_state: Optional[VersionState] = None,
@@ -114,7 +113,6 @@ def extract_from_doc(
             llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
             max_section_chars=int(max_chars_per_chunk or 0) or 6000,
             overlap_chars=int(overlap_chars or 0),
-            domain_profile_path=str(domain_profile_path or "").strip(),
             max_candidates_per_unit=int(max_candidates_per_unit or 0) or 3,
             max_units_per_document=int(max_units_per_document or 0),
         ),
@@ -132,7 +130,6 @@ def extract_from_doc(
         target_state=target_state,
         max_documents=int(max_documents or 0),
         extract_strategy=normalize_extract_strategy(extract_strategy),
-        domain_profile_path=str(domain_profile_path or "").strip(),
     )
     return _build_summary(pipeline=pipeline, result=result)
 
@@ -252,6 +249,7 @@ def _build_summary(*, pipeline: DocumentBuildPipeline, result: DocumentBuildResu
         "upserted_count": len(result.registration.upserted_store_skills),
         "staging_runs": list(result.registration.staging_runs or []),
         "visible_tree": dict(result.registration.visible_tree or {}),
+        "intermediate": dict(result.intermediate or {}),
         "skills": skills_out,
         "errors": errors,
     }
@@ -342,7 +340,6 @@ def _build_pipeline_from_args(args: argparse.Namespace) -> DocumentBuildPipeline
             llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
             max_section_chars=int(args.max_chars_per_chunk or 0) or 6000,
             overlap_chars=int(args.overlap_chars or 0),
-            domain_profile_path=str(args.domain_profile or "").strip(),
             max_candidates_per_unit=int(args.max_candidates_per_unit or 0) or 3,
             max_units_per_document=int(args.max_units_per_document or 0),
         ),
@@ -382,7 +379,6 @@ def _ingest_for_cli(
         dry_run=bool(dry_run),
         max_documents=int(args.max_documents or 0),
         extract_strategy=normalize_extract_strategy(args.extract_strategy),
-        domain_profile_path=str(args.domain_profile or "").strip(),
     )
 
 
@@ -425,11 +421,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         "--taxonomy-axis",
         default="",
         help="Optional taxonomy axis label recorded into visible skill tags and manifests, e.g. 疗法.",
-    )
-    parser.add_argument(
-        "--domain-profile",
-        default="",
-        help="Optional JSON file overriding or extending the built-in domain profile used by the document extractor.",
     )
     parser.set_defaults(continue_on_error=True)
     parser.add_argument(
@@ -651,7 +642,6 @@ def _run_build(args: argparse.Namespace) -> None:
         target_state=_coerce_state(str(args.target_state or ""), default=VersionState.ACTIVE),
         max_documents=int(args.max_documents or 0),
         extract_strategy=normalize_extract_strategy(args.extract_strategy),
-        domain_profile_path=str(args.domain_profile or "").strip(),
     )
     payload = _build_summary(pipeline=pipeline, result=result)
     if bool(args.json):
@@ -667,8 +657,11 @@ def _run_build(args: argparse.Namespace) -> None:
         f"skills={payload['total_skill_specs']} "
         f"changes={payload['change_events']} "
         f"staging={len(list(payload.get('staging_runs') or []))} "
-        f"schools={len(list((payload.get('visible_tree') or {}).get('affected_schools') or []))}"
+        f"schools={len(list((payload.get('visible_tree') or {}).get('affected_schools') or []))} "
+        f"intermediate={'1' if (payload.get('intermediate') or {}).get('run_dir') else '0'}"
     )
+    if (payload.get("intermediate") or {}).get("run_dir"):
+        print(f"intermediate_run={(payload.get('intermediate') or {}).get('run_dir')}")
     for idx, skill in enumerate(list(payload.get("skills") or [])[:20], start=1):
         print(f"{idx}. {skill.get('name', '')} ({skill.get('version', '')}, {skill.get('status', '')})")
     _print_errors(list(payload.get("errors") or []))
@@ -778,7 +771,6 @@ def _run_diag(args: argparse.Namespace) -> None:
         continue_on_error=bool(args.continue_on_error),
         max_documents=int(args.max_documents or 0),
         extract_strategy=normalize_extract_strategy(args.extract_strategy),
-        domain_profile_path=str(args.domain_profile or "").strip(),
         report_path=str(args.report_path or "").strip(),
         report_limit=int(args.report_limit or 0),
     )
