@@ -17,7 +17,12 @@ from typing import Any, Dict, List, Optional
 from autoskill import AutoSkill
 
 from .core.common import StageLogger
-from .core.config import DEFAULT_DOC_SKILL_USER_ID, DEFAULT_EXTRACT_STRATEGY, default_store_path
+from .core.config import (
+    DEFAULT_DOC_SKILL_USER_ID,
+    DEFAULT_EXTRACT_STRATEGY,
+    DEFAULT_MAX_SECTION_CHARS,
+    default_store_path,
+)
 from .stages.compiler import (
     SkillCompilationResult,
     SkillCompiler,
@@ -315,6 +320,7 @@ def build_default_document_pipeline(
     sdk: Optional[AutoSkill] = None,
     registry_root: str = "",
     logger: StageLogger = None,
+    document_ingestor: Optional[DocumentIngestor] = None,
     document_skill_extractor: Optional[DocumentSkillExtractor] = None,
     skill_compiler: Optional[SkillCompiler] = None,
 ) -> DocumentBuildPipeline:
@@ -332,6 +338,12 @@ def build_default_document_pipeline(
         registry=registry,
         sdk=sdk,
         logger=logger,
+        document_ingestor=document_ingestor
+        or HeuristicDocumentIngestor(
+            llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
+            max_section_chars=DEFAULT_MAX_SECTION_CHARS,
+            outline_fallback_mode="auto",
+        ),
         document_skill_extractor=document_skill_extractor
         or build_document_skill_extractor(
             "llm",

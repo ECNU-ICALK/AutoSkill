@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from autoskill import AutoSkill
 from autoskill.llm.base import LLM
 from autoskill.llm.factory import build_llm
+from autoskill.models import Skill, SkillStatus
 from autoskill.utils.time import now_iso
 
 from ..core.common import StageLogger, emit_stage_log, summarize_names
@@ -31,9 +32,9 @@ from ..models import (
     SupportRelation,
     VersionState,
 )
-from ..prompts import activate_offline_prompt_runtime
-from ..stages.compiler import _build_structured_prompt, _coerce_examples, skill_spec_to_candidate
+from ..stages.compiler import _build_structured_prompt, _coerce_examples
 from .registry import DocumentRegistry
+from .retrieval import DEFAULT_RETRIEVAL_LIMIT, DocumentSkillRetriever, build_document_skill_retriever
 from .staging import plain_skill_specs, write_registration_staging
 from .visible_tree import sync_visible_skill_tree
 
@@ -252,6 +253,122 @@ def _store_root_from_context(*, registry: DocumentRegistry, sdk: Optional[AutoSk
     return os.path.dirname(registry_root)
 
 
+def _store_status_for_skill(skill: SkillSpec) -> SkillStatus:
+    """Maps one document lifecycle state into the final AutoSkill store status."""
+
+    return SkillStatus.ACTIVE if skill.status in _ACTIVE_STORE_STATES else SkillStatus.ARCHIVED
+
+
+def _store_metadata_for_skill(skill: SkillSpec, *, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Builds final store metadata from one reconciled document skill."""
+
+    merged = dict(metadata or {})
+    merged.update(dict(skill.metadata or {}))
+    merged["_autoskill_asset_type"] = str(skill.asset_type or "").strip()
+    merged["_autoskill_granularity"] = str(skill.granularity or "").strip()
+    merged["asset_type"] = str(skill.asset_type or "").strip()
+    merged["granularity"] = str(skill.granularity or "").strip()
+    merged["source_type"] = "document_skill"
+    return merged
+
+
+def _store_source_for_skill(skill: SkillSpec) -> Dict[str, Any]:
+    """Builds stable source metadata carried into the final store skill."""
+
+    return {
+        "source_type": "document_skill",
+        "skill_spec_id": skill.skill_id,
+        "asset_type": skill.asset_type,
+        "granularity": skill.granularity,
+        "objective": skill.objective,
+        "support_ids": list(skill.support_ids or []),
+        "domain": skill.domain,
+        "task_family": skill.task_family,
+        "method_family": skill.method_family,
+        "stage": skill.stage,
+        "version": skill.version,
+        "status": skill.status.value,
+    }
+
+
+def _store_files_for_skill(skill: SkillSpec) -> Dict[str, str]:
+    """Returns any extra files that should be persisted with the final store skill."""
+
+    files = maybe_json_dict((skill.metadata or {}).get("files"))
+    if not isinstance(files, dict):
+        return {}
+    return {str(path): str(content) for path, content in files.items()}
+
+
+def _store_skill_from_spec(
+    skill: SkillSpec,
+    *,
+    user_id: str,
+    metadata: Optional[Dict[str, Any]],
+) -> Skill:
+    """Builds one final AutoSkill store skill directly from a reconciled document skill."""
+
+    return Skill(
+        id=str(skill.skill_id or "").strip(),
+        user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
+        name=str(skill.name or "").strip(),
+        description=str(skill.description or "").strip(),
+        instructions=str(skill.skill_body or "").strip(),
+        triggers=list(skill.triggers or []),
+        examples=list(skill.examples or []),
+        tags=list(skill.tags or []),
+        version=str(skill.version or "0.1.0"),
+        status=_store_status_for_skill(skill),
+        files=_store_files_for_skill(skill),
+        source=_store_source_for_skill(skill),
+        metadata=_store_metadata_for_skill(skill, metadata=metadata),
+        updated_at=now_iso(),
+    )
+
+
+def _sync_store_skills(
+    *,
+    sdk: AutoSkill,
+    skill_specs: Sequence[SkillSpec],
+    user_id: str,
+    metadata: Optional[Dict[str, Any]],
+    logger: StageLogger,
+) -> Tuple[List[Skill], List[Skill]]:
+    """
+    Persists reconciled document skills directly into the final store.
+
+    This bypasses the generic SDK maintainer so AutoSkill4Doc keeps control over
+    asset-layer boundaries such as `asset_type` and `granularity`.
+    """
+
+    effective_user = str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID
+    deduped: Dict[str, SkillSpec] = {}
+    for item in list(skill_specs or []):
+        key = str(item.skill_id or "").strip()
+        if key:
+            deduped[key] = item
+
+    touched: List[Skill] = []
+    for item in deduped.values():
+        persisted = _store_skill_from_spec(item, user_id=effective_user, metadata=metadata)
+        existing = sdk.store.get(persisted.id)
+        if persisted.status == SkillStatus.ARCHIVED and existing is None:
+            continue
+        sdk.store.upsert(persisted)
+        touched.append(persisted)
+
+    try:
+        current_active = list(sdk.store.list(user_id=effective_user) or [])
+    except Exception:
+        current_active = []
+
+    emit_stage_log(
+        logger,
+        f"[register_versions] store_sync touched={len(touched)} active={len(current_active)} names={summarize_names([skill.name for skill in touched])}",
+    )
+    return touched, current_active
+
+
 def _staging_bucket_for_skill(skill: SkillSpec, *, metadata: Optional[Dict[str, Any]]) -> Tuple[str, str, str]:
     """Builds one `(profile_id, family_id, child_type)` staging bucket tuple."""
 
@@ -290,10 +407,14 @@ class VersionManager:
         *,
         registry: DocumentRegistry,
         llm: LLM,
+        retriever: Optional[DocumentSkillRetriever] = None,
+        retrieval_limit: int = DEFAULT_RETRIEVAL_LIMIT,
         logger: StageLogger = None,
     ) -> None:
         self.registry = registry
         self.llm = llm
+        self.retriever = retriever
+        self.retrieval_limit = max(1, int(retrieval_limit or DEFAULT_RETRIEVAL_LIMIT))
         self.logger = logger
 
     def _skill_for_llm(self, skill: SkillSpec, *, support_by_id: Dict[str, SupportRecord]) -> Dict[str, Any]:
@@ -847,16 +968,32 @@ class VersionManager:
         support_by_id = _support_lookup(self.registry, support_records)
         existing_skills = list(self.registry.list_skills())
         existing_skills_by_id = {skill.skill_id: skill for skill in existing_skills}
+        retriever = self.retriever or build_document_skill_retriever()
+        retriever.refresh(existing_skills)
 
-        decisions = [
-            self.classify_change(
+        decisions: List[ChangeDecision] = []
+        for skill in list(skills or []):
+            hits = retriever.search(
                 skill,
-                peer_skills=skills,
-                existing_skills=existing_skills,
-                support_by_id=support_by_id,
+                limit=self.retrieval_limit,
             )
-            for skill in list(skills or [])
-        ]
+            retrieved_existing = [hit.skill for hit in list(hits or [])]
+            emit_stage_log(
+                self.logger,
+                (
+                    f"[register_versions] retrieve skill={skill.skill_id} "
+                    f"hits={len(retrieved_existing)} "
+                    f"names={summarize_names([item.name for item in retrieved_existing])}"
+                ),
+            )
+            decisions.append(
+                self.classify_change(
+                    skill,
+                    peer_skills=skills,
+                    existing_skills=retrieved_existing,
+                    support_by_id=support_by_id,
+                )
+            )
 
         processed_split_parents: Set[str] = set()
         consumed_existing_ids: Set[str] = set()
@@ -1191,7 +1328,20 @@ def register_versions(
     effective_state = VersionState.DRAFT if dry_run else target_state
     preexisting_skills = list(registry.list_skills())
     llm_impl = llm or build_llm(dict(getattr(getattr(sdk, "config", None), "llm", {}) or {"provider": "mock"}))
-    manager = VersionManager(registry=registry, llm=llm_impl, logger=logger)
+    sdk_config = getattr(sdk, "config", None)
+    embeddings_config = dict(getattr(sdk_config, "embeddings", {}) or {"provider": "hashing", "dims": 256})
+    bm25_weight = float(getattr(sdk_config, "bm25_weight", 0.1) or 0.1)
+    retriever = build_document_skill_retriever(
+        embeddings_config=embeddings_config,
+        bm25_weight=bm25_weight,
+    )
+    manager = VersionManager(
+        registry=registry,
+        llm=llm_impl,
+        retriever=retriever,
+        retrieval_limit=12,
+        logger=logger,
+    )
     reconciled = manager.reconcile(
         skills=skill_specs,
         support_records=support_records,
@@ -1200,7 +1350,7 @@ def register_versions(
     reconciled.skill_specs = [_merge_layout_metadata(skill, metadata=metadata) for skill in list(reconciled.skill_specs or [])]
     reconciled.documents = list(documents or [])
     reconciled.dry_run = bool(dry_run)
-    persisted_store_skills: List[Any] = []
+    current_store_skills: List[Any] = []
 
     if not dry_run:
         for document in documents or []:
@@ -1232,26 +1382,21 @@ def register_versions(
             )
 
     if sdk is not None and reconciled.skill_specs:
-        candidates = [
-            skill_spec_to_candidate(spec)
-            for spec in reconciled.skill_specs
-            if spec.status in _ACTIVE_STORE_STATES
-        ]
         md = dict(metadata or {})
         md.setdefault("channel", "offline_extract_from_doc")
         md.setdefault("source_type", "document")
         md["document_registry_root"] = registry.root_dir
-        if candidates:
+        if reconciled.skill_specs:
             if not dry_run:
                 try:
-                    with activate_offline_prompt_runtime(sdk=sdk, channel="offline_extract_from_doc"):
-                        updated = sdk.maintainer.apply(
-                            candidates,
-                            user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
-                            metadata=md,
-                        )
-                    persisted_store_skills = list(updated or [])
-                    reconciled.upserted_store_skills = [_plain_skill(skill) for skill in (updated or [])]
+                    touched_store_skills, current_store_skills = _sync_store_skills(
+                        sdk=sdk,
+                        skill_specs=reconciled.skill_specs,
+                        user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
+                        metadata=md,
+                        logger=logger,
+                    )
+                    reconciled.upserted_store_skills = [_plain_skill(skill) for skill in list(touched_store_skills or [])]
                     emit_stage_log(
                         logger,
                         f"[register_versions] store_upserts={len(reconciled.upserted_store_skills)} names={summarize_names([str(skill.get('name') or '') for skill in reconciled.upserted_store_skills])}",
@@ -1262,13 +1407,13 @@ def register_versions(
             else:
                 emit_stage_log(
                     logger,
-                    f"[register_versions] dry-run store_upserts={len(candidates)} names={summarize_names([candidate.name for candidate in candidates])}",
+                    f"[register_versions] dry-run store_upserts={len(reconciled.skill_specs)} names={summarize_names([spec.name for spec in reconciled.skill_specs])}",
                 )
-        if not dry_run and not persisted_store_skills:
+        if not dry_run and not current_store_skills:
             try:
-                persisted_store_skills = list(sdk.store.list(user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID) or [])
+                current_store_skills = list(sdk.store.list(user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID) or [])
             except Exception:
-                persisted_store_skills = []
+                current_store_skills = []
 
     if not dry_run:
         store_root = _store_root_from_context(registry=registry, sdk=sdk)
@@ -1345,7 +1490,7 @@ def register_versions(
                 skill_specs=reconciled.skill_specs,
                 user_id=str(user_id or "").strip() or DEFAULT_DOC_SKILL_USER_ID,
                 metadata=metadata,
-                store_skills=(persisted_store_skills if sdk is not None else None),
+                store_skills=(current_store_skills if sdk is not None else None),
                 logger=logger,
             )
             reconciled.visible_tree = visible_tree.to_dict()

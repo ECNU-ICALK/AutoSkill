@@ -33,6 +33,7 @@ class DocumentModelsTest(unittest.TestCase):
                     text="Build rapport first.",
                     level=1,
                     span=TextSpan(start=0, end=18),
+                    metadata={"heading_path": ["Intake"], "parent_heading": ""},
                 )
             ],
             metadata={"source_file": "/tmp/intake.md"},
@@ -119,6 +120,7 @@ class DocumentModelsTest(unittest.TestCase):
         lifecycle2 = SkillLifecycle.from_dict(json.loads(lifecycle.to_json()))
 
         self.assertEqual(document2.content_hash, document.content_hash)
+        self.assertEqual(document2.sections[0].metadata["heading_path"], ["Intake"])
         self.assertEqual(support2.relation_type, SupportRelation.SUPPORT)
         self.assertEqual(draft2.support_ids, [support.support_id])
         self.assertEqual(draft2.asset_type, "session_skill")

@@ -1,8 +1,30 @@
 from __future__ import annotations
 
+import json
 import unittest
 
-from AutoSkill4Doc.ingest import ingest_document
+from autoskill.llm.base import LLM
+from AutoSkill4Doc.document.windowing import build_windows_for_record
+from AutoSkill4Doc.ingest import HeuristicDocumentIngestor, ingest_document, parse_sections_from_text
+from AutoSkill4Doc.models import DocumentRecord, DocumentSection, TextSpan
+
+
+class _OutlineMockLLM(LLM):
+    def complete(self, *, system: str | None, user: str, temperature: float = 0.0) -> str:
+        _ = system, temperature
+        payload = json.loads(user)
+        if "candidates" in payload:
+            return json.dumps(
+                {
+                    "headings": [
+                        {"candidate_index": 0, "level": 1},
+                        {"candidate_index": 1, "level": 2},
+                        {"candidate_index": 2, "level": 2},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps({"skills": []}, ensure_ascii=False)
 
 
 class DocumentWindowingTest(unittest.TestCase):
@@ -114,6 +136,147 @@ class DocumentWindowingTest(unittest.TestCase):
                 dry_run=True,
                 extract_strategy="chunks",
             )
+
+    def test_numbered_subsections_preserve_hierarchy_context(self) -> None:
+        sections = parse_sections_from_text(
+            """
+3 认知重构
+
+3.1 自动思维识别
+先识别自动思维和触发事件。
+
+3.2 证据检验
+再评估支持证据、反证和替代解释。
+""".strip(),
+            default_title="CBT",
+        )
+
+        self.assertEqual(["3 认知重构", "3.1 自动思维识别"], sections[0].metadata["heading_path"])
+        self.assertEqual("3 认知重构", sections[1].metadata["parent_heading"])
+
+        result = ingest_document(
+            data="""
+3 认知重构
+
+3.1 自动思维识别
+先识别自动思维和触发事件。
+
+3.2 证据检验
+再评估支持证据、反证和替代解释。
+""".strip(),
+            title="CBT Hierarchy",
+            domain="psychology",
+            dry_run=True,
+        )
+
+        self.assertEqual(1, len(result.windows))
+        first = result.windows[0]
+        self.assertEqual("3 认知重构", first.section_heading)
+        self.assertEqual(["3 认知重构"], first.metadata["heading_path"])
+        self.assertIn("3.1 自动思维识别", list(first.metadata.get("subsection_headings") or []))
+        self.assertIn("3.2 证据检验", list(first.metadata.get("subsection_headings") or []))
+
+    def test_reference_like_body_is_skipped_even_without_reference_heading(self) -> None:
+        result = ingest_document(
+            data="""
+# 研究摘要
+这是正文说明。
+
+文献列表
+[1] Beck, A. T. (1979). Cognitive Therapy and the Emotional Disorders.
+[2] Ellis, A. (1962). Reason and Emotion in Psychotherapy.
+[3] https://doi.org/10.1000/example
+[4] Dobson, K. S. (2010). Handbook of Cognitive-Behavioral Therapies.
+""".strip(),
+            title="Reference Filter",
+            domain="psychology",
+            dry_run=True,
+        )
+
+        self.assertEqual([], result.windows)
+
+    def test_outline_llm_fallback_recovers_parent_and_subsections(self) -> None:
+        result = ingest_document(
+            data="""
+Intervention Framework
+
+Focus Reset
+先帮助来访者收束当前焦点并明确本次目标。
+
+Evidence Review
+再检查支持证据、反证和替代解释。
+""".strip(),
+            title="Outline Fallback",
+            domain="psychology",
+            dry_run=True,
+            ingestor=HeuristicDocumentIngestor(llm=_OutlineMockLLM()),
+        )
+
+        self.assertEqual(1, len(result.windows))
+        self.assertEqual("Intervention Framework", result.windows[0].section_heading)
+        self.assertEqual(["Intervention Framework"], result.windows[0].metadata["heading_path"])
+        self.assertEqual("", result.windows[0].metadata["parent_heading"])
+        self.assertIn("Focus Reset", list(result.windows[0].metadata.get("subsection_headings") or []))
+        self.assertIn("Evidence Review", list(result.windows[0].metadata.get("subsection_headings") or []))
+
+    def test_outline_llm_fallback_can_refine_low_confidence_partial_structure(self) -> None:
+        result = ingest_document(
+            data="""
+3 认知重构
+
+自动思维识别
+先识别自动思维和触发事件。
+
+证据检验
+再评估支持证据、反证和替代解释。
+""".strip(),
+            title="Partial Outline",
+            domain="psychology",
+            dry_run=True,
+            ingestor=HeuristicDocumentIngestor(llm=_OutlineMockLLM()),
+        )
+
+        self.assertEqual(1, len(result.windows))
+        self.assertEqual("3 认知重构", result.windows[0].section_heading)
+        self.assertEqual(["3 认知重构"], result.windows[0].metadata["heading_path"])
+        self.assertIn("自动思维识别", list(result.windows[0].metadata.get("subsection_headings") or []))
+        self.assertIn("证据检验", list(result.windows[0].metadata.get("subsection_headings") or []))
+
+    def test_long_section_is_pre_split_before_window_building(self) -> None:
+        para1 = "阶段目标 " + ("A" * 4200)
+        para2 = "认知重构 " + ("B" * 4200)
+        para3 = "家庭作业 " + ("C" * 4200)
+        record = DocumentRecord(
+            doc_id="doc-long",
+            source_type="markdown_document",
+            title="Long Section",
+            domain="psychology",
+            raw_text=f"# 长章节\n\n{para1}\n\n{para2}\n\n{para3}",
+            sections=[
+                DocumentSection(
+                    heading="长章节",
+                    text=f"{para1}\n\n{para2}\n\n{para3}",
+                    level=1,
+                    span=TextSpan(start=0, end=len(f"{para1}\n\n{para2}\n\n{para3}")),
+                    metadata={"heading_path": ["长章节"]},
+                )
+            ],
+            content_hash="hash-long",
+        )
+
+        windows = build_windows_for_record(
+            record=record,
+            strategy="chunk",
+            max_chars=20000,
+            max_section_chars=10000,
+        )
+
+        self.assertEqual(2, len(windows))
+        self.assertEqual(1, windows[0].metadata["section_chunk_index"])
+        self.assertEqual(2, windows[0].metadata["section_chunk_count"])
+        self.assertEqual(2, windows[1].metadata["section_chunk_count"])
+        self.assertLessEqual(len(windows[0].text), 10000)
+        self.assertLessEqual(len(windows[1].text), 10000)
 
 
 if __name__ == "__main__":

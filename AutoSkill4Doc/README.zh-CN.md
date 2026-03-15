@@ -33,6 +33,7 @@ document
 - 独立 CLI：`autoskill4doc ...` 或 `python -m AutoSkill4Doc ...`
 - 基于 `content_hash` 的增量跳过
 - section 过滤、对话段裁剪、strict/recommended 窗口切分
+- 规则优先的章节识别；当标题规则失效或识别出的结构明显过弱时，可触发一次 outline 级 LLM fallback
 - 支持 dry-run 和分阶段执行
 - 支持 provenance/change log/version history
 - 支持生命周期状态：`candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
@@ -96,7 +97,7 @@ document
 1. `.runtime/document_registry/`
    - 内部 document / support / skill / version 记录
 2. `Users/<internal_user>/`
-   - 经过 maintainer 整理后的最终 AutoSkill 本地 store 技能
+   - 由已协调后的 `SkillSpec` 直接同步得到的最终 AutoSkill 本地 store 技能
 3. `<family_name>/`
    - 面向浏览和导出的可见父子技能树投影
 
@@ -109,9 +110,15 @@ document
 
 1. 先把文档抽成 `SkillSpec`
    - `ingest` 负责把文档切成 `StrictWindow`
+     - 支持 markdown 标题以及 `3`、`3.1`、`第3章`、`（一）` 这类编号章节
+     - window 规划时会先按根章节分组，因此像 `4.1 / 4.2 / 5.1` 这样的子章节会归到 `4 ...` / `5 ...` 这类大章节下面，而不是被当成独立顶层切片单位
+     - 每个 window 都会附带 `heading_path`、`parent_heading`、`sibling_headings`、`subsection_headings` 等层级上下文
+     - 如果规则无法识别章节层级，或者只识别出明显过弱的部分结构，AutoSkill4Doc 最多会对每篇文档做一次紧凑的 outline LLM 判断，用来区分章节和子章节
+     - 超长章节会先预切片，再进入最终 window 规划；默认 `--max-section-chars` 为 `10000`
+     - 参考文献 / bibliography 类章节会在抽取前被跳过
    - `extract` 负责从 window 提取 `SupportRecord + SkillDraft`
    - `compile` 负责把 draft 归一成 `SkillSpec`
-   - `register_versions` 负责做 registry 持久化和版本状态处理
+   - `register_versions` 会先用带 metadata 的技能文本做 embedding + BM25 hybrid 检索，召回 top-k 相似旧技能，再判断 create / strengthen / revise / merge / split / unchanged，最后做 registry 持久化和版本状态处理
 
 2. 再把结果投影成可见父子结构
    - 如果最终 store skill 已存在，可见子技能会优先按 `Users/<internal_user>/...` 里的最终技能重建
@@ -134,6 +141,7 @@ document
 如果不传 `--profile-id`，系统会基于 taxonomy 和 `family_name` 自动派生；
 如果不传 `--taxonomy-axis`，则会优先使用 taxonomy 配置里的默认值。
 `--user-id` 现在只是内部 store 路由细节，不再是正常文档抽取流程里需要关心的主参数。
+如果省略，AutoSkill4Doc 会使用更中性的内部用户 id：`docskill`。
 
 ## Skill Taxonomy
 
@@ -228,7 +236,7 @@ asset_types:
 其他配置入口：
 
 - [AutoSkill4Doc/core/config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/config.py)
-  - 代码默认值，例如默认 store 路径、runtime 路径、extract strategy
+  - 代码默认值，例如默认 store 路径、runtime 路径、extract strategy、章节预切片大小、章节 outline fallback 模式
 - [AutoSkill4Doc/core/provider_config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/provider_config.py)
   - `dashscope`、`glm`、`openai`、`anthropic`、`generic` 的 provider/env 解析
 
@@ -245,6 +253,15 @@ provider 配置不是文件，而是环境变量。常用项包括：
 - 内置 taxonomy 文件
 - `core/config.py` 中的代码默认值
 - provider 的环境变量（用于认证和 endpoint URL）
+
+切片 / 层级识别相关参数：
+
+- `--max-section-chars`
+  - 一个检测到的章节如果过长，会先按这个上限预切片，再构造最终 extraction windows
+  - 默认：`10000`
+- `--section-outline-mode auto|off`
+  - `auto`：当规则化标题检测失败时，对整篇文档最多做一次紧凑的 outline LLM 判断
+  - `off`：完全关闭这层 outline LLM fallback
 
 ## 流程是否合理
 
@@ -286,7 +303,7 @@ python3 -m AutoSkill4Doc extract --file ./paper.md --json
 autoskill4doc compile --file ./paper.md --json
 python3 -m AutoSkill4Doc diag --file ./paper.md --report-path ./diag.jsonl --json
 python3 -m AutoSkill4Doc retrieve-hierarchy --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --json
-python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --child-type intake --json
+python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --family-name "认知行为疗法" --json
 python3 -m AutoSkill4Doc migrate-layout --store-path ./SkillBank/DocSkill --json
 
 python3 -m AutoSkill4Doc build \
@@ -301,7 +318,8 @@ python3 -m AutoSkill4Doc build \
 - `dry-run` 会跑 ingest/extract/compile 供你查看结果，但不会写入最终 registry / skill store / 可见技能树。
 - `diag` 始终以 dry-run 观察模式运行，不会写入 registry 或 skill store。
 - 非 `dry-run` 的 `build / llm-extract` 会把 ingest / extract / compile / register 的阶段快照写到 `.runtime/intermediate_runs/<run_id>/`。
-- `canonical-merge` 当前用于查看 staging 结果，必须显式传 `--profile-id` 和 `--family-name`。
+- 如果库里当前只存在一个可见 family，`retrieve-hierarchy` 会直接打开这棵 family 树，而不是先返回只有一项的 family 列表。
+- `canonical-merge` 当前用于查看 staging 结果。如果 staging 中只有一个唯一 bucket，会自动推导 `profile_id`、`family_name` 和 `child_type`；否则再显式传入。
 
 ## Python API
 

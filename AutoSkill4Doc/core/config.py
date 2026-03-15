@@ -11,7 +11,9 @@ import os
 
 DEFAULT_EXTRACT_STRATEGY = "recommended"
 SUPPORTED_EXTRACT_STRATEGIES = ("recommended", "strict", "chunk")
-DEFAULT_DOC_SKILL_USER_ID = "u1"
+DEFAULT_DOC_SKILL_USER_ID = "docskill"
+DEFAULT_MAX_SECTION_CHARS = 10000
+SUPPORTED_SECTION_OUTLINE_MODES = ("auto", "off")
 
 
 def repo_root() -> str:
@@ -51,4 +53,13 @@ def normalize_extract_strategy(value: str) -> str:
     raw = str(value or "").strip().lower() or DEFAULT_EXTRACT_STRATEGY
     if raw not in SUPPORTED_EXTRACT_STRATEGIES:
         raise ValueError(f"unsupported extract strategy: {value}")
+    return raw
+
+
+def normalize_section_outline_mode(value: str) -> str:
+    """Validates and normalizes the public section-outline fallback mode."""
+
+    raw = str(value or "").strip().lower() or "auto"
+    if raw not in SUPPORTED_SECTION_OUTLINE_MODES:
+        raise ValueError(f"unsupported section outline mode: {value}")
     return raw

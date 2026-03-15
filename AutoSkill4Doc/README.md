@@ -33,6 +33,7 @@ Core layers:
 - standalone CLI: `autoskill4doc ...` or `python -m AutoSkill4Doc ...`
 - incremental skip by content hash
 - section filtering + dialogue-aware pruning + strict/recommended windowing
+- rule-first section parsing with one optional outline-level LLM fallback when headings are missing or the recovered structure is too weak
 - dry-run and stage-by-stage execution
 - support-backed provenance and change logs
 - lifecycle-aware versioning: `candidate -> draft -> evaluating -> active -> watchlist -> deprecated -> retired`
@@ -96,7 +97,7 @@ Storage layers under the same library root:
 1. `.runtime/document_registry/`
    - internal document/support/skill/version records
 2. `Users/<internal_user>/`
-   - final AutoSkill local-store skills after maintainer reconciliation
+   - final AutoSkill local-store skills synced directly from reconciled `SkillSpec` records
 3. `<family_name>/`
    - visible parent/child projection built for browsing and export
 
@@ -111,9 +112,15 @@ single extraction step. It works in two layers:
 
 1. The document pipeline first produces canonical `SkillSpec` records
    - `ingest` builds `StrictWindow`
+     - markdown headings plus numbered / chapter-style headings such as `3`, `3.1`, `第3章`, `（一）`
+     - window planning groups subsections under their top-level chapter, so `4.1 / 4.2 / 5.1` style blocks are extracted under `4 ...` / `5 ...` root sections rather than treated as separate top-level units
+     - hierarchy metadata (`heading_path`, `parent_heading`, `sibling_headings`, `subsection_headings`) is attached to each window
+     - if rule-based heading detection fails, or only recovers a very weak partial outline, AutoSkill4Doc can do at most one compact outline LLM pass per document to decide section vs subsection
+     - long sections are pre-split before final window planning; default `--max-section-chars` is `10000`
+     - bibliography / reference-heavy sections are skipped before extraction
    - `extract` produces `SupportRecord + SkillDraft`
    - `compile` turns drafts into `SkillSpec`
-   - `register_versions` persists registry state and lifecycle updates
+   - `register_versions` retrieves top-k similar existing skills with hybrid embedding + BM25 scoring over metadata-rich skill text, then decides create / strengthen / revise / merge / split / unchanged before persisting registry state and lifecycle updates
 
 2. The visible parent/child tree is then projected for browsing/export
    - if final store skills are available, the visible child skills are rebuilt from the reconciled `Users/<internal_user>/...` store results
@@ -136,7 +143,8 @@ If `--profile-id` is omitted, AutoSkill4Doc now derives one from the selected
 taxonomy plus `family_name`. If `--taxonomy-axis` is omitted, the selected
 taxonomy may provide a default axis label.
 `--user-id` is now treated as an internal store-routing detail and is no longer
-part of the normal documented workflow.
+part of the normal documented workflow. If omitted, AutoSkill4Doc uses the
+neutral internal user id `docskill`.
 
 ## Skill Taxonomy
 
@@ -232,7 +240,7 @@ asset_types:
 Other configuration sources:
 
 - [AutoSkill4Doc/core/config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/config.py)
-  - code defaults such as default store path, runtime path, and extract strategy
+  - code defaults such as default store path, runtime path, extract strategy, section pre-split size, and section-outline fallback mode
 - [AutoSkill4Doc/core/provider_config.py](/Users/jiezhou/Desktop/工作/其他/浦江/AutoSkill/AutoSkill4Doc/core/provider_config.py)
   - provider/env resolution for `dashscope`, `glm`, `openai`, `anthropic`, and `generic`
 
@@ -249,6 +257,15 @@ Resolution priority:
 - built-in taxonomy file
 - code default in `core/config.py`
 - provider env vars for backend credentials and endpoint URLs
+
+Parsing / hierarchy knobs:
+
+- `--max-section-chars`
+  - pre-splits one oversized detected section before final window construction
+  - default: `10000`
+- `--section-outline-mode auto|off`
+  - `auto`: when rule-based heading detection fails, do one compact outline LLM pass per document
+  - `off`: disable the outline LLM fallback completely
 
 ## Is The Flow Reasonable
 
@@ -289,7 +306,7 @@ python3 -m AutoSkill4Doc extract --file ./paper.md --json
 autoskill4doc compile --file ./paper.md --json
 python3 -m AutoSkill4Doc diag --file ./paper.md --report-path ./diag.jsonl --json
 python3 -m AutoSkill4Doc retrieve-hierarchy --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --json
-python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name "认知行为疗法" --child-type intake --json
+python3 -m AutoSkill4Doc canonical-merge --store-path ./SkillBank/DocSkill --family-name "认知行为疗法" --json
 python3 -m AutoSkill4Doc migrate-layout --store-path ./SkillBank/DocSkill --json
 
 python3 -m AutoSkill4Doc build \
@@ -304,7 +321,8 @@ Notes:
 - `dry-run` runs ingest/extract/compile for inspection but does not write final registry/store/visible-tree results.
 - `diag` always runs in non-persisting dry-run mode.
 - non-`dry-run` `build` / `llm-extract` writes ingest/extract/compile/register snapshots to `.runtime/intermediate_runs/<run_id>/`.
-- `canonical-merge` currently inspects staged results and requires `--profile-id` plus `--family-name`.
+- `retrieve-hierarchy` now opens the family directly when the library contains only one visible family.
+- `canonical-merge` currently inspects staged results. When staging contains one unique bucket, it can infer `profile_id`, `family_name`, and `child_type`; otherwise pass them explicitly.
 
 ## Python API
 

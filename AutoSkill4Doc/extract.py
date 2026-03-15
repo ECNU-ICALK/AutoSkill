@@ -33,22 +33,26 @@ from .core.common import StageLogger
 from .core.config import (
     DEFAULT_DOC_SKILL_USER_ID,
     DEFAULT_EXTRACT_STRATEGY,
+    DEFAULT_MAX_SECTION_CHARS,
     SUPPORTED_EXTRACT_STRATEGIES,
+    SUPPORTED_SECTION_OUTLINE_MODES,
     default_store_path,
     normalize_extract_strategy,
+    normalize_section_outline_mode,
 )
 from .core.provider_config import (
     build_embeddings_config as _build_provider_embeddings_config,
     build_llm_config as _build_provider_llm_config,
 )
 from .models import DocumentRecord, SkillDraft, SkillSpec, StrictWindow, SupportRecord, VersionState
+from .ingest import HeuristicDocumentIngestor
 from .pipeline import DocumentBuildPipeline, DocumentBuildResult, build_default_document_pipeline
 from .stages.diag import run_document_diag
 from .stages.extractor import build_document_skill_extractor
 from .stages.hierarchy import retrieve_hierarchy
 from .stages.merge import available_merge_child_types, canonical_merge_from_staging
 from .stages.migrate import migrate_layout
-from .store.staging import list_child_types
+from .store.staging import list_child_types, resolve_staging_bucket_context
 from .taxonomy import SkillTaxonomy, list_builtin_skill_taxonomies, load_skill_taxonomy
 
 _DOCUMENT_CLI_EXAMPLES = (
@@ -57,7 +61,7 @@ _DOCUMENT_CLI_EXAMPLES = (
     "  python -m AutoSkill4Doc llm-extract --file ./cbt_docs --family-name '认知行为疗法'\n"
     "  python -m AutoSkill4Doc diag --file ./paper.md --report-path ./diag.jsonl --json\n"
     "  python -m AutoSkill4Doc retrieve-hierarchy --store-path SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name '认知行为疗法'\n"
-    "  python -m AutoSkill4Doc canonical-merge --store-path SkillBank/DocSkill --profile-id psychology::认知行为疗法 --family-name '认知行为疗法' --child-type intake\n"
+    "  python -m AutoSkill4Doc canonical-merge --store-path SkillBank/DocSkill --family-name '认知行为疗法'\n"
     "  python -m AutoSkill4Doc build --file ./cbt_docs --domain psychology --domain-type psychology --family-name '认知行为疗法'\n"
     "  python -m AutoSkill4Doc extract --file ./docs/ --json\n"
     "  autoskill4doc migrate-layout --store-path SkillBank/DocSkill --json"
@@ -114,6 +118,8 @@ def extract_from_doc(
     max_documents: int = 0,
     max_candidates_per_unit: int = 3,
     max_units_per_document: int = 0,
+    max_section_chars: int = DEFAULT_MAX_SECTION_CHARS,
+    section_outline_mode: str = "auto",
     family_name: str = "",
     profile_id: str = "",
     taxonomy_axis: str = "",
@@ -156,6 +162,11 @@ def extract_from_doc(
         sdk=sdk,
         registry_root=str(registry_root or "").strip(),
         logger=logger,
+        document_ingestor=HeuristicDocumentIngestor(
+            llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
+            max_section_chars=int(max_section_chars or 0) or DEFAULT_MAX_SECTION_CHARS,
+            outline_fallback_mode=normalize_section_outline_mode(section_outline_mode),
+        ),
         document_skill_extractor=build_document_skill_extractor(
             "llm",
             llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
@@ -394,6 +405,11 @@ def _build_pipeline_from_args(args: argparse.Namespace) -> DocumentBuildPipeline
         sdk=sdk,
         registry_root=str(args.registry_root or "").strip(),
         logger=(None if bool(args.quiet) else print),
+        document_ingestor=HeuristicDocumentIngestor(
+            llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
+            max_section_chars=int(getattr(args, "max_section_chars", 0) or 0) or DEFAULT_MAX_SECTION_CHARS,
+            outline_fallback_mode=normalize_section_outline_mode(str(getattr(args, "section_outline_mode", "") or "auto")),
+        ),
         document_skill_extractor=build_document_skill_extractor(
             "llm",
             llm_config=dict(getattr(getattr(sdk, "config", None), "llm", {}) or {}),
@@ -541,6 +557,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embeddings-auth-mode", default="", help=argparse.SUPPRESS)
     parser.add_argument("--embeddings-dims", type=int, default=256, help="Embedding dimensions for hashing/mock providers.")
     parser.add_argument("--maintenance-strategy", default="llm", choices=["heuristic", "llm"], help="Store maintenance strategy.")
+    parser.add_argument(
+        "--max-section-chars",
+        type=int,
+        default=DEFAULT_MAX_SECTION_CHARS,
+        help="If one detected section is longer than this many characters, pre-split it before final extraction windows are built.",
+    )
+    parser.add_argument(
+        "--section-outline-mode",
+        default="auto",
+        choices=list(SUPPORTED_SECTION_OUTLINE_MODES),
+        help="How to recover section/subsection hierarchy when rule-based heading detection fails. `auto` allows one outline LLM pass per document; `off` disables it.",
+    )
 
     parser.add_argument(
         "--max-chars-per-chunk",
@@ -673,18 +701,18 @@ def build_parser() -> argparse.ArgumentParser:
     merge_parser = subparsers.add_parser(
         "canonical-merge",
         help="Inspect the latest staged canonical results for one bucket.",
-        description="Load the most recent staging payloads written during document registration for one profile/family/child-type bucket.",
+        description="Load the most recent staging payloads written during document registration for one profile/family/child-type bucket. When staging contains one unique bucket, omitted identifiers are inferred automatically.",
         epilog=_DOCUMENT_CLI_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     merge_parser.add_argument("--store-path", default="", help="Document skill library root. Default: <repo_root>/SkillBank/DocSkill.")
-    merge_parser.add_argument("--profile-id", default="", help="Profile id for the staged canonical bucket.")
+    merge_parser.add_argument("--profile-id", default="", help="Optional profile id for the staged canonical bucket. Inferred automatically when staging has one unique match.")
     merge_parser.add_argument(
         "--family-name",
         default="",
-        help="Visible family name for the staged canonical bucket.",
+        help="Optional visible family name for the staged canonical bucket. Inferred automatically when staging has one unique match.",
     )
-    merge_parser.add_argument("--child-type", default="", help="Child skill type for the staged canonical bucket.")
+    merge_parser.add_argument("--child-type", default="", help="Optional child skill type for the staged canonical bucket.")
     merge_parser.add_argument("--run-id", default="", help="Optional staging run id. Defaults to the latest run in the bucket.")
     merge_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
 
@@ -916,9 +944,15 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
     """Loads the latest staged canonical results for one bucket."""
 
     store_root = str(args.store_path or "").strip() or default_store_path()
-    profile_id = str(args.profile_id or "").strip()
-    family_name = str(getattr(args, "family_name", "") or "").strip()
-    child_type = str(args.child_type or "").strip()
+    resolved = resolve_staging_bucket_context(
+        base_store_root=store_root,
+        profile_id=str(args.profile_id or "").strip(),
+        family_id=str(getattr(args, "family_name", "") or "").strip(),
+        child_type=str(args.child_type or "").strip(),
+    )
+    profile_id = str(resolved.get("profile_id") or "").strip()
+    family_name = str(resolved.get("family_id") or "").strip()
+    child_type = str(resolved.get("child_type") or "").strip()
     if not child_type and profile_id and family_name:
         child_types = list_child_types(
             base_store_root=store_root,
@@ -941,6 +975,29 @@ def _run_canonical_merge(args: argparse.Namespace) -> None:
             for idx, item in enumerate(list(payload.get("child_types") or []), start=1):
                 print(f"{idx}. {item}")
             return
+    if not profile_id or not family_name:
+        payload = {
+            "route": "canonical_merge",
+            "profile_id": profile_id or None,
+            "family_id": family_name or None,
+            "child_type": child_type or None,
+            "run_id": resolved.get("run_id"),
+            "skills": [],
+            "change_logs": [],
+            "errors": [
+                {
+                    "stage": "canonical_merge",
+                    "error": "could not resolve a unique staging bucket; pass --profile-id and --family-name explicitly",
+                    "candidates": list(resolved.get("candidates") or []),
+                }
+            ],
+        }
+        if bool(args.json):
+            _print_json(payload)
+            return
+        print("Canonical merge staging resolution failed.")
+        _print_errors(list(payload.get("errors") or []))
+        return
     payload = canonical_merge_from_staging(
         store_root=store_root,
         profile_id=profile_id,
@@ -993,11 +1050,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     command = str(args.command or "build").strip() or "build"
     if command in {"build", "llm-extract", "ingest", "extract", "compile", "diag"} and not str(args.file or "").strip():
         parser.error("--file is required for CLI commands. Use extract_from_doc(...) for in-memory data.")
-    if command == "canonical-merge":
-        if not str(getattr(args, "profile_id", "") or "").strip():
-            parser.error("--profile-id is required for canonical-merge.")
-        if not str(getattr(args, "family_name", "") or "").strip():
-            parser.error("--family-name is required for canonical-merge.")
     if command in {"build", "llm-extract"}:
         _run_build(args)
         return

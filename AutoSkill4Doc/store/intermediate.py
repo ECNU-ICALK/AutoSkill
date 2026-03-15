@@ -11,17 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from autoskill.utils.time import now_iso
 
-from ..ingest import DocumentIngestResult
 from ..models import DocumentRecord, SkillDraft, StrictWindow, SupportRecord
-from ..stages.compiler import SkillCompilationResult
-from ..stages.extractor import SkillExtractionResult
-from ..store.versioning import VersionRegistrationResult
 from .layout import intermediate_run_dir, normalize_library_root
-from .staging import new_staging_run_id, safe_run_id
+from .staging import new_staging_run_id, safe_dir_component, safe_run_id
+
+if TYPE_CHECKING:
+    from ..ingest import DocumentIngestResult
+    from ..stages.compiler import SkillCompilationResult
+    from ..stages.extractor import SkillExtractionResult
+    from ..store.versioning import VersionRegistrationResult
 
 
 @dataclass
@@ -102,7 +104,7 @@ class IntermediateRunWriter:
             completed_stages=list(self._state.get("completed_stages") or []),
         )
 
-    def write_ingest(self, result: DocumentIngestResult) -> None:
+    def write_ingest(self, result: "DocumentIngestResult") -> None:
         """Writes the completed ingest snapshot."""
 
         payload = {
@@ -152,7 +154,7 @@ class IntermediateRunWriter:
             "processed_documents": int(progress.get("processed_documents") or 0),
             "total_documents": int(total_documents or 0),
         }
-        doc_name = str(record.doc_id or "").strip() or "document"
+        doc_name = safe_dir_component(str(record.doc_id or "").strip() or "document")
         self._write_json(f"extract/documents/{doc_name}.json", payload)
         self._set_stage(
             stage="extract_running",
@@ -164,7 +166,7 @@ class IntermediateRunWriter:
             },
         )
 
-    def write_extract(self, result: SkillExtractionResult) -> None:
+    def write_extract(self, result: "SkillExtractionResult") -> None:
         """Writes the aggregate extraction snapshot."""
 
         payload = {
@@ -186,13 +188,60 @@ class IntermediateRunWriter:
             },
         )
 
-    def load_extract(self) -> SkillExtractionResult:
+    def load_extract(self) -> "SkillExtractionResult":
         """Loads aggregated extraction results from per-document progress files."""
+
+        from ..stages.extractor import SkillExtractionResult
+        from ..models import DocumentRecord, StrictWindow
 
         extract_dir = os.path.join(self.run_dir, "extract", "documents")
         support_records: List[SupportRecord] = []
         skill_drafts: List[SkillDraft] = []
         errors: List[Dict[str, Any]] = []
+        documents: List[DocumentRecord] = []
+        windows: List[StrictWindow] = []
+        aggregate_path = os.path.join(self.run_dir, "extract", "result.json")
+        if os.path.isfile(aggregate_path):
+            try:
+                with open(aggregate_path, "r", encoding="utf-8") as f:
+                    aggregate = json.load(f)
+                if isinstance(aggregate, dict):
+                    documents = [
+                        DocumentRecord.from_dict(item)
+                        for item in list(aggregate.get("documents") or [])
+                        if isinstance(item, dict)
+                    ]
+                    windows = [
+                        StrictWindow.from_dict(item)
+                        for item in list(aggregate.get("windows") or [])
+                        if isinstance(item, dict)
+                    ]
+                    errors.extend(
+                        [{"stage": "intermediate_extract_result_load", **item} for item in list(aggregate.get("errors") or []) if isinstance(item, dict)]
+                    )
+            except Exception as exc:
+                errors.append({"stage": "intermediate_extract_result_load", "path": aggregate_path, "error": str(exc)})
+        if not documents or not windows:
+            ingest_path = os.path.join(self.run_dir, "ingest", "result.json")
+            if os.path.isfile(ingest_path):
+                try:
+                    with open(ingest_path, "r", encoding="utf-8") as f:
+                        ingest_payload = json.load(f)
+                    if isinstance(ingest_payload, dict):
+                        if not documents:
+                            documents = [
+                                DocumentRecord.from_dict(item)
+                                for item in list(ingest_payload.get("documents") or [])
+                                if isinstance(item, dict)
+                            ]
+                        if not windows:
+                            windows = [
+                                StrictWindow.from_dict(item)
+                                for item in list(ingest_payload.get("windows") or [])
+                                if isinstance(item, dict)
+                            ]
+                except Exception as exc:
+                    errors.append({"stage": "intermediate_ingest_result_load", "path": ingest_path, "error": str(exc)})
         if os.path.isdir(extract_dir):
             for name in sorted(os.listdir(extract_dir)):
                 if not name.endswith(".json"):
@@ -217,15 +266,15 @@ class IntermediateRunWriter:
         for draft in skill_drafts:
             seen_drafts[draft.draft_id] = draft
         return SkillExtractionResult(
-            documents=[],
-            windows=[],
+            documents=documents,
+            windows=windows,
             support_records=list(seen_supports.values()),
             skill_drafts=list(seen_drafts.values()),
             errors=[{"stage": "intermediate_extract_load", **item} for item in errors],
             extractor_name="llm",
         )
 
-    def write_compile(self, result: SkillCompilationResult) -> None:
+    def write_compile(self, result: "SkillCompilationResult") -> None:
         """Writes the completed compile snapshot."""
 
         payload = {
@@ -245,7 +294,7 @@ class IntermediateRunWriter:
             },
         )
 
-    def write_registration(self, result: VersionRegistrationResult) -> None:
+    def write_registration(self, result: "VersionRegistrationResult") -> None:
         """Writes the completed registration snapshot."""
 
         payload = {

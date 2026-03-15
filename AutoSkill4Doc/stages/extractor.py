@@ -572,7 +572,9 @@ class LLMDocumentSkillExtractor:
         span: TextSpan,
         unit_text: str,
         unit_type: str,
+        unit_metadata: Optional[Dict[str, object]] = None,
     ) -> List[Dict[str, object]]:
+        unit_md = dict(unit_metadata or {})
         payload = {
             "document": {
                 "doc_id": record.doc_id,
@@ -588,6 +590,14 @@ class LLMDocumentSkillExtractor:
                 "level": section_level,
                 "span": span.to_dict(),
                 "unit_type": unit_type,
+                "heading_path": list(unit_md.get("heading_path") or []),
+                "parent_heading": str(unit_md.get("parent_heading") or "").strip(),
+                "sibling_headings": list(unit_md.get("sibling_headings") or []),
+                "subsection_headings": list(unit_md.get("subsection_headings") or []),
+                "context_snippets": list(unit_md.get("context_snippets") or []),
+                "heading_number": str(unit_md.get("heading_number") or "").strip(),
+                "heading_kind": str(unit_md.get("heading_kind") or "").strip(),
+                "section_summary": str(unit_md.get("section_summary") or "").strip(),
             },
             "excerpt": str(unit_text or "").strip(),
             "max_candidates": self.max_candidates_per_unit,
@@ -748,6 +758,7 @@ class LLMDocumentSkillExtractor:
                 span=window.span,
                 unit_text=window.text,
                 unit_type="window",
+                unit_metadata=dict(window.metadata or {}),
             )
             for item in raw_skills:
                 support, draft = self._build_support_and_draft(
@@ -763,6 +774,14 @@ class LLMDocumentSkillExtractor:
                         "anchor_hits": list(window.anchor_hits or []),
                         "paragraph_start": window.paragraph_start,
                         "paragraph_end": window.paragraph_end,
+                        "heading_path": list((window.metadata or {}).get("heading_path") or []),
+                        "parent_heading": str((window.metadata or {}).get("parent_heading") or "").strip(),
+                        "sibling_headings": list((window.metadata or {}).get("sibling_headings") or []),
+                        "subsection_headings": list((window.metadata or {}).get("subsection_headings") or []),
+                        "context_snippets": list((window.metadata or {}).get("context_snippets") or []),
+                        "heading_number": str((window.metadata or {}).get("heading_number") or "").strip(),
+                        "heading_kind": str((window.metadata or {}).get("heading_kind") or "").strip(),
+                        "section_summary": str((window.metadata or {}).get("section_summary") or "").strip(),
                     },
                 )
                 if support is None or draft is None:

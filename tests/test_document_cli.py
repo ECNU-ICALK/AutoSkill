@@ -8,8 +8,9 @@ import tempfile
 import unittest
 
 from autoskill.cli import main as autoskill_main
+from AutoSkill4Doc import resolve_staging_bucket_context, skill_retrieval_text
 from AutoSkill4Doc.__main__ import main as autoskill4doc_main
-from AutoSkill4Doc.core.config import default_store_path
+from AutoSkill4Doc.core.config import DEFAULT_DOC_SKILL_USER_ID, default_store_path
 from AutoSkill4Doc.extract import _build_sdk_from_args, build_parser, main
 
 
@@ -204,6 +205,29 @@ class DocumentCliTest(unittest.TestCase):
             self.assertGreaterEqual(len(payload["windows"]), 1)
             self.assertTrue(all(window["strategy"] == "chunk" for window in payload["windows"]))
 
+    def test_ingest_command_accepts_section_outline_and_section_size_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            doc_path = self._write_doc(root=tmpdir)
+            payload = self._run_main_json(
+                [
+                    "ingest",
+                    "--file",
+                    doc_path,
+                    "--dry-run",
+                    "--quiet",
+                    "--json",
+                    "--section-outline-mode",
+                    "off",
+                    "--max-section-chars",
+                    "10000",
+                    "--store-path",
+                    tmpdir,
+                ]
+            )
+
+            self.assertEqual(len(payload["documents"]), 1)
+            self.assertGreaterEqual(len(payload["windows"]), 1)
+
     def test_compile_command_returns_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             doc_path = self._write_doc(root=tmpdir)
@@ -295,6 +319,10 @@ class DocumentCliTest(unittest.TestCase):
         self.assertIn("canonical-merge", output)
         self.assertIn("migrate-layout", output)
 
+    def test_top_level_package_exports_retrieval_and_staging_helpers(self) -> None:
+        self.assertTrue(callable(resolve_staging_bucket_context))
+        self.assertTrue(callable(skill_retrieval_text))
+
     def test_root_autoskill_cli_rejects_document_route(self) -> None:
         buf = io.StringIO()
         with redirect_stderr(buf):
@@ -315,6 +343,7 @@ class DocumentCliTest(unittest.TestCase):
         sdk = _build_sdk_from_args(args)
 
         self.assertEqual(sdk.config.store.get("path"), default_store_path())
+        self.assertEqual(args.user_id, DEFAULT_DOC_SKILL_USER_ID)
 
     def test_document_cli_defaults_to_continue_on_error_and_recommended_windows(self) -> None:
         args = build_parser().parse_args(["build", "--file", "/tmp/paper.md"])
@@ -463,6 +492,7 @@ class DocumentCliTest(unittest.TestCase):
                 ]
             )
             self.assertEqual(hierarchy["route"], "family_hierarchy")
+            self.assertEqual(hierarchy["profile_id"], "test_therapy_v2")
             self.assertEqual(hierarchy["family_name"], "认知行为疗法")
             self.assertGreaterEqual(len(list(hierarchy.get("hits") or [])), 1)
 
@@ -471,17 +501,54 @@ class DocumentCliTest(unittest.TestCase):
                     "canonical-merge",
                     "--store-path",
                     tmpdir,
-                    "--profile-id",
-                    "test_therapy_v2",
-                    "--family-name",
-                    "认知行为疗法",
-                    "--child-type",
-                    "intake",
                     "--json",
                 ]
             )
             self.assertEqual(merge_payload["route"], "canonical_merge")
+            self.assertEqual(merge_payload["profile_id"], "test_therapy_v2")
+            self.assertEqual(merge_payload["family_id"], "认知行为疗法")
+            self.assertEqual(merge_payload["child_type"], "intake")
             self.assertGreaterEqual(len(list(merge_payload.get("skills") or [])), 1)
+
+    def test_retrieve_hierarchy_auto_opens_single_family(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            doc_path = self._write_doc(root=tmpdir)
+            self._run_main_json(
+                [
+                    "build",
+                    "--file",
+                    doc_path,
+                    "--quiet",
+                    "--json",
+                    "--llm-provider",
+                    "mock",
+                    "--llm-response",
+                    self._mock_response(),
+                    "--maintenance-strategy",
+                    "llm",
+                    "--family-name",
+                    "认知行为疗法",
+                    "--profile-id",
+                    "test_therapy_v2",
+                    "--taxonomy-axis",
+                    "疗法",
+                    "--store-path",
+                    tmpdir,
+                ]
+            )
+
+            hierarchy = self._run_main_json(
+                [
+                    "retrieve-hierarchy",
+                    "--store-path",
+                    tmpdir,
+                    "--json",
+                ]
+            )
+
+            self.assertEqual(hierarchy["route"], "family_hierarchy")
+            self.assertEqual(hierarchy["family_name"], "认知行为疗法")
+            self.assertEqual(hierarchy["profile_id"], "test_therapy_v2")
 
     def test_migrate_layout_command_prepares_runtime_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -497,14 +564,20 @@ class DocumentCliTest(unittest.TestCase):
             self.assertEqual(payload["route"], "migrate_layout")
             self.assertTrue(os.path.isdir(os.path.join(tmpdir, ".runtime")))
 
-    def test_canonical_merge_requires_profile_and_school(self) -> None:
-        buf = io.StringIO()
-        with redirect_stderr(buf):
-            with self.assertRaises(SystemExit) as ctx:
-                main(["canonical-merge", "--store-path", "/tmp/docskill", "--json"])
+    def test_canonical_merge_returns_resolution_error_when_bucket_is_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = self._run_main_json(
+                [
+                    "canonical-merge",
+                    "--store-path",
+                    tmpdir,
+                    "--json",
+                ]
+            )
 
-        self.assertEqual(int(getattr(ctx.exception, "code", 0) or 0), 2)
-        self.assertIn("--profile-id is required for canonical-merge", buf.getvalue())
+            self.assertEqual(payload["route"], "canonical_merge")
+            self.assertTrue(payload["errors"])
+            self.assertIn("could not resolve a unique staging bucket", payload["errors"][0]["error"])
 
 
 if __name__ == "__main__":

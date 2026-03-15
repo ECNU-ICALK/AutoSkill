@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 
+from autoskill import AutoSkill, AutoSkillConfig
 from autoskill.llm.mock import MockLLM
 from autoskill.models import Skill, SkillStatus
 from AutoSkill4Doc.models import (
@@ -16,6 +17,7 @@ from AutoSkill4Doc.models import (
     VersionState,
 )
 from AutoSkill4Doc.store.registry import DocumentRegistry
+from AutoSkill4Doc.store.retrieval import build_document_skill_retriever
 from AutoSkill4Doc.store.visible_tree import sync_visible_skill_tree
 from AutoSkill4Doc.store.versioning import register_versions
 
@@ -363,6 +365,162 @@ class DocumentVersioningTest(unittest.TestCase):
             self.assertTrue(any(log["action"] == "merge" for log in result.change_logs))
             self.assertTrue(any(skill.status == VersionState.DEPRECATED for skill in result.skill_specs))
 
+    def test_document_retriever_prefers_metadata_and_skill_identity_matches(self) -> None:
+        retriever = build_document_skill_retriever(
+            embeddings_config={"provider": "hashing", "dims": 64},
+            bm25_weight=0.1,
+        )
+        matching = self._skill(
+            skill_id="match",
+            name="认知重评会谈流程",
+            objective="Run an agenda-based CBT cognitive reframing session.",
+            workflow_steps=["建立议程。", "识别自动思维。", "进行重评。", "总结与作业。"],
+            support_ids=["sup-match"],
+            method_family="cbt",
+        )
+        matching.metadata["family_name"] = "认知行为疗法"
+        matching.metadata["domain_type"] = "psychology"
+        distractor = self._skill(
+            skill_id="distractor",
+            name="认知重评会谈流程",
+            objective="Run an interpretive psychodynamic exploration of recurring themes.",
+            workflow_steps=["建立自由联想框架。", "追踪移情。", "解释防御。", "总结核心冲突。"],
+            support_ids=["sup-distractor"],
+            method_family="psychodynamic",
+        )
+        distractor.metadata["family_name"] = "Psychodynamic（心理动力学）"
+        distractor.metadata["domain_type"] = "psychology"
+        retriever.refresh([distractor, matching])
+
+        candidate = self._skill(
+            skill_id="candidate",
+            name="认知重评会谈流程",
+            objective="Run an agenda-based CBT cognitive reframing session.",
+            workflow_steps=["建立议程。", "识别自动思维。", "进行重评。", "总结与作业。"],
+            support_ids=["sup-candidate"],
+            method_family="cbt",
+        )
+        candidate.metadata["family_name"] = "认知行为疗法"
+        candidate.metadata["domain_type"] = "psychology"
+
+        hits = retriever.search(candidate, limit=2)
+
+        self.assertEqual(["match"], [hit.skill.skill_id for hit in hits])
+
+    def test_document_retriever_filters_across_profile_ids(self) -> None:
+        retriever = build_document_skill_retriever(
+            embeddings_config={"provider": "hashing", "dims": 64},
+            bm25_weight=0.1,
+        )
+        matching = self._skill(
+            skill_id="match",
+            name="认知重评会谈流程",
+            objective="Run an agenda-based CBT cognitive reframing session.",
+            workflow_steps=["建立议程。", "识别自动思维。", "进行重评。", "总结与作业。"],
+            support_ids=["sup-match"],
+            method_family="cbt",
+        )
+        matching.metadata["family_name"] = "认知行为疗法"
+        matching.metadata["domain_type"] = "psychology"
+        matching.metadata["taxonomy_id"] = "psychology"
+        matching.metadata["profile_id"] = "psychology::认知行为疗法"
+
+        other_profile = self._skill(
+            skill_id="other-profile",
+            name="认知重评会谈流程",
+            objective="Run an agenda-based CBT cognitive reframing session.",
+            workflow_steps=["建立议程。", "识别自动思维。", "进行重评。", "总结与作业。"],
+            support_ids=["sup-other"],
+            method_family="cbt",
+        )
+        other_profile.metadata["family_name"] = "认知行为疗法"
+        other_profile.metadata["domain_type"] = "psychology"
+        other_profile.metadata["taxonomy_id"] = "psychology"
+        other_profile.metadata["profile_id"] = "psychology::人本-存在主义"
+
+        retriever.refresh([matching, other_profile])
+
+        candidate = self._skill(
+            skill_id="candidate",
+            name="认知重评会谈流程",
+            objective="Run an agenda-based CBT cognitive reframing session.",
+            workflow_steps=["建立议程。", "识别自动思维。", "进行重评。", "总结与作业。"],
+            support_ids=["sup-candidate"],
+            method_family="cbt",
+        )
+        candidate.metadata["family_name"] = "认知行为疗法"
+        candidate.metadata["domain_type"] = "psychology"
+        candidate.metadata["taxonomy_id"] = "psychology"
+        candidate.metadata["profile_id"] = "psychology::认知行为疗法"
+
+        hits = retriever.search(candidate, limit=5)
+
+        self.assertEqual(["match"], [hit.skill.skill_id for hit in hits])
+
+    def test_register_versions_retrieves_relevant_existing_skill_beyond_registry_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = DocumentRegistry(root_dir=os.path.join(tmpdir, "registry"))
+            base_doc = self._document(doc_id="doc-base", title="Many Existing Skills")
+
+            for index in range(15):
+                support = self._support(
+                    support_id=f"sup-noise-{index}",
+                    doc_id=base_doc.doc_id,
+                    excerpt=f"Noise excerpt {index}",
+                )
+                registry.upsert_support(support)
+                noise = self._skill(
+                    skill_id=f"noise-{index}",
+                    name=f"noise workflow {index}",
+                    workflow_steps=["Observe.", "Summarize.", "Close."],
+                    support_ids=[support.support_id],
+                    task_family="psychoeducation",
+                    method_family="general_support",
+                    stage="general",
+                )
+                registry.upsert_skill(noise)
+
+            target_support = self._support(
+                support_id="sup-target",
+                doc_id=base_doc.doc_id,
+                excerpt="Build rapport first and clarify the immediate concern.",
+            )
+            target_skill = self._skill(
+                skill_id="target-skill",
+                name="rapport building / intake",
+                workflow_steps=["Build rapport first.", "Clarify the immediate concern."],
+                constraints=["Do not push interpretation too early."],
+                support_ids=[target_support.support_id],
+            )
+            registry.upsert_support(target_support)
+            registry.upsert_skill(target_skill)
+
+            new_doc = self._document(doc_id="doc-new", title="Retrieved Match")
+            new_support = self._support(
+                support_id="sup-new",
+                doc_id=new_doc.doc_id,
+                excerpt="Build rapport first and clarify the immediate concern.",
+            )
+            candidate = self._skill(
+                skill_id="cand-new",
+                name="rapport building / intake",
+                workflow_steps=["Build rapport first.", "Clarify the immediate concern."],
+                constraints=["Do not push interpretation too early."],
+                support_ids=[new_support.support_id],
+            )
+
+            result = self._register(
+                registry=registry,
+                documents=[new_doc],
+                supports=[new_support],
+                skills=[candidate],
+            )
+
+            self.assertEqual(1, len(result.skill_specs))
+            self.assertEqual("target-skill", result.skill_specs[0].skill_id)
+            self.assertEqual("0.1.1", result.skill_specs[0].version)
+            self.assertTrue(any(event.reason == "strengthen" for event in result.lifecycles))
+
     def test_conflicting_new_support_can_deprecate_existing_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             registry = DocumentRegistry(root_dir=os.path.join(tmpdir, "registry"))
@@ -653,6 +811,151 @@ class DocumentVersioningTest(unittest.TestCase):
                 child_text = f.read()
             self.assertIn("结构化短期咨询框架确立与首次评估会话（5次CBT）", child_text)
             self.assertNotIn("ABC模型结构化识别与不合理信念标注", child_text)
+
+    def test_visible_tree_prefers_store_provenance_before_fuzzy_name_matching(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = DocumentRegistry(root_dir=os.path.join(tmpdir, ".runtime", "document_registry"))
+            document = self._document(doc_id="doc-1", title="Precise Evidence")
+            support_exact = self._support(
+                support_id="sup-exact",
+                doc_id=document.doc_id,
+                excerpt="Use collaborative agenda setting before deeper intervention.",
+            )
+            support_distractor = self._support(
+                support_id="sup-distractor",
+                doc_id=document.doc_id,
+                excerpt="Use a different breathing exercise as homework.",
+            )
+            registry_skill_exact = self._skill(
+                skill_id="cand-exact",
+                name="结构化首次会谈框架",
+                workflow_steps=["建立议程。", "明确目标。", "风险检查。", "总结安排。"],
+                support_ids=[support_exact.support_id],
+            )
+            registry_skill_distractor = self._skill(
+                skill_id="cand-distractor",
+                name="结构化首次会谈框架与放松练习",
+                workflow_steps=["说明呼吸。", "带领练习。", "回顾体验。", "布置作业。"],
+                support_ids=[support_distractor.support_id],
+            )
+            registry.upsert_document(document)
+            registry.upsert_support(support_exact)
+            registry.upsert_support(support_distractor)
+            registry.upsert_skill(registry_skill_exact)
+            registry.upsert_skill(registry_skill_distractor)
+
+            store_skill = Skill(
+                id="store-precise",
+                user_id="u1",
+                name="结构化首次会谈框架（最终版）",
+                description="Final store skill with explicit provenance.",
+                instructions="# Goal\nUse the final skill.",
+                triggers=["首次会谈"],
+                tags=["CBT", "认知行为疗法"],
+                status=SkillStatus.ACTIVE,
+                version="0.1.2",
+                files={},
+                source={
+                    "source_type": "document_skill",
+                    "skill_spec_id": registry_skill_exact.skill_id,
+                    "support_ids": [support_exact.support_id],
+                },
+            )
+
+            result = sync_visible_skill_tree(
+                registry=registry,
+                store_root=tmpdir,
+                documents=[document],
+                support_records=[support_exact, support_distractor],
+                skill_specs=[registry_skill_exact, registry_skill_distractor],
+                user_id="u1",
+                metadata={"family_name": "认知行为疗法", "profile_id": "test_therapy_v2", "taxonomy_axis": "疗法"},
+                store_skills=[store_skill],
+            )
+
+            self.assertEqual(result.affected_families, ["认知行为疗法"])
+            evidence_md = os.path.join(
+                tmpdir,
+                "认知行为疗法",
+                "子技能",
+                "结构化首次会谈框架（最终版）",
+                "references",
+                "evidence.md",
+            )
+            with open(evidence_md, "r", encoding="utf-8") as f:
+                evidence_text = f.read()
+            self.assertIn("Use collaborative agenda setting", evidence_text)
+            self.assertNotIn("different breathing exercise", evidence_text)
+
+    def test_store_sync_keeps_cross_asset_type_document_skills_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = AutoSkill(
+                AutoSkillConfig(
+                    llm={"provider": "mock"},
+                    embeddings={"provider": "hashing", "dims": 64},
+                    store={"provider": "local", "path": tmpdir},
+                    maintenance_strategy="heuristic",
+                )
+            )
+            registry = DocumentRegistry(root_dir=os.path.join(tmpdir, ".runtime", "document_registry"))
+            document = self._document(doc_id="doc-1", title="Asset Layer")
+            session_support = self._support(
+                support_id="sup-session",
+                doc_id=document.doc_id,
+                excerpt="Run a full CBT reframing session scaffold.",
+            )
+            micro_support = self._support(
+                support_id="sup-micro",
+                doc_id=document.doc_id,
+                excerpt="Ask one Socratic question to challenge a belief.",
+            )
+            session_skill = self._skill(
+                skill_id="cand-session",
+                name="认知重评",
+                asset_type="session_skill",
+                granularity="session",
+                objective="agenda-based session flow for cognitive reframing",
+                workflow_steps=["建立议程。", "识别自动想法。", "进行重评。", "总结与作业。"],
+                support_ids=[session_support.support_id],
+            )
+            micro_skill = self._skill(
+                skill_id="cand-micro",
+                name="认知重评",
+                asset_type="micro_skill",
+                granularity="micro",
+                workflow_steps=["提出一个苏格拉底式提问。"],
+                support_ids=[micro_support.support_id],
+            )
+
+            result = register_versions(
+                registry=registry,
+                documents=[document],
+                support_records=[session_support, micro_support],
+                skill_specs=[session_skill, micro_skill],
+                sdk=sdk,
+                llm=self._llm(),
+                user_id="u1",
+                metadata={
+                    "channel": "offline_extract_from_doc",
+                    "family_name": "认知行为疗法",
+                    "profile_id": "psychology::认知行为疗法",
+                },
+                dry_run=False,
+                target_state=VersionState.ACTIVE,
+            )
+
+            stored = sorted(sdk.store.list(user_id="u1"), key=lambda item: item.id)
+            self.assertEqual(2, len(stored))
+            self.assertEqual(2, len(result.upserted_store_skills))
+            self.assertEqual(
+                {"session_skill", "micro_skill"},
+                {str(skill.metadata.get("_autoskill_asset_type") or "") for skill in stored},
+            )
+            self.assertEqual(
+                {"session", "micro"},
+                {str(skill.metadata.get("_autoskill_granularity") or "") for skill in stored},
+            )
+            self.assertEqual({"cand-session", "cand-micro"}, {skill.id for skill in stored})
 
 
 if __name__ == "__main__":

@@ -44,9 +44,15 @@ __all__ = [
     "runtime_root",
     "staging_root",
     "library_manifest_path",
+    "DocumentSkillRetriever",
+    "SkillRetrievalHit",
+    "build_document_skill_retriever",
+    "skill_retrieval_text",
     "latest_run_id",
     "list_child_types",
     "read_run_payload",
+    "discover_staging_buckets",
+    "resolve_staging_bucket_context",
 ]
 
 
@@ -185,16 +191,34 @@ def __getattr__(name: str) -> Any:
         "runtime_root",
         "staging_root",
         "library_manifest_path",
+        "DocumentSkillRetriever",
+        "SkillRetrievalHit",
+        "build_document_skill_retriever",
+        "skill_retrieval_text",
         "latest_run_id",
         "list_child_types",
         "read_run_payload",
+        "discover_staging_buckets",
+        "resolve_staging_bucket_context",
     }:
         from .store.registry import (
             DocumentRegistry,
             build_registry_from_store_config,
         )
         from .store.layout import library_manifest_path, normalize_library_root, runtime_root, staging_root
-        from .store.staging import latest_run_id, list_child_types, read_run_payload
+        from .store.retrieval import (
+            DocumentSkillRetriever,
+            SkillRetrievalHit,
+            build_document_skill_retriever,
+            skill_retrieval_text,
+        )
+        from .store.staging import (
+            discover_staging_buckets,
+            latest_run_id,
+            list_child_types,
+            read_run_payload,
+            resolve_staging_bucket_context,
+        )
 
         mapping = {
             "DocumentRegistry": DocumentRegistry,
@@ -203,9 +227,15 @@ def __getattr__(name: str) -> Any:
             "runtime_root": runtime_root,
             "staging_root": staging_root,
             "library_manifest_path": library_manifest_path,
+            "DocumentSkillRetriever": DocumentSkillRetriever,
+            "SkillRetrievalHit": SkillRetrievalHit,
+            "build_document_skill_retriever": build_document_skill_retriever,
+            "skill_retrieval_text": skill_retrieval_text,
             "latest_run_id": latest_run_id,
             "list_child_types": list_child_types,
             "read_run_payload": read_run_payload,
+            "discover_staging_buckets": discover_staging_buckets,
+            "resolve_staging_bucket_context": resolve_staging_bucket_context,
         }
         return mapping[name]
     raise AttributeError(name)

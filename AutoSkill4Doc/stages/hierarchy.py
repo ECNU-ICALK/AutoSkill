@@ -64,11 +64,25 @@ def retrieve_hierarchy(
             "errors": [{"stage": "retrieve_hierarchy", "error": "no family hierarchy found"}],
         }
 
+    if not query_text and not family_key and len(families) == 1:
+        chosen = dict(families[0])
+        hits = _browse_child_hits(chosen)
+        return {
+            "route": "family_hierarchy",
+            "fallback": route,
+            "profile_id": profile_key or str(chosen.get("profile_id") or "").strip() or None,
+            "family_name": chosen["family_name"],
+            "parent": dict(chosen.get("parent") or {}),
+            "hits": hits[: max(1, int(limit or 20))],
+            "families": [],
+            "errors": [],
+        }
+
     if not query_text and not family_key:
         return {
             "route": "family_list",
             "fallback": route,
-            "profile_id": profile_key or None,
+            "profile_id": profile_key or (str(families[0].get("profile_id") or "").strip() or None if len(families) == 1 else None),
             "family_name": None,
             "parent": None,
             "hits": [],
@@ -102,7 +116,7 @@ def retrieve_hierarchy(
         return {
             "route": "family_hierarchy",
             "fallback": route,
-            "profile_id": profile_key or None,
+            "profile_id": profile_key or str(chosen.get("profile_id") or "").strip() or None,
             "family_name": chosen["family_name"],
             "parent": dict(chosen.get("parent") or {}),
             "hits": hits[: max(1, int(limit or 20))],
@@ -114,7 +128,7 @@ def retrieve_hierarchy(
     return {
         "route": "query_hits",
         "fallback": route,
-        "profile_id": profile_key or None,
+        "profile_id": profile_key or str(chosen.get("profile_id") or "").strip() or None,
         "family_name": chosen["family_name"],
         "parent": dict(chosen.get("parent") or {}),
         "hits": hits,

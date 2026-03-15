@@ -11,8 +11,10 @@ from AutoSkill4Doc.stages.extractor import build_document_skill_extractor, extra
 from AutoSkill4Doc.extract import extract_from_doc
 from AutoSkill4Doc.models import SkillDraft, SupportRecord, SupportRelation, TextSpan, VersionState
 from AutoSkill4Doc.pipeline import build_default_document_pipeline
+from AutoSkill4Doc.core.config import DEFAULT_DOC_SKILL_USER_ID
 from AutoSkill4Doc.prompts import OFFLINE_CHANNEL_DOC, build_offline_extract_prompt
 from AutoSkill4Doc.store.layout import intermediate_runs_root
+from AutoSkill4Doc.store.staging import safe_dir_component
 
 
 _DOC_TEXT = """
@@ -198,6 +200,8 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertEqual(len(result.ingest.documents), 1)
             self.assertGreater(len(result.extracted.support_records), 0)
             self.assertGreater(len(result.extracted.skill_drafts), 0)
+            self.assertEqual(len(result.extracted.documents), 1)
+            self.assertGreaterEqual(len(result.extracted.windows), 1)
             self.assertGreater(len(result.compiled.skill_specs), 0)
             self.assertGreater(len(result.registration.lifecycles), 0)
             self.assertGreaterEqual(len(result.registration.upserted_store_skills), 1)
@@ -227,6 +231,34 @@ class DocumentPipelineTest(unittest.TestCase):
             self.assertTrue(any("[ingest_document]" in line for line in logs))
             self.assertTrue(any("[extract_skills]" in line for line in logs))
             self.assertTrue(any("[compile_skills]" in line for line in logs))
+
+    def test_intermediate_extract_progress_uses_safe_doc_filenames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+            pipeline = build_default_document_pipeline(sdk=sdk)
+
+            result = pipeline.build(
+                user_id=DEFAULT_DOC_SKILL_USER_ID,
+                data={
+                    "doc_id": "folder/doc:1",
+                    "title": "Safe File Name",
+                    "raw_text": _DOC_TEXT,
+                },
+                title="Safe File Name",
+                domain="psychology",
+                metadata={"channel": "offline_extract_from_doc"},
+            )
+
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        result.intermediate["run_dir"],
+                        "extract",
+                        "documents",
+                        f"{safe_dir_component('folder/doc:1')}.json",
+                    )
+                )
+            )
 
     def test_incremental_build_skips_unchanged_document(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -341,7 +373,7 @@ class DocumentPipelineTest(unittest.TestCase):
             )
 
             self.assertEqual(result["total_documents"], 1)
-            self.assertGreaterEqual(len(sdk.store.list(user_id="u1")), 1)
+            self.assertGreaterEqual(len(sdk.store.list(user_id=DEFAULT_DOC_SKILL_USER_ID)), 1)
 
     def test_extract_from_doc_derives_profile_and_axis_from_taxonomy(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -779,6 +811,37 @@ Always check for acute risk before intensive exploration.
             self.assertTrue(any(spec.version != first_versions[spec.skill_id] for spec in shared_skills))
             self.assertTrue(any(spec.version == "0.1.1" for spec in shared_skills))
             self.assertTrue(any(event.reason in {"revise", "strengthen", "merge"} for event in second.registration.lifecycles))
+
+    def test_numbered_subsection_context_reaches_extraction_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sdk = self._build_sdk(store_path=tmpdir)
+            pipeline = build_default_document_pipeline(sdk=sdk)
+            text = """
+3 认知重构
+
+3.1 自动思维识别
+先识别自动思维和触发事件。
+
+3.2 证据检验
+再评估支持证据、反证和替代解释。
+""".strip()
+
+            result = pipeline.build(
+                user_id="u1",
+                data=text,
+                title="Hierarchy Intake",
+                domain="psychology",
+                metadata={"channel": "offline_extract_from_doc"},
+                dry_run=True,
+            )
+
+            self.assertTrue(result.extracted.support_records)
+            support = result.extracted.support_records[0]
+            self.assertIn("heading_path", support.metadata)
+            self.assertEqual(["3 认知重构"], list(support.metadata.get("heading_path") or []))
+            self.assertEqual("", support.metadata.get("parent_heading"))
+            self.assertIn("3.1 自动思维识别", list(support.metadata.get("subsection_headings") or []))
+            self.assertIn("3.2 证据检验", list(support.metadata.get("subsection_headings") or []))
 
 
 if __name__ == "__main__":

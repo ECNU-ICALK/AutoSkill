@@ -371,6 +371,7 @@ class DocumentSection(SerializableModel):
     text: str
     level: int = 1
     span: TextSpan = field(default_factory=TextSpan)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Normalizes section fields and validates them."""
@@ -380,6 +381,7 @@ class DocumentSection(SerializableModel):
         self.level = int(self.level or 1)
         if not isinstance(self.span, TextSpan):
             self.span = TextSpan.from_dict(_coerce_str_dict(self.span))
+        self.metadata = _coerce_str_dict(self.metadata)
         self.validate()
 
     def validate(self) -> None:
@@ -402,6 +404,7 @@ class DocumentSection(SerializableModel):
             text=str(data.get("text") or ""),
             level=int(data.get("level", 1) or 1),
             span=TextSpan.from_dict(_coerce_str_dict(data.get("span"))),
+            metadata=_coerce_str_dict(data.get("metadata")),
         )
 
 

@@ -635,6 +635,27 @@ def _match_registry_skills_for_store_skill(
 ) -> List[SkillSpec]:
     """Matches one final store skill back to one or more registry skills for evidence stitching."""
 
+    source_map = dict(store_skill.source or {})
+    skill_spec_id = str(source_map.get("skill_spec_id") or "").strip()
+    if skill_spec_id:
+        exact = [skill for skill in list(registry_skills or []) if str(skill.skill_id or "").strip() == skill_spec_id]
+        if exact:
+            return exact
+
+    source_support_ids = {
+        str(support_id or "").strip()
+        for support_id in list(source_map.get("support_ids") or [])
+        if str(support_id or "").strip()
+    }
+    if source_support_ids:
+        matched = [
+            skill
+            for skill in list(registry_skills or [])
+            if source_support_ids & {str(support_id or "").strip() for support_id in list(skill.support_ids or []) if str(support_id or "").strip()}
+        ]
+        if matched:
+            return matched
+
     scored: List[Tuple[float, SkillSpec]] = []
     store_name = str(store_skill.name or "").strip()
     for registry_skill in list(registry_skills or []):
