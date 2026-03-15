@@ -1,5 +1,110 @@
 # STATUS
 
+## 2026-03-15 - Round 24 (embedded install docs without provider args)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/README.md` and `AutoSkill4OpenClaw/README.zh-CN.md`.
+- Objective: make the recommended embedded installation path explicit and remove the impression that users must provide separate LLM/embedding providers.
+
+### Completed
+- Reworked the install section in both plugin READMEs:
+  - added a dedicated "recommended embedded install" subsection
+  - installation command now omits `--llm-provider`, `--llm-model`, `--embeddings-provider`, and `--embeddings-model`
+  - clarified that embedded mode reuses the existing OpenClaw runtime/model path
+  - clarified that generated `.env` provider placeholders are optional in embedded mode
+  - clarified that the sidecar process does not need to be started for the recommended embedded path
+- Kept an explicit optional subsection for sidecar/manual-provider installation so advanced deployments still have a documented path.
+
+### Validation
+- Executed:
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+- Result:
+  - `54/54` adapter tests pass.
+
+### Self-Review Notes
+- Docs now match the actual embedded runtime direction: installation is lightweight and does not require users to choose a separate provider stack up front.
+- No code-path changes were introduced in this round.
+
+## 2026-03-14 - Round 23 (message_received diagnostics for Feishu ingress)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/adapter/index.js`.
+- Objective: distinguish "channel traffic reached plugin hooks" from "agent lifecycle hooks executed" in Feishu/OpenClaw deployments.
+
+### Completed
+- Added a low-risk diagnostic probe on `message_received`:
+  - registers `message_received` alongside existing `before_prompt_build` and `agent_end` hooks.
+  - logs first invocation marker:
+    - `hook first invocation name=message_received`
+  - logs per-event session/channel summary without dumping prompt bodies:
+    - `message_received invoked session=... channel=...`
+- Extended lifecycle watchdog logging:
+  - now reports `message_received`, `before_prompt_build`, and `agent_end` counters together.
+  - makes it easy to tell whether Feishu traffic hits plugin hooks at all, or only stops before agent loop.
+- Updated adapter tests in `AutoSkill4OpenClaw/adapter/index.test.mjs`:
+  - registration list now includes `message_received`
+  - diagnostics test now verifies first-invocation and session/channel logging for `message_received`
+
+### Validation
+- Executed:
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+- Result:
+  - `54/54` adapter tests pass.
+
+### Self-Review Notes
+- This change is diagnostic-only and fail-open.
+- No message mutation, retrieval behavior, memory behavior, or provider/model path was changed.
+
+### Remaining Issues / Risks
+- If `message_received` still does not fire in production, the issue is below plugin lifecycle registration and likely in deployment/load/runtime boundaries.
+- If `message_received` fires but `before_prompt_build` does not, the message is entering channel dispatch but not reaching `runEmbeddedPiAgent(...)`.
+
+## 2026-03-14 - Round 22 (main-turn proxy turn-type inference parity)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/openclaw_main_turn_proxy.py`.
+- Objective: align sidecar main-turn proxy sampling with the embedded fallback when OpenClaw omits explicit `turn_type`.
+
+### Completed
+- Audited `OpenClaw-RL` proxy sampling flow against local plugin code:
+  - confirmed `OpenClaw-RL` collects data from `/v1/chat/completions` proxy traffic and buffers previous `main` turn until the next request provides `next_state`.
+  - confirmed local embedded path is session-close extraction and not equivalent to RL proxy sampling.
+- Fixed sidecar proxy parsing in `AutoSkill4OpenClaw/openclaw_main_turn_proxy.py`:
+  - added `infer_turn_type_from_messages(...)`.
+  - `parse_turn_context(...)` now falls back to message-based inference when `X-Turn-Type` / body fields are absent.
+  - inference rules match embedded adapter behavior:
+    - `user` present => `main`
+    - assistant-only history => `main`
+    - tool/environment only => `side`
+- Added regression tests in `AutoSkill4OpenClaw/tests/test_main_turn_proxy.py`:
+  - missing explicit `turn_type` infers `main`
+  - tool-only request infers `side`
+  - inference helper behavior is pinned directly
+
+### Validation
+- Executed:
+  - `python3 -m unittest AutoSkill4OpenClaw.tests.test_main_turn_proxy -q`
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+- Result:
+  - `52/52` Python tests pass.
+  - `54/54` adapter tests pass.
+
+### Failed Attempts
+- Initial attempt to compare `OpenClaw-RL` via GitHub web rendering was too noisy for code-level verification.
+- Switched to a local shallow clone of `Gen-Verse/OpenClaw-RL` for direct source inspection.
+
+### Self-Review Notes
+- This is a low-risk parser-only change; no memory, provider, hook, or OpenClaw core behavior is modified.
+- The fix matters because OpenClaw `2026.3.x` deployments may omit `turn_type`, which previously caused the sidecar proxy path to skip all main-turn extraction.
+
+### Remaining Issues / Risks
+- Embedded mode still depends on OpenClaw lifecycle hooks firing; it is not a drop-in replacement for RL-style proxy capture.
+- `session_done` is still explicit-field-first; without it, the final pending main turn remains intentionally unextracted unless another close signal arrives.
+
+### Next Step
+- Decide whether embedded mode should remain the default recommendation when reliable RL-style sampling is required.
+
 ## 2026-03-13 - Round 1
 
 ### Scope
@@ -979,3 +1084,32 @@
 ### Risk Notes
 - Very low risk: this aligns adapter behavior to OpenClaw official typed lifecycle API.
 - Backward compatibility preserved for environments exposing only `registerHook` (fallback path retained).
+
+## 2026-03-14 - Round 21 (runtime hook diagnostics logging)
+
+### Scope
+- Target area: production troubleshooting for "hooks registered but never invoked".
+- Objective: provide explicit logs to distinguish registration success from runtime callback execution.
+
+### Changes Applied
+- `AutoSkill4OpenClaw/adapter/index.js`
+  - hook registration logs now include binding method:
+    - `method=on` or `method=registerHook`
+  - plugin startup logs hook API capability snapshot:
+    - `has_api_on`, `has_registerHook`, `runtime_mode`
+  - added first-invocation diagnostics:
+    - `hook first invocation name=before_prompt_build`
+    - `hook first invocation name=agent_end`
+  - added one-shot watchdog warning after startup (60s):
+    - emits if either lifecycle hook still has zero invocations
+    - helps confirm "plugin loaded but traffic not entering agent lifecycle"
+- `AutoSkill4OpenClaw/adapter/index.test.mjs`
+  - added regression case asserting first-invocation diagnostics are logged.
+
+### Validation
+- `cd AutoSkill4OpenClaw/adapter && npm test` (pass, 54 tests)
+- `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q` (pass, 49 tests)
+
+### Risk Notes
+- Diagnostics are low-risk and fail-open.
+- Watchdog uses `setTimeout(...).unref()` to avoid holding process lifecycle.

@@ -6,6 +6,7 @@ import { createEmbeddedProcessor } from "./embedded_runtime.js";
 const PLUGIN_ID = "autoskill-openclaw-adapter";
 const BEFORE_PROMPT_BUILD_HOOK_NAMES = ["before_prompt_build"];
 const AGENT_END_HOOK_NAMES = ["agent_end"];
+const MESSAGE_RECEIVED_HOOK_NAMES = ["message_received"];
 const DEFAULTS = {
   baseUrl: "http://127.0.0.1:9100/v1",
   apiKey: "",
@@ -1538,11 +1539,11 @@ function createAgentEndHandler(cfg, log, deps = {}) {
 function registerLifecycleHook(api, hookName, handler, meta) {
   if (api && typeof api.on === "function") {
     api.on(hookName, handler);
-    return;
+    return "on";
   }
   if (api && typeof api.registerHook === "function") {
     api.registerHook(hookName, handler, meta || {});
-    return;
+    return "registerHook";
   }
   throw new Error(`No hook registration API found for ${hookName}`);
 }
@@ -1558,10 +1559,10 @@ function registerLifecycleHooks(api, hookNames, handler, meta, log) {
     if (seen.has(hookName)) continue;
     seen.add(hookName);
     try {
-      registerLifecycleHook(api, hookName, handler, meta);
+      const method = registerLifecycleHook(api, hookName, handler, meta);
       count += 1;
       if (log?.info) {
-        log.info(`[${PLUGIN_ID}] hook registered name=${hookName}`);
+        log.info(`[${PLUGIN_ID}] hook registered name=${hookName} method=${method || "unknown"}`);
       }
     } catch (err) {
       if (!firstError) firstError = err;
@@ -1581,19 +1582,81 @@ export default {
   register(api) {
     const cfg = normalizeConfig(api.pluginConfig);
     const log = api.logger ?? console;
+    if (log?.info) {
+      log.info(
+        `[${PLUGIN_ID}] register runtime_mode=${cfg.runtimeMode} ` +
+          `has_api_on=${intBool(api && typeof api.on === "function")} ` +
+          `has_registerHook=${intBool(api && typeof api.registerHook === "function")}`,
+      );
+    }
     const embeddedProcessor =
       cfg.runtimeMode === "embedded" ? createEmbeddedProcessor(cfg, api, log) : null;
     const retrievalCache = createSessionRetrievalCache();
+    let messageReceivedInvoked = 0;
+    let beforePromptInvoked = 0;
+    let agentEndInvoked = 0;
+
+    const messageReceivedProbe = async (event, ctx) => {
+      messageReceivedInvoked += 1;
+      if (messageReceivedInvoked === 1 && log?.info) {
+        log.info(`[${PLUGIN_ID}] hook first invocation name=message_received`);
+      }
+      if (log?.info) {
+        const sessionId = resolveSessionId(event, ctx, pickMessages(event, ctx));
+        const channel = asString(event?.channel || event?.provider || ctx?.channel || ctx?.provider).trim();
+        log.info(
+          `[${PLUGIN_ID}] message_received invoked session=${sessionId || "<missing>"} channel=${channel || "<empty>"}`,
+        );
+      }
+      return undefined;
+    };
+
+    const beforePromptBuildHandler = createBeforePromptBuildHandler(cfg, log, {
+      embeddedProcessor,
+      onRetrieval(sessionId, snapshot, userId) {
+        retrievalCache.remember(sessionId, snapshot, userId);
+      },
+    });
+    const beforePromptBuildProbe = async (event, ctx) => {
+      beforePromptInvoked += 1;
+      if (beforePromptInvoked === 1 && log?.info) {
+        log.info(`[${PLUGIN_ID}] hook first invocation name=before_prompt_build`);
+      }
+      return beforePromptBuildHandler(event, ctx);
+    };
+
+    const agentEndHandler = createAgentEndHandler(cfg, log, {
+      embeddedProcessor,
+      consumeRetrieval(sessionId, userId) {
+        return retrievalCache.consume(sessionId, userId);
+      },
+      clearRetrieval(sessionId, userId) {
+        retrievalCache.clear(sessionId, userId);
+      },
+    });
+    const agentEndProbe = async (event, ctx) => {
+      agentEndInvoked += 1;
+      if (agentEndInvoked === 1 && log?.info) {
+        log.info(`[${PLUGIN_ID}] hook first invocation name=agent_end`);
+      }
+      return agentEndHandler(event, ctx);
+    };
+
+    registerLifecycleHooks(
+      api,
+      MESSAGE_RECEIVED_HOOK_NAMES,
+      messageReceivedProbe,
+      {
+        name: `${PLUGIN_ID}.message-received`,
+        description: "AutoSkill diagnostic hook: observe inbound channel traffic before agent execution.",
+      },
+      log,
+    );
 
     registerLifecycleHooks(
       api,
       BEFORE_PROMPT_BUILD_HOOK_NAMES,
-      createBeforePromptBuildHandler(cfg, log, {
-        embeddedProcessor,
-        onRetrieval(sessionId, snapshot, userId) {
-          retrievalCache.remember(sessionId, snapshot, userId);
-        },
-      }),
+      beforePromptBuildProbe,
       {
         name: `${PLUGIN_ID}.before-prompt-build`,
         description: "AutoSkill recall hook: retrieve and append concise skill hints before prompt build.",
@@ -1604,21 +1667,28 @@ export default {
     registerLifecycleHooks(
       api,
       AGENT_END_HOOK_NAMES,
-      createAgentEndHandler(cfg, log, {
-        embeddedProcessor,
-        consumeRetrieval(sessionId, userId) {
-          return retrievalCache.consume(sessionId, userId);
-        },
-        clearRetrieval(sessionId, userId) {
-          retrievalCache.clear(sessionId, userId);
-        },
-      }),
+      agentEndProbe,
       {
         name: `${PLUGIN_ID}.agent-end`,
         description: "AutoSkill evolution hook: schedule background extraction after run.",
       },
       log,
     );
+
+    if (typeof setTimeout === "function") {
+      const timer = setTimeout(() => {
+        if (messageReceivedInvoked <= 0 || beforePromptInvoked <= 0 || agentEndInvoked <= 0) {
+          if (log?.warn) {
+            log.warn(
+              `[${PLUGIN_ID}] hook watchdog no invocation yet ` +
+                `message_received=${messageReceivedInvoked} ` +
+                `before_prompt_build=${beforePromptInvoked} agent_end=${agentEndInvoked} runtime_mode=${cfg.runtimeMode}`,
+            );
+          }
+        }
+      }, 60_000);
+      if (timer && typeof timer.unref === "function") timer.unref();
+    }
   },
 };
 
@@ -1637,3 +1707,7 @@ export {
   buildEndPayload,
   createSessionRetrievalCache,
 };
+
+function intBool(v) {
+  return v ? 1 : 0;
+}

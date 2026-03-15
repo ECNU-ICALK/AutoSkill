@@ -16,9 +16,22 @@ AutoSkill 的核心意图是让 OpenClaw 在使用过程中自动进化：每个
 
 - Python 3.10+
 - 本地已有 AutoSkill 仓库
-- 已准备好可用的 LLM 和 embedding 凭据
+- 已安装可运行的 OpenClaw
 
-### 从当前仓库安装
+对于推荐的 `embedded` 模式，安装阶段不需要额外提供一套 `LLM provider` 或 `embedding provider`。
+AutoSkill 会在真正执行抽取/维护时，优先复用当前 OpenClaw 运行时里的模型链路。
+
+### 推荐方式：按 embedded 模式安装
+
+这是大多数用户应该直接采用的默认路径。
+
+它会完成 adapter 安装、写入 `openclaw.json`，并准备好以下本地目录：
+
+- 会话归档
+- SkillBank 维护
+- 镜像到 OpenClaw 原生 `skills` 目录
+
+这个安装命令**不需要**你传入 `--llm-provider`、`--llm-model`、`--embeddings-provider`、`--embeddings-model`。
 
 ```bash
 git clone https://github.com/ECNU-ICALK/AutoSkill.git
@@ -28,11 +41,7 @@ python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
   --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
-  --repo-dir "$(pwd)" \
-  --llm-provider internlm \
-  --llm-model intern-s1-pro \
-  --embeddings-provider qwen \
-  --embeddings-model text-embedding-v4
+  --repo-dir "$(pwd)"
 ```
 
 如果仓库已经在本地：
@@ -40,6 +49,26 @@ python3 AutoSkill4OpenClaw/install.py \
 ```bash
 cd /path/to/AutoSkill
 python3 -m pip install -e .
+python3 AutoSkill4OpenClaw/install.py \
+  --workspace-dir ~/.openclaw \
+  --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
+  --repo-dir "$(pwd)"
+```
+
+安装完成后，再按下文快速开始把 `~/.openclaw/openclaw.json` 里的 `runtimeMode` 设为 `embedded`。
+
+说明：
+
+- 安装器仍会生成 `.env` 里的 sidecar / manual 兜底占位项。
+- 但在 embedded 模式下，这些 provider/env 占位值可以先保持为空。
+- 推荐 embedded 路径下，不需要额外启动 AutoSkill sidecar 进程。
+
+### 可选方式：按 sidecar / 手动 provider 模式安装
+
+只有在你明确要走外置 sidecar，或者想在安装时就预填 `.env` 里的 provider 默认值时，才需要这样安装：
+
+```bash
 python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \

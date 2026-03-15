@@ -16,9 +16,22 @@ An optional external-service path is still available later for centralized opera
 
 - Python 3.10+
 - A local checkout of this AutoSkill repository
-- Valid LLM and embedding credentials
+- An existing OpenClaw installation
 
-### Install from this repo
+For the recommended `embedded` mode, you do not need to provide a separate LLM provider or embedding provider during installation.
+AutoSkill will reuse the current OpenClaw runtime/model path at execution time.
+
+### Recommended: install for embedded mode
+
+This is the default path for most users.
+
+It installs the adapter, wires `openclaw.json`, and prepares local directories for:
+
+- session archiving
+- SkillBank maintenance
+- mirroring maintained skills into OpenClaw's native `skills` directory
+
+It does **not** require you to pass `--llm-provider`, `--llm-model`, `--embeddings-provider`, or `--embeddings-model`.
 
 ```bash
 git clone https://github.com/ECNU-ICALK/AutoSkill.git
@@ -28,11 +41,7 @@ python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
   --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
-  --repo-dir "$(pwd)" \
-  --llm-provider internlm \
-  --llm-model intern-s1-pro \
-  --embeddings-provider qwen \
-  --embeddings-model text-embedding-v4
+  --repo-dir "$(pwd)"
 ```
 
 If you already have the repo locally:
@@ -40,6 +49,26 @@ If you already have the repo locally:
 ```bash
 cd /path/to/AutoSkill
 python3 -m pip install -e .
+python3 AutoSkill4OpenClaw/install.py \
+  --workspace-dir ~/.openclaw \
+  --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
+  --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
+  --repo-dir "$(pwd)"
+```
+
+After installation, set `runtimeMode=embedded` in `~/.openclaw/openclaw.json` as shown in the quick-start section below.
+
+Notes:
+
+- The installer still writes `.env` placeholders for optional sidecar/manual fallback paths.
+- In embedded mode, those provider/env placeholders can stay empty.
+- You do not need to start the AutoSkill sidecar process for the recommended embedded path.
+
+### Optional: install for sidecar/manual-provider mode
+
+Only use this if you explicitly want the external sidecar path or want to prefill provider defaults in the generated `.env`.
+
+```bash
 python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \

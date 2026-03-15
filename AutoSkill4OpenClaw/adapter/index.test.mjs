@@ -523,7 +523,7 @@ test("plugin registers before_prompt_build without re-registering before_agent_s
 
   assert.deepEqual(
     hooks.map((hook) => hook.name),
-    ["before_prompt_build", "agent_end"],
+    ["message_received", "before_prompt_build", "agent_end"],
   );
   assert.equal(hooks.some((hook) => hook.name === "before_agent_start"), false);
 });
@@ -547,9 +547,62 @@ test("plugin prefers api.on for typed lifecycle hooks when on/registerHook both 
 
   assert.deepEqual(
     onHooks.map((hook) => hook.name),
-    ["before_prompt_build", "agent_end"],
+    ["message_received", "before_prompt_build", "agent_end"],
   );
   assert.equal(registerHooks.length, 0);
+});
+
+test("plugin logs first hook invocation for lifecycle diagnostics", async () => {
+  const hooks = new Map();
+  const logger = makeLogger();
+  plugin.register({
+    pluginConfig: {
+      runtimeMode: "embedded",
+      skillRetrieval: { enabled: false },
+      extractOnAgentEnd: false,
+    },
+    logger,
+    registerHook(name, handler) {
+      hooks.set(name, handler);
+    },
+  });
+
+  const before = hooks.get("before_prompt_build");
+  const end = hooks.get("agent_end");
+  const received = hooks.get("message_received");
+  assert.equal(typeof received, "function");
+  assert.equal(typeof before, "function");
+  assert.equal(typeof end, "function");
+
+  await received(
+    {
+      sessionId: "sess-msg",
+      channel: "feishu",
+      messages: [{ role: "user", content: "hello" }],
+    },
+    {},
+  );
+  await before(
+    { messages: [{ role: "user", content: "hello" }] },
+    {},
+  );
+  await end(
+    { messages: [{ role: "user", content: "hello" }] },
+    {},
+  );
+
+  assert(
+    logger.entries.some((entry) => entry.message.includes("hook first invocation name=message_received")),
+  );
+  assert(
+    logger.entries.some((entry) => entry.message.includes("message_received invoked session=sess-msg channel=feishu")),
+  );
+  assert(
+    logger.entries.some((entry) => entry.message.includes("hook first invocation name=before_prompt_build")),
+  );
+  assert(
+    logger.entries.some((entry) => entry.message.includes("hook first invocation name=agent_end")),
+  );
 });
 
 test("agent_end payload includes session and turn metadata when available", () => {

@@ -171,6 +171,30 @@ def normalize_openclaw_messages(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def infer_turn_type_from_messages(messages: List[Dict[str, Any]]) -> str:
+    """Best-effort turn type inference when OpenClaw does not forward explicit metadata."""
+    has_user = False
+    has_assistant = False
+    has_tool_or_env = False
+    for item in list(messages or []):
+        role = str((item or {}).get("role") or "").strip().lower()
+        if role == "user":
+            has_user = True
+            continue
+        if role == "assistant":
+            has_assistant = True
+            continue
+        if role in {"tool", "environment"}:
+            has_tool_or_env = True
+    if has_user:
+        return "main"
+    if has_assistant and not has_tool_or_env:
+        return "main"
+    if has_tool_or_env and not has_user and not has_assistant:
+        return "side"
+    return ""
+
+
 def _header_value(headers: Any, key: str) -> str:
     """Run header value."""
     if headers is None:
@@ -523,6 +547,8 @@ def parse_turn_context(
     )
     request_seq = _safe_int(_header_value(headers, "X-Request-Seq") or _body_value(body, "request_seq", "requestSeq"), 0)
     messages = normalize_openclaw_messages(body.get("messages"))
+    if not turn_type:
+        turn_type = infer_turn_type_from_messages(messages)
     next_state, next_state_index = _extract_last_next_state(messages)
     reference, retrieval_metadata = extract_retrieval_metadata(body)
     user_id = (

@@ -20,6 +20,7 @@ from openclaw_main_turn_proxy import (  # noqa: E402
     StreamAssistantAccumulator,
     UpstreamChatProxy,
     _copy_headers_to_client,
+    infer_turn_type_from_messages,
     parse_turn_context,
 )
 
@@ -271,8 +272,56 @@ class MainTurnProxyStateTest(unittest.TestCase):
             self.manager.finalize_request(ctx=ctx, assistant=None, success=False, error=error)
         self.assertNotIn("s-fail", self.manager._pending_by_session)
 
+    def test_parse_turn_context_infers_main_without_explicit_turn_type(self) -> None:
+        ctx = parse_turn_context(
+            body={
+                "session_id": "s-infer-main",
+                "messages": [
+                    {"role": "assistant", "content": "previous"},
+                    {"role": "user", "content": "continue"},
+                ],
+            },
+            headers={},
+            default_user_id="u-test",
+            ingest_window=self.cfg.ingest_window,
+        )
+        self.assertEqual(ctx.turn_type, "main")
+
+    def test_parse_turn_context_infers_side_for_tool_only_messages(self) -> None:
+        ctx = parse_turn_context(
+            body={
+                "session_id": "s-infer-side",
+                "messages": [
+                    {"role": "tool", "content": "{\"ok\":true}"},
+                ],
+            },
+            headers={},
+            default_user_id="u-test",
+            ingest_window=self.cfg.ingest_window,
+        )
+        self.assertEqual(ctx.turn_type, "side")
+
 
 class StreamAccumulatorTest(unittest.TestCase):
+    def test_infer_turn_type_matches_embedded_fallback_rules(self) -> None:
+        self.assertEqual(
+            infer_turn_type_from_messages(
+                [
+                    {"role": "assistant", "content": "history"},
+                    {"role": "user", "content": "new task"},
+                ]
+            ),
+            "main",
+        )
+        self.assertEqual(
+            infer_turn_type_from_messages(
+                [
+                    {"role": "tool", "content": "{\"status\":\"ok\"}"},
+                ]
+            ),
+            "side",
+        )
+
     def test_copy_headers_does_not_force_zero_content_length_for_stream(self) -> None:
         handler = _FakeHandler()
         _copy_headers_to_client(
