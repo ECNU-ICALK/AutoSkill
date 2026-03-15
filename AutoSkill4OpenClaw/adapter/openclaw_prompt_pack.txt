@@ -1,4 +1,4 @@
-@@version 2026-03-13-openclaw-v1
+@@version 2026-03-15-openclaw-v2
 
 @@block shared.skill_creator_alignment
 - Target the standard agent skill artifact used by OpenClaw: one skill directory with SKILL.md plus optional scripts/, references/, and assets/.
@@ -190,10 +190,14 @@ Output strict JSON only.
 
 ### Embedded constraints
 - Require turn_type=main evidence in session.
+- If `session_evidence` is provided, use it to confirm which turns were `main`, whether the session ended successfully, and whether explicit user feedback was present near the end.
 - Ignore one-off payload.
 - No examples field.
 - Keep concise.
 - Return {"skills": [...]} and prefer one high-signal skill over multiple weak skills.
+- Per skill keep fields lean: name, description, prompt, triggers, tags, confidence.
+- Optional resources/files are allowed only when they materially improve repeated execution.
+- If you include bundled resources, use safe relative paths under scripts/, references/, or assets/ and keep content concise.
 @@end
 
 @@template embedded.maintain.decide.system
@@ -217,7 +221,7 @@ Output strict JSON with fields action,target_skill_id,reason.
 
 @@template embedded.maintain.merge.system
 Merge existing skill and candidate skill into one skill.
-Output strict JSON with name,description,prompt,triggers,tags.
+Output strict JSON with name,description,prompt,triggers,tags and optional resources/files.
 
 ### Shared merge policy
 - Preserve capability identity and reusable constraints.
@@ -225,4 +229,6 @@ Output strict JSON with name,description,prompt,triggers,tags.
 - Keep output concise, de-duplicated, and future-reusable.
 - Do not add examples field.
 - Keep short resource pointers only (scripts/... / references/... / assets/...).
+- Preserve reusable bundled resources when they are part of the capability; do not drop scripts/references/assets improvements.
+- If resource content is needed, keep it concise and use safe relative paths under scripts/, references/, or assets/.
 @@end

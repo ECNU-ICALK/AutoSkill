@@ -17,9 +17,12 @@ AutoSkill 的核心意图是让 OpenClaw 在使用过程中自动进化：每个
 - Python 3.10+
 - 本地已有 AutoSkill 仓库
 - 已安装可运行的 OpenClaw
+- 只有在你要运行 adapter 测试或本地验证脚本时，才需要 Node.js
+- 只有在你要运行可选的 sidecar 验证脚本时，才需要 `curl`
 
 对于推荐的 `embedded` 模式，安装阶段不需要额外提供一套 `LLM provider` 或 `embedding provider`。
 AutoSkill 会在真正执行抽取/维护时，优先复用当前 OpenClaw 运行时里的模型链路。
+安装完成后请保留这份仓库 checkout：当前安装出来的运行时脚本仍然会引用本地仓库里的 `AutoSkill4OpenClaw/run_proxy.py`。
 
 ### 推荐方式：按 embedded 模式安装
 
@@ -56,7 +59,8 @@ python3 AutoSkill4OpenClaw/install.py \
   --repo-dir "$(pwd)"
 ```
 
-安装完成后，再按下文快速开始把 `~/.openclaw/openclaw.json` 里的 `runtimeMode` 设为 `embedded`。
+安装完成后，如果 adapter 条目原本不存在，安装器会直接把一套以 `embedded` 为主的默认配置写进 `~/.openclaw/openclaw.json`。
+只有在你想改目录、调整 `sessionMaxTurns`，或者切换成 `sidecar` 时，才需要再手动编辑。
 
 说明：
 
@@ -92,11 +96,18 @@ python3 AutoSkill4OpenClaw/install.py \
 - `~/.openclaw/extensions/autoskill-openclaw-adapter/package.json`
 - `~/.openclaw/openclaw.json`，并自动启用 adapter
 
+命名说明：
+
+- 仓库/项目名是 `AutoSkill4OpenClaw`
+- 安装到 OpenClaw 里的 adapter id 仍然是 `autoskill-openclaw-adapter`
+- 可选 sidecar 运行时目录仍然是 `~/.openclaw/plugins/autoskill-openclaw-plugin`
+- 这些安装名/运行时名暂时保留，是为了兼容已有安装路径、日志与脚本
+
 ## 快速开始（推荐默认路径）
 
 ### 1. 将 adapter 运行模式设为 embedded
 
-编辑 `~/.openclaw/openclaw.json`，在插件配置中设置：
+安装器默认会把下面这样的插件配置写入 `~/.openclaw/openclaw.json`：
 
 ```json
 {
@@ -110,7 +121,8 @@ python3 AutoSkill4OpenClaw/install.py \
           "embedded": {
             "skillBankDir": "~/.openclaw/autoskill/SkillBank",
             "openclawSkillsDir": "~/.openclaw/workspace/skills",
-            "sessionArchiveDir": "~/.openclaw/autoskill/embedded_sessions"
+            "sessionArchiveDir": "~/.openclaw/autoskill/embedded_sessions",
+            "sessionMaxTurns": 20
           }
         }
       }
@@ -118,6 +130,8 @@ python3 AutoSkill4OpenClaw/install.py \
   }
 }
 ```
+
+`embedded.sessionMaxTurns` 默认是 `20`。如果一个 session 很长、`session_id` 一直不变，AutoSkill 会在本地把这段会话按 20 个 turn 自动收口一次，并触发一轮抽取/维护，而不是无限等待。若你只想严格依赖 `session_done`、session 切换或 idle-timeout，再把它设成 `0`。
 
 ### 2. 重启 OpenClaw
 
@@ -167,6 +181,7 @@ flowchart LR
 - OpenClaw adapter 在运行时内处理 `agent_end`（不需要 sidecar）
 - embedded runtime 先按 session 归档 transcript
 - embedded runtime 在 AutoSkill `SkillBank` 中完成技能抽取与维护
+- 生成的技能可以携带标准 OpenClaw `scripts/`、`references/`、`assets/` 等资源文件，并会在 SkillBank 与镜像目录中一并保留
 - embedded runtime 把当前有效技能镜像到 OpenClaw 标准本地 skills 目录
 - OpenClaw 继续通过自己的标准本地 skill 机制来使用这些技能
 
@@ -239,6 +254,12 @@ AUTOSKILL_OPENCLAW_PROMPT_PACK_PATH=/abs/path/to/openclaw_prompt_pack.txt
 - embedded 实时会话快照（每次收到 turn 都会更新）：`~/.openclaw/autoskill/embedded_sessions/<user>/<session>.latest.json`
 - OpenClaw 本地技能镜像：`~/.openclaw/workspace/skills`
 - sidecar 对话归档（`runtimeMode=sidecar`）：`~/.openclaw/autoskill/conversations`
+
+长会话兜底收口：
+
+- embedded 模式：`embedded.sessionMaxTurns` 默认 `20`
+- sidecar / session archive 路径：`AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS` 默认 `20`
+- 如需完全等待 `session_done`、session 切换或 idle-timeout，再把对应值设成 `0`
 
 ### 技能使用计数（默认安全模式）
 
@@ -321,7 +342,7 @@ AUTOSKILL_OPENCLAW_SKILLS_DIR=~/.openclaw/workspace/skills
   - 若缺少 `turn_type/turnType`（部分 OpenClaw 2026.3.x 版本会出现），adapter 会按消息结构推断（存在 `user` 视为 `main`，仅 tool/environment 视为 `side`）
   - 一旦上游显式提供 `turn_type`，仍以显式字段为准
   - 若缺少 `session_done`，仍可通过 `session_id` 变化收口（sidecar 开启空闲超时时也可自动收口）
-- embedded 模式下 `before_prompt_build` 检索默认自动关闭（避免无 sidecar 场景下发起无效检索请求）
+- embedded 的 `openclaw_mirror` 主线上，`before_prompt_build` 检索默认自动关闭；`store_only` 是明确的例外路径，会重新开启检索注入
 - 内置防递归保护，避免抽取/合并过程再次触发抽取链路
 - 优先级说明：若显式配置 `runtimeMode`，会覆盖 no-sidecar 别名
 

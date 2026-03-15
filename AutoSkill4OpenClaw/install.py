@@ -96,9 +96,20 @@ def _upsert_openclaw_plugin_config(
     if not isinstance(cfg, dict):
         cfg = {}
     cfg.setdefault("baseUrl", f"http://127.0.0.1:{int(proxy_port)}/v1")
+    cfg.setdefault("runtimeMode", "embedded")
+    cfg.setdefault("openclawSkillInstallMode", "openclaw_mirror")
     cfg.setdefault("skillScope", "all")
     cfg.setdefault("topK", 3)
     cfg.setdefault("minScore", 0.4)
+    embedded_cfg = cfg.get("embedded")
+    if not isinstance(embedded_cfg, dict):
+        embedded_cfg = {}
+    autoskill_dir = (workspace_dir / "autoskill").resolve()
+    embedded_cfg.setdefault("skillBankDir", str((autoskill_dir / "SkillBank").resolve()))
+    embedded_cfg.setdefault("openclawSkillsDir", str((workspace_dir / "workspace" / "skills").resolve()))
+    embedded_cfg.setdefault("sessionArchiveDir", str((autoskill_dir / "embedded_sessions").resolve()))
+    embedded_cfg.setdefault("sessionMaxTurns", 20)
+    cfg["embedded"] = embedded_cfg
     skill_retrieval = cfg.get("skillRetrieval")
     if not isinstance(skill_retrieval, dict):
         skill_retrieval = {}
@@ -129,12 +140,16 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         f"AUTOSKILL_PYTHON={args.python_bin}\n"
         "AUTOSKILL_PROXY_HOST=127.0.0.1\n"
         f"AUTOSKILL_PROXY_PORT={args.proxy_port}\n"
+        "AUTOSKILL_BASE_URL=\n"
+        "AUTOSKILL_PROXY_BASE_URL=\n"
+        "AUTOSKILL_DOTENV=\n"
         f"AUTOSKILL_STORE_DIR={store_dir}\n"
         "AUTOSKILL_USER_ID=\n"
         "AUTOSKILL_SKILL_SCOPE=all\n"
         "AUTOSKILL_REWRITE_MODE=always\n"
         "AUTOSKILL_MIN_SCORE=0.4\n"
         "AUTOSKILL_TOP_K=3\n"
+        "AUTOSKILL_MAX_INJECTED_CHARS=1500\n"
         "AUTOSKILL_SKILL_RETRIEVAL_ENABLED=\n"
         "AUTOSKILL_SKILL_RETRIEVAL_TOP_K=3\n"
         "AUTOSKILL_SKILL_RETRIEVAL_MAX_CHARS=1500\n"
@@ -145,6 +160,9 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         "AUTOSKILL_OPENCLAW_INGEST_WINDOW=6\n"
         "AUTOSKILL_EXTRACT_ENABLED=1\n"
         "AUTOSKILL_MAX_BG_EXTRACT_JOBS=2\n"
+        "AUTOSKILL_PROXY_EXTRACT_EVENT_DETAILS=1\n"
+        "AUTOSKILL_PROXY_EXTRACT_EVENT_MAX_MD_CHARS=0\n"
+        "AUTOSKILL_LIBRARY_DIRS=\n"
         "AUTOSKILL_OPENCLAW_MAIN_TURN_EXTRACT=1\n"
         "AUTOSKILL_OPENCLAW_AGENT_END_EXTRACT=\n"
         "AUTOSKILL_OPENCLAW_PROXY_TARGET_BASE_URL=\n"
@@ -154,9 +172,23 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         "AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_ENABLED=1\n"
         f"AUTOSKILL_OPENCLAW_CONVERSATION_ARCHIVE_DIR={conversation_archive_dir}\n"
         "AUTOSKILL_OPENCLAW_SESSION_IDLE_TIMEOUT_S=0\n"
+        "AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS=20\n"
+        "AUTOSKILL_OPENCLAW_RUNTIME_MODE=embedded\n"
+        "AUTOSKILL_OPENCLAW_NO_SIDECAR=\n"
+        "AUTOSKILL_OPENCLAW_HOME=\n"
         "AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE=openclaw_mirror\n"
         f"AUTOSKILL_OPENCLAW_SKILLS_DIR={openclaw_skills_dir}\n"
         "AUTOSKILL_OPENCLAW_INSTALL_USER_ID=\n"
+        f"AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR={(workspace_dir / 'autoskill' / 'embedded_sessions').resolve()}\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_MAX_TURNS=20\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_BM25_TOP_K=8\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES=openclaw-runtime,openclaw-runtime-subagent,openclaw-config-resolve,manual\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_TIMEOUT_MS=20000\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_RETRIES=1\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_OPENCLAW_HOME=\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_BASE_URL=\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_API_KEY=\n"
+        "AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_MODEL=\n"
         "AUTOSKILL_OPENCLAW_USAGE_TRACKING_ENABLED=1\n"
         "AUTOSKILL_OPENCLAW_USAGE_INFER_ENABLED=1\n"
         "AUTOSKILL_OPENCLAW_USAGE_INFER_FROM_SELECTED_IDS=1\n"
@@ -171,11 +203,13 @@ def _env_template(args: argparse.Namespace, *, repo_dir: Path, workspace_dir: Pa
         "AUTOSKILL_OPENCLAW_USAGE_MAX_PENDING_SESSIONS=4096\n"
         "AUTOSKILL_OPENCLAW_USAGE_PENDING_TTL_S=21600\n"
         "AUTOSKILL_OPENCLAW_PROMPT_PACK_PATH=\n"
+        f"AUTOSKILL_SKILLBANK_DIR={store_dir}\n"
+        "AUTOSKILL_REPO_SKILLBANK_DIR=\n"
+        f"AUTOSKILL_PROXY_MODELS={args.served_models_json}\n"
         f"AUTOSKILL_LLM_PROVIDER={args.llm_provider}\n"
         f"AUTOSKILL_LLM_MODEL={args.llm_model}\n"
         f"AUTOSKILL_EMBEDDINGS_PROVIDER={args.embeddings_provider}\n"
         f"AUTOSKILL_EMBEDDINGS_MODEL={args.embeddings_model}\n"
-        f"AUTOSKILL_PROXY_MODELS={args.served_models_json}\n"
         f"AUTOSKILL_PROXY_MODELS_JSON={args.served_models_json}\n"
         "AUTOSKILL_PROXY_API_KEY=\n"
         "INTERNLM_API_KEY=\n"
@@ -263,7 +297,7 @@ fi
 
 def build_parser() -> argparse.ArgumentParser:
     """Run build parser."""
-    parser = argparse.ArgumentParser(description="Install AutoSkill OpenClaw plugin sidecar.")
+    parser = argparse.ArgumentParser(description="Install AutoSkill4OpenClaw plugin runtime and adapter.")
     parser.add_argument("--workspace-dir", default="~/.openclaw")
     parser.add_argument("--install-dir", default="~/.openclaw/plugins/autoskill-openclaw-plugin")
     parser.add_argument(
@@ -325,6 +359,7 @@ def main() -> None:
 
     install_dir.mkdir(parents=True, exist_ok=True)
     (workspace_dir / "autoskill" / "SkillBank").mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "autoskill" / "embedded_sessions").mkdir(parents=True, exist_ok=True)
     (workspace_dir / "workspace" / "skills").mkdir(parents=True, exist_ok=True)
 
     env_path = install_dir / ".env"
@@ -356,7 +391,7 @@ def main() -> None:
     if conf_path is not None:
         print("[autoskill-openclaw-plugin] openclaw config updated:", conf_path)
     print("")
-    print("OpenClaw plugin endpoints:")
+    print("AutoSkill service endpoints (used in sidecar mode or optional proxy mode):")
     print(f"  base_url: http://127.0.0.1:{int(args.proxy_port)}/v1")
     print("  hook API: POST /v1/autoskill/openclaw/hooks/before_agent_start")
     print("  hook API: POST /v1/autoskill/openclaw/hooks/agent_end")

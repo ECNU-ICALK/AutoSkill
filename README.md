@@ -285,16 +285,16 @@ Client (OpenAI-compatible request)
 
 ```text
 Documents
-  -> ingest (DocumentRecord + hash-based incremental skip)
+  -> ingest (DocumentRecord + TextUnit + StrictWindow + hash-based incremental skip)
   -> extract (SupportRecord + SkillDraft)
-  -> compile (canonical SkillSpec + provenance links)
-  -> versioning (create / strengthen / revise / split / merge / deprecate)
-  -> registry + SkillBank persistence
+  -> compile (SkillSpec)
+  -> versioning + registry (lifecycle / provenance / history)
+  -> optional SkillBank store upsert
 ```
 
 - The old `autoskill/offline/document` module has been migrated into top-level `AutoSkill4Doc/`.
-- CLI compatibility is preserved: `autoskill offline document build|ingest|extract|compile`.
-- Direct module entry is also supported: `python3 -m AutoSkill4Doc.extract ...`.
+- The document pipeline is now standalone: use `autoskill4doc ...` or `python3 -m AutoSkill4Doc ...`.
+- The current CLI exposes staged commands: `build`, `ingest`, `extract`, and `compile`.
 - Detailed document-pipeline design and options: [AutoSkill4Doc/README.md](AutoSkill4Doc/README.md).
 
 ## 5. SkillBank Storage Layout
@@ -336,10 +336,10 @@ Notes:
 ### 6.1 Top Level
 
 - `autoskill/`: SDK core.
-- `AutoSkill4Doc/`: standalone offline document-to-skill engine (ingest/extract/compile/versioning/registry).
+- `AutoSkill4Doc/`: standalone offline document-to-skill engine with its own CLI, config, windowing, extraction, compilation, and versioning modules.
 - `examples/`: runnable demos and entry scripts.
 - `autoskill/interactive/server.py`: OpenAI-compatible reverse proxy runtime.
-- `AutoSkill4OpenClaw/`: local-deployable OpenClaw sidecar plugin for autoskill interface integration.
+- `AutoSkill4OpenClaw/`: embedded-first OpenClaw integration for automatic skill extraction, maintenance, and native skill mirroring.
 - `web/`: static frontend assets for local Web UI.
 - `SkillBank/`: default local storage root.
 - `imgs/`: README demo images.
@@ -382,7 +382,7 @@ Notes:
 
 Migration note:
 - `autoskill/offline/document` has been removed.
-- Document offline pipeline is now maintained in `AutoSkill4Doc/`, while `autoskill offline document ...` remains as the stable CLI entry.
+- Document offline pipeline is now maintained in `AutoSkill4Doc/` and is no longer routed through `autoskill.offline`.
 - See [AutoSkill4Doc/README.md](AutoSkill4Doc/README.md) for full staged workflow and configuration details.
 
 - `autoskill/offline/conversation/extract.py`: import OpenAI-format conversation `.json/.jsonl` (single file or directory), then extract and maintain skills.
@@ -405,7 +405,7 @@ python3 -m autoskill.offline.conversation.extract \
   --embeddings-provider dashscope
 
 # 3) Document -> skill extraction
-python3 -m AutoSkill4Doc.extract \
+python3 -m AutoSkill4Doc build \
   --file ./data/docs \
   --user-id u1 \
   --llm-provider dashscope \
@@ -535,7 +535,7 @@ python3 -m examples.interactive_chat --llm-provider internlm --llm-model intern-
 export AUTOSKILL_GENERIC_LLM_URL="http://XXX/v1"
 export AUTOSKILL_GENERIC_LLM_MODEL="gpt-5.2"
 export AUTOSKILL_GENERIC_EMBED_URL="http://XX/v1"
-export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3"
+export AUTOSKILL_GENERIC_EMBED_MODEL="embd_qwen3vl8b"
 # Optional (can be empty):
 export AUTOSKILL_GENERIC_API_KEY=""
 
@@ -663,31 +663,30 @@ python3 -m examples.auto_evalution \
 
 ### 9.6 AutoSkill4OpenClaw
 
-Deploy sidecar + native OpenClaw adapter (auto wiring):
+Recommended embedded-first install for OpenClaw (auto wiring, no separate provider required at install time):
 
 ```bash
 python3 AutoSkill4OpenClaw/install.py \
   --workspace-dir ~/.openclaw \
   --install-dir ~/.openclaw/plugins/autoskill-openclaw-plugin \
   --adapter-dir ~/.openclaw/extensions/autoskill-openclaw-adapter \
-  --llm-provider internlm \
-  --llm-model intern-s1-pro \
-  --embeddings-provider qwen \
-  --embeddings-model text-embedding-v4 \
-  --start
+  --repo-dir "$(pwd)"
 ```
 
 Full plugin guide (install, wiring, runtime flow, verification):
 - `AutoSkill4OpenClaw/README.md`
 
 The installer automatically:
-- installs sidecar scripts
+- installs compatibility sidecar scripts
 - installs native lifecycle adapter (`before_agent_start` / `agent_end`)
 - writes adapter load path + plugin entry into `~/.openclaw/openclaw.json`
 - enables adapter entry by default
+- defaults the adapter to `runtimeMode=embedded` and `openclawSkillInstallMode=openclaw_mirror`
 
 Important:
 - After installation, restart OpenClaw runtime once so new plugin config is loaded.
+- In the recommended embedded path, you do not need to start the sidecar process.
+- If you explicitly want the optional sidecar path, manual provider defaults, or centralized operations, see `AutoSkill4OpenClaw/README.md`.
 
 ```bash
 openclaw gateway restart

@@ -1,7 +1,7 @@
 {
   "id": "autoskill-openclaw-adapter",
   "name": "AutoSkill OpenClaw Adapter",
-  "description": "Append retrieved skill hints during before_prompt_build and schedule skill evolution after successful runs.",
+  "description": "AutoSkill adapter for OpenClaw embedded or sidecar skill evolution workflows.",
   "version": "0.1.0",
   "kind": "lifecycle",
   "main": "./index.js",
@@ -29,7 +29,7 @@
           "sidecar",
           "embedded"
         ],
-        "default": "sidecar",
+        "default": "embedded",
         "description": "sidecar: send hooks to external AutoSkill service; embedded: run extraction/maintenance inside OpenClaw plugin runtime."
       },
       "embedded": {
@@ -41,6 +41,13 @@
             "default": "",
             "description": "Session archive JSONL directory for embedded extraction."
           },
+          "sessionMaxTurns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000,
+            "default": 20,
+            "description": "Auto-close a long-lived embedded session after N turns when session_id never changes. 0 disables."
+          },
           "skillBankDir": {
             "type": "string",
             "default": "",
@@ -50,6 +57,11 @@
             "type": "string",
             "default": "",
             "description": "OpenClaw standard local skills directory for mirror install."
+          },
+          "promptPackPath": {
+            "type": "string",
+            "default": "",
+            "description": "Optional override path for the shared AutoSkill prompt pack."
           },
           "bm25TopK": {
             "type": "integer",

@@ -17,9 +17,12 @@ An optional external-service path is still available later for centralized opera
 - Python 3.10+
 - A local checkout of this AutoSkill repository
 - An existing OpenClaw installation
+- Node.js is only needed if you want to run the adapter tests or local verification scripts
+- `curl` is only needed for the optional sidecar verification script
 
 For the recommended `embedded` mode, you do not need to provide a separate LLM provider or embedding provider during installation.
 AutoSkill will reuse the current OpenClaw runtime/model path at execution time.
+Keep this repository checkout on disk after installation: the installed runtime scripts still reference `AutoSkill4OpenClaw/run_proxy.py` from your local repo path.
 
 ### Recommended: install for embedded mode
 
@@ -56,7 +59,8 @@ python3 AutoSkill4OpenClaw/install.py \
   --repo-dir "$(pwd)"
 ```
 
-After installation, set `runtimeMode=embedded` in `~/.openclaw/openclaw.json` as shown in the quick-start section below.
+After installation, the installer now writes an `embedded`-first default config into `~/.openclaw/openclaw.json` when the adapter entry does not already exist.
+You only need to edit it manually if you want to override the default directories, change `sessionMaxTurns`, or switch to `sidecar`.
 
 Notes:
 
@@ -92,11 +96,18 @@ python3 AutoSkill4OpenClaw/install.py \
 - `~/.openclaw/extensions/autoskill-openclaw-adapter/package.json`
 - `~/.openclaw/openclaw.json` with the adapter entry enabled
 
+Naming note:
+
+- the repository/project name is `AutoSkill4OpenClaw`
+- the installed OpenClaw adapter id remains `autoskill-openclaw-adapter`
+- the optional sidecar runtime install dir remains `~/.openclaw/plugins/autoskill-openclaw-plugin`
+- those install/runtime identifiers are kept for compatibility with earlier setup and logs
+
 ## Quick Start (Recommended Default Path)
 
 ### 1. Set adapter runtime to embedded
 
-Edit `~/.openclaw/openclaw.json` and set plugin config:
+The installer writes a plugin config like this into `~/.openclaw/openclaw.json` by default:
 
 ```json
 {
@@ -110,7 +121,8 @@ Edit `~/.openclaw/openclaw.json` and set plugin config:
           "embedded": {
             "skillBankDir": "~/.openclaw/autoskill/SkillBank",
             "openclawSkillsDir": "~/.openclaw/workspace/skills",
-            "sessionArchiveDir": "~/.openclaw/autoskill/embedded_sessions"
+            "sessionArchiveDir": "~/.openclaw/autoskill/embedded_sessions",
+            "sessionMaxTurns": 20
           }
         }
       }
@@ -118,6 +130,8 @@ Edit `~/.openclaw/openclaw.json` and set plugin config:
   }
 }
 ```
+
+`embedded.sessionMaxTurns` defaults to `20`. If a session never ends and `session_id` never changes, AutoSkill will close that local archive segment after 20 turns and run one extraction/maintenance pass instead of waiting forever. Set it to `0` to disable this safeguard.
 
 ### 2. Restart OpenClaw
 
@@ -167,6 +181,7 @@ In this mode:
 - OpenClaw adapter handles `agent_end` inside runtime (no sidecar required).
 - The embedded runtime archives the transcript locally by session.
 - The embedded runtime extracts and maintains skills in AutoSkill `SkillBank`.
+- Generated skills can include standard OpenClaw bundled resources such as `scripts/`, `references/`, and `assets/`, and those files are preserved in SkillBank and in the mirror.
 - The embedded runtime mirrors active skills into OpenClaw's standard local skills directory.
 - OpenClaw uses those mirrored skills through its normal local skill mechanism.
 
@@ -239,6 +254,12 @@ If the prompt pack is missing or invalid, both runtimes fail open and fall back 
 - Embedded live session snapshot (updated every incoming turn): `~/.openclaw/autoskill/embedded_sessions/<user>/<session>.latest.json`
 - Mirrored OpenClaw local skills: `~/.openclaw/workspace/skills`
 - Sidecar conversation archive (`runtimeMode=sidecar`): `~/.openclaw/autoskill/conversations`
+
+Long-lived session safeguard:
+
+- Embedded mode: `embedded.sessionMaxTurns` defaults to `20`
+- Sidecar/session archive path: `AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS` defaults to `20`
+- Set either value to `0` if you want to wait strictly for `session_done`, session id change, or idle timeout
 
 ### Skill Usage Counters (safe-by-default)
 
@@ -321,7 +342,7 @@ Notes:
   - if `turn_type/turnType` is missing (observed on some OpenClaw 2026.3.x builds), adapter infers turn type from messages (`user` present => `main`, tool-only => `side`)
   - explicit `turn_type` still has highest priority when provided
   - if `session_done` is missing, session closing still works via `session_id` change (and sidecar idle-timeout close when enabled)
-- `before_prompt_build` retrieval is auto-disabled by default in embedded mode (to avoid sidecar-only retrieval calls when no sidecar is running)
+- `before_prompt_build` retrieval is auto-disabled by default on the embedded `openclaw_mirror` mainline; `store_only` remains the explicit exception that turns retrieval injection back on
 - recursion guard is enabled for internal extraction/merge calls
 - precedence: explicit `runtimeMode` config overrides the no-sidecar alias
 

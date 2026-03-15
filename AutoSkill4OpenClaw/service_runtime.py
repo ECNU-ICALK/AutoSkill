@@ -573,6 +573,27 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         return out
 
     @staticmethod
+    def _append_user_feedback_message(
+        *,
+        messages: List[Dict[str, Any]],
+        feedback: str,
+    ) -> List[Dict[str, Any]]:
+        """Append explicit post-run user feedback as the final user message when it adds new evidence."""
+
+        out = list(messages or [])
+        fb = str(feedback or "").strip()
+        if not fb:
+            return out
+        if out:
+            last = out[-1] if isinstance(out[-1], dict) else {}
+            last_role = str(last.get("role") or "").strip().lower()
+            last_content = str(last.get("content") or "").strip()
+            if last_role == "user" and last_content == fb:
+                return out
+        out.append({"role": "user", "content": fb})
+        return out
+
+    @staticmethod
     def _merge_ended_sessions(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Deduplicate ended-session records by `(session_id, path)`."""
         out: List[Dict[str, Any]] = []
@@ -747,6 +768,10 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         hint = str(hint_raw).strip() if hint_raw is not None and str(hint_raw).strip() else None
         feedback_raw = body.get("user_feedback")
         feedback = str(feedback_raw).strip() if feedback_raw is not None else ""
+        archived_messages = self._append_user_feedback_message(
+            messages=messages,
+            feedback=feedback,
+        )
 
         success_raw = (
             body.get("success")
@@ -770,7 +795,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
         archive_result = self._archive_conversation(
             user_id=user_id,
             source="openclaw_agent_end",
-            messages=messages,
+            messages=archived_messages,
             metadata=archive_meta,
         )
         print(
@@ -789,7 +814,7 @@ class OpenClawSkillRuntime(AutoSkillProxyRuntime):
             user_id=user_id,
             session_id=session_id,
             turn_type=turn_type,
-            messages=messages,
+            messages=archived_messages,
             metadata=archive_meta,
             session_done=bool(session_done),
             success=bool(success),

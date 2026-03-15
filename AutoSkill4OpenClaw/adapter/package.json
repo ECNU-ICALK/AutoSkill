@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "OpenClaw lifecycle adapter for AutoSkill sidecar.",
+  "description": "OpenClaw lifecycle adapter for AutoSkill embedded and sidecar runtimes.",
   "scripts": {
     "test": "node --test ./index.test.mjs ./embedded_runtime.test.mjs"
   },

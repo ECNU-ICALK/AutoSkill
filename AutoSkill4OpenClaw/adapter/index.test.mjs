@@ -99,11 +99,11 @@ test("before_prompt_build returns no-op when skill retrieval is disabled", async
   assert(logger.entries.some((entry) => entry.message.includes("retrieval disabled")));
 });
 
-test("before_prompt_build skips external retrieval in embedded runtime default mode", async () => {
+test("before_prompt_build skips external retrieval in embedded mirror mode", async () => {
   await withEnv(
     {
       AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
-      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "openclaw_mirror",
       AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "",
     },
     async () => {
@@ -128,7 +128,7 @@ test("before_prompt_build skips external retrieval in embedded runtime default m
       assert.equal(result, undefined);
       assert.equal(called, false);
       assert(
-        logger.entries.some((entry) => entry.message.includes("retrieval disabled by embedded runtime mode")),
+        logger.entries.some((entry) => entry.message.includes("retrieval disabled by openclaw_mirror install mode")),
       );
     },
   );
@@ -138,7 +138,7 @@ test("before_prompt_build stages embedded live session snapshot even when retrie
   await withEnv(
     {
       AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
-      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "openclaw_mirror",
       AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "",
     },
     async () => {
@@ -177,7 +177,7 @@ test("before_prompt_build stages embedded live session snapshot even when retrie
       assert.equal(liveCalls[0].session_id, "sess-live-stage");
       assert.equal(liveCalls[0].session_done, false);
       assert(
-        logger.entries.some((entry) => entry.message.includes("retrieval disabled by embedded runtime mode")),
+        logger.entries.some((entry) => entry.message.includes("retrieval disabled by openclaw_mirror install mode")),
       );
     },
   );
@@ -262,11 +262,11 @@ test("normalizeConfig keeps retrieval disabled in store_only when explicitly dis
   );
 });
 
-test("normalizeConfig disables retrieval by default in embedded runtime mode", async () => {
+test("normalizeConfig disables retrieval by default in embedded mirror mode", async () => {
   await withEnv(
     {
       AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
-      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "store_only",
+      AUTOSKILL_OPENCLAW_SKILL_INSTALL_MODE: "openclaw_mirror",
       AUTOSKILL_SKILL_RETRIEVAL_ENABLED: "",
     },
     async () => {
@@ -276,7 +276,7 @@ test("normalizeConfig disables retrieval by default in embedded runtime mode", a
       });
       assert.equal(cfg.runtimeMode, "embedded");
       assert.equal(cfg.skillRetrieval.enabled, false);
-      assert.equal(cfg.skillRetrieval.disableReason, "embedded_runtime_mode");
+      assert.equal(cfg.skillRetrieval.disableReason, "openclaw_mirror_install_mode");
     },
   );
 });
@@ -701,6 +701,7 @@ test("normalizeConfig can switch to embedded runtime mode", async () => {
       });
       assert.equal(cfg.runtimeMode, "embedded");
       assert.equal(cfg.embedded.skillBankDir, "/tmp/autoskill-skillbank");
+      assert.equal(cfg.embedded.sessionMaxTurns, 20);
       assert.equal(cfg.embedded.bm25TopK, 8);
       assert.deepEqual(cfg.embedded.modelInvocation.modes, [
         "openclaw-runtime",
@@ -708,6 +709,37 @@ test("normalizeConfig can switch to embedded runtime mode", async () => {
         "openclaw-config-resolve",
         "manual",
       ]);
+    },
+  );
+});
+
+test("normalizeConfig defaults to embedded runtime mode", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "",
+      AUTOSKILL_OPENCLAW_NO_SIDECAR: "",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+    },
+  );
+});
+
+test("normalizeConfig supports embedded session max turns override", async () => {
+  await withEnv(
+    {
+      AUTOSKILL_OPENCLAW_RUNTIME_MODE: "embedded",
+      AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_MAX_TURNS: "35",
+    },
+    async () => {
+      const cfg = normalizeConfig({
+        extractOnAgentEnd: true,
+      });
+      assert.equal(cfg.runtimeMode, "embedded");
+      assert.equal(cfg.embedded.sessionMaxTurns, 35);
     },
   );
 });

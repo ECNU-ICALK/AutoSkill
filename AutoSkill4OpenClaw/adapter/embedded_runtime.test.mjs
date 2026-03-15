@@ -60,9 +60,13 @@ function writeExistingSkill({
   name = "Existing Skill",
   description = "Existing reusable skill.",
   prompt = "Do existing workflow.\nCheck constraints.",
+  triggers = ["when requested"],
+  tags = [],
+  files = {},
 }) {
   const dir = path.join(skillBankDir, "Users", userId, dirName);
   fs.mkdirSync(dir, { recursive: true });
+  const resourcePaths = Object.keys(files || {}).filter((item) => item && item !== "SKILL.md").sort();
   const md = [
     "---",
     `id: "skill-${dirName}"`,
@@ -79,12 +83,35 @@ function writeExistingSkill({
     "",
     prompt,
     "",
+    ...(resourcePaths.length
+      ? [
+          "## Files",
+          "",
+          ...resourcePaths.map((item) => `- \`${item}\``),
+          "",
+        ]
+      : []),
     "## Triggers",
     "",
-    "- when requested",
+    ...triggers.map((item) => `- ${item}`),
+    "",
+    ...(tags.length
+      ? [
+          "## Tags",
+          "",
+          ...tags.map((item) => `- ${item}`),
+          "",
+        ]
+      : []),
     "",
   ].join("\n");
   fs.writeFileSync(path.join(dir, "SKILL.md"), md, "utf8");
+  for (const [relPath, content] of Object.entries(files || {})) {
+    if (!relPath || relPath === "SKILL.md") continue;
+    const absPath = path.join(dir, relPath);
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, String(content || ""), "utf8");
+  }
   return dir;
 }
 
@@ -170,6 +197,33 @@ function makeInvokeModelWithMultilineMetadata() {
             prompt: "# Goal\nShip safely.\n",
             triggers: ["release workflow", "deployment\nchecks"],
             tags: ["release", "ops\ncore"],
+          },
+        ],
+      });
+    }
+    if (metadata?.channel === "autoskill_embedded_maintain") {
+      return JSON.stringify({ action: "add" });
+    }
+    return JSON.stringify({});
+  };
+}
+
+function makeInvokeModelWithFiles() {
+  return async ({ metadata }) => {
+    if (metadata?.channel === "autoskill_embedded_extract") {
+      return JSON.stringify({
+        skills: [
+          {
+            name: "Release Checklist",
+            description: "Reusable release checklist for deployment workflows.",
+            prompt: "Validate readiness.\nRead reference: references/release-checklist.md.\nExecute script: scripts/release_gate.sh.",
+            triggers: ["release workflow", "deployment checks"],
+            tags: ["release", "ops"],
+            files: {
+              "scripts/release_gate.sh": "#!/usr/bin/env bash\necho release-gate\n",
+              "references/release-checklist.md": "# Release checklist\n- Verify rollback.\n",
+              "assets/release-template.txt": "rollback_owner=<OWNER>\n",
+            },
           },
         ],
       });
@@ -381,6 +435,154 @@ test("embedded runtime extracts only after session is closed and mirrors changed
   const skillDirName = userSkillDirs[0].name;
   assert.ok(fs.existsSync(path.join(paths.skillBankDir, "Users", "user1", skillDirName, "SKILL.md")));
   assert.ok(fs.existsSync(path.join(paths.openclawSkillsDir, skillDirName, "SKILL.md")));
+});
+
+test("embedded runtime persists bundled resource files into SkillBank and mirrored OpenClaw skills", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    invokeModel: makeInvokeModelWithFiles(),
+  });
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-files",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a reusable release workflow with helper files." },
+        { role: "assistant", content: "Will capture the checklist and script." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "scheduled");
+  const added = result.jobs.find((job) => job.status === "added");
+  assert.ok(added?.path);
+  const skillDir = path.dirname(String(added.path));
+  const mirroredDir = path.join(paths.openclawSkillsDir, path.basename(skillDir));
+  const md = fs.readFileSync(String(added.path), "utf8");
+  assert.match(md, /## Files/);
+  assert.match(md, /`scripts\/release_gate\.sh`/);
+  assert.equal(fs.existsSync(path.join(skillDir, "scripts", "release_gate.sh")), true);
+  assert.equal(fs.existsSync(path.join(skillDir, "references", "release-checklist.md")), true);
+  assert.equal(fs.existsSync(path.join(skillDir, "assets", "release-template.txt")), true);
+  assert.equal(fs.existsSync(path.join(mirroredDir, "scripts", "release_gate.sh")), true);
+  assert.equal(fs.existsSync(path.join(mirroredDir, "references", "release-checklist.md")), true);
+  assert.equal(fs.existsSync(path.join(mirroredDir, "assets", "release-template.txt")), true);
+});
+
+test("embedded runtime sends explicit user feedback and session evidence into extraction input", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const seen = [];
+  const processor = createEmbeddedProcessor(makeConfig(paths), {}, logger, {
+    async invokeModel({ metadata, user }) {
+      if (metadata?.channel === "autoskill_embedded_extract") {
+        seen.push(JSON.parse(String(user || "{}")));
+        return JSON.stringify({
+          skills: [
+            {
+              name: "Feedback Aware Skill",
+              description: "Skill extracted with end-of-session feedback.",
+              prompt: "Use the validated workflow.",
+              triggers: ["feedback aware"],
+              tags: ["feedback"],
+            },
+          ],
+        });
+      }
+      if (metadata?.channel === "autoskill_embedded_maintain") {
+        return JSON.stringify({ action: "add" });
+      }
+      return JSON.stringify({});
+    },
+  });
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-feedback",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      user_feedback: "Keep the rollback verification and reuse it next time.",
+      messages: [
+        { role: "user", content: "Need a release workflow." },
+        { role: "assistant", content: "I will prepare one." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(result.status, "scheduled");
+  assert.equal(seen.length, 1);
+  const payload = seen[0];
+  assert.equal(payload.session_evidence.has_main_turn, true);
+  assert.equal(payload.session_evidence.has_successful_main_turn, true);
+  assert.equal(payload.session_evidence.turn_count, 1);
+  assert.equal(payload.session_evidence.turns[0].turn_type, "main");
+  assert(payload.session_messages.some((item) => item.role === "user" && /rollback verification/.test(item.content)));
+});
+
+test("embedded runtime auto-closes long-lived session after max turn threshold", async () => {
+  const paths = makeSandbox();
+  const logger = makeLogger();
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        sessionMaxTurns: 2,
+      },
+    }),
+    {},
+    logger,
+    {
+      invokeModel: makeInvokeModelForAdd(),
+    },
+  );
+
+  const first = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-turn-limit",
+      turn_type: "main",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "user", content: "Need a reusable workflow." },
+        { role: "assistant", content: "I will outline it." },
+      ],
+    },
+    {},
+    {},
+  );
+  assert.equal(first.status, "skipped");
+  assert.equal(first.reason, "session_not_finished");
+
+  const second = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-turn-limit",
+      turn_type: "side",
+      session_done: false,
+      success: true,
+      messages: [
+        { role: "assistant", content: "Running reusable checks." },
+        { role: "tool", content: "workspace: ready" },
+      ],
+    },
+    {},
+    {},
+  );
+  assert.equal(second.status, "scheduled");
+  const added = second.jobs.find((job) => job.status === "added");
+  assert.ok(added);
+  assert.equal(listSkillDirs(paths.skillBankDir, "user1").length, 1);
 });
 
 test("embedded runtime requires at least one successful main turn", async () => {
@@ -894,6 +1096,88 @@ test("embedded runtime maintenance merges into explicit target skill in subagent
   assert.match(md, /Add rollback checks\./);
 });
 
+test("embedded runtime merge preserves candidate bundled resources when prompt is otherwise unchanged", async () => {
+  const paths = makeSandbox();
+  writeExistingSkill({
+    skillBankDir: paths.skillBankDir,
+    dirName: "release-existing",
+    name: "Release Existing",
+    description: "Reusable release routine.",
+    prompt: "Run smoke tests.\nPublish release notes.",
+  });
+  const logger = makeLogger();
+  let maintainCallCount = 0;
+  const processor = createEmbeddedProcessor(
+    makeConfig(paths, {
+      embedded: {
+        modelInvocation: {
+          modes: ["openclaw-runtime-subagent"],
+        },
+      },
+    }),
+    {
+      async runSubAgent({ metadata, user }) {
+        if (metadata?.channel === "autoskill_embedded_extract") {
+          return JSON.stringify({
+            skills: [
+              {
+                name: "Release Existing",
+                description: "Reusable release routine.",
+                prompt: "Run smoke tests.\nPublish release notes.",
+                triggers: ["release workflow"],
+                tags: ["ops"],
+                files: {
+                  "references/release-checks.md": "# Checks\n- verify rollback plan\n",
+                },
+              },
+            ],
+          });
+        }
+        if (metadata?.channel === "autoskill_embedded_maintain") {
+          maintainCallCount += 1;
+          const parsed = JSON.parse(String(user || "{}"));
+          return JSON.stringify({ action: "merge", target_skill_id: parsed?.similar_skills?.[0]?.id || "release-existing" });
+        }
+        if (metadata?.channel === "autoskill_embedded_merge") {
+          return JSON.stringify({
+            name: "Release Existing",
+            description: "Reusable release routine.",
+            prompt: "Run smoke tests.\nPublish release notes.",
+            triggers: ["release workflow"],
+            tags: ["ops"],
+          });
+        }
+        return JSON.stringify({});
+      },
+    },
+    logger,
+  );
+
+  const result = await processor.handle(
+    {
+      user: "user1",
+      session_id: "sess-merge-files",
+      turn_type: "main",
+      session_done: true,
+      success: true,
+      messages: [
+        { role: "user", content: "Need the release routine with a reusable checks file." },
+        { role: "assistant", content: "Will update the existing skill." },
+      ],
+    },
+    {},
+    {},
+  );
+
+  assert.equal(maintainCallCount, 1);
+  const merged = result.jobs.find((job) => job.status === "merged");
+  assert.ok(merged?.path);
+  const skillDir = path.dirname(String(merged.path));
+  assert.equal(fs.existsSync(path.join(skillDir, "references", "release-checks.md")), true);
+  const md = fs.readFileSync(String(merged.path), "utf8");
+  assert.match(md, /`references\/release-checks\.md`/);
+});
+
 test("embedded runtime maintenance avoids unsafe merge target and falls back to add", async () => {
   const paths = makeSandbox();
   writeExistingSkill({
@@ -962,7 +1246,10 @@ test("embedded runtime maintenance skips duplicate candidate without merge/add",
     skillBankDir: paths.skillBankDir,
     dirName: "dup-existing",
     name: "Duplicate Skill",
+    description: "Duplicate of existing skill.",
     prompt: "Collect logs.\nRun diagnostics.\nSummarize findings.",
+    triggers: ["diagnose issue"],
+    tags: ["ops"],
   });
   const logger = makeLogger();
   let maintainCallCount = 0;

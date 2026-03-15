@@ -1,5 +1,337 @@
 # STATUS
 
+## 2026-03-15 - Round 30 (delivery hardening: CI, entrypoint smoke tests, and top-level docs)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/tests/test_install.py`, `AutoSkill4OpenClaw/README.md`, `AutoSkill4OpenClaw/README.zh-CN.md`, top-level `README.md`, and CI coverage.
+- Objective: tighten delivery confidence by verifying entrypoint scripts actually start, clarifying runtime prerequisites/checkout assumptions, and aligning the top-level project documentation with the current embedded-first OpenClaw integration path.
+
+### Completed
+- Added CLI smoke coverage in `AutoSkill4OpenClaw/tests/test_install.py`:
+  - `install.py --help` must execute successfully
+  - `run_proxy.py --help` must execute successfully
+  - this guards against import-path regressions and broken entrypoint wiring that unit tests alone could miss
+- Improved plugin READMEs:
+  - documented that Node.js is only needed for adapter tests / local verification scripts
+  - documented that `curl` is only needed for the optional sidecar verification script
+  - documented that the local repository checkout must remain on disk after installation because runtime scripts still reference `AutoSkill4OpenClaw/run_proxy.py`
+- Updated top-level `README.md`:
+  - repository structure now describes `AutoSkill4OpenClaw/` as embedded-first OpenClaw integration instead of a sidecar-only plugin
+  - the OpenClaw quick-install example now reflects the recommended embedded-first path
+  - top-level docs now explicitly state that the sidecar path is optional and not required for the recommended mainline
+- Added lightweight GitHub Actions coverage in `.github/workflows/autoskill4openclaw-ci.yml`:
+  - install package with `pip install -e .`
+  - run `python -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - run `npm test` in `AutoSkill4OpenClaw/adapter`
+
+### Validation
+- Executed:
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+  - `python3 -m compileall AutoSkill4OpenClaw`
+- Result:
+  - `62/62` Python tests pass.
+  - `60/60` adapter tests pass.
+  - `compileall` passes for `AutoSkill4OpenClaw`.
+
+### Self-Review Notes
+- This round stayed low-risk:
+  - no extraction/runtime behavior changed
+  - no OpenClaw hook logic changed
+  - no memory/tool/provider path changed
+- The new CI/workflow coverage is intentionally narrow and focused on the OpenClaw integration surface instead of trying to validate the whole repository at once.
+
+### Remaining Issues / Risks
+- Embedded mode still depends on the host OpenClaw deployment actually executing lifecycle hooks such as `before_prompt_build` and `agent_end`.
+- The runtime still depends on a local repository checkout and is not yet packaged as a standalone distributable for `AutoSkill4OpenClaw`.
+- Mirrored skill identity/conflict protection can still be hardened further before enabling more aggressive automated pruning or overwrite behavior.
+
+### Next Step
+- Continue with final delivery-risk reduction:
+  - add mirrored-skill conflict guardrails
+  - add one lightweight real-runtime smoke scenario for OpenClaw deployment boundaries
+  - keep pruning/cleanup logic conservative and fail-open
+
+## 2026-03-15 - Round 29 (pre-delivery env and naming audit)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/.env.example`, `AutoSkill4OpenClaw/install.py`, `AutoSkill4OpenClaw/tests/test_install.py`, and plugin README naming/compatibility notes.
+- Objective: close pre-delivery gaps around environment-template drift, false-positive coverage tests, and naming clarity between the repo, adapter id, and sidecar runtime install paths.
+
+### Completed
+- Fixed environment template drift:
+  - refreshed `AutoSkill4OpenClaw/.env.example` so it includes the full current AutoSkill/OpenClaw adapter env surface instead of only the older reduced subset
+  - added embedded runtime envs such as:
+    - `AUTOSKILL_OPENCLAW_RUNTIME_MODE`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_MAX_TURNS`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MODEL_MODES`
+    - `AUTOSKILL_OPENCLAW_EMBEDDED_MANUAL_*`
+  - added compatibility/fallback envs used by adapter code such as:
+    - `AUTOSKILL_BASE_URL`
+    - `AUTOSKILL_PROXY_BASE_URL`
+    - `AUTOSKILL_DOTENV`
+    - `AUTOSKILL_MAX_INJECTED_CHARS`
+    - `AUTOSKILL_SKILLBANK_DIR`
+    - `AUTOSKILL_REPO_SKILLBANK_DIR`
+    - `AUTOSKILL_PROXY_MODELS`
+- Fixed generated installer `.env` output in `AutoSkill4OpenClaw/install.py` so fresh installs receive the same expanded env surface as the checked-in example file.
+- Tightened regression coverage in `AutoSkill4OpenClaw/tests/test_install.py`:
+  - the env-example audit now parses exact env keys instead of using substring matching
+  - the audit now checks env usage across `run_proxy.py`, `adapter/index.js`, and `adapter/embedded_runtime.js`
+  - this closes a real false-positive gap where `AUTOSKILL_PROXY_MODELS` was previously considered covered by `AUTOSKILL_PROXY_MODELS_JSON`
+- Improved naming clarity in both plugin READMEs:
+  - documented that the repo/project name is `AutoSkill4OpenClaw`
+  - documented that the adapter id remains `autoskill-openclaw-adapter`
+  - documented that the optional sidecar runtime install dir remains `~/.openclaw/plugins/autoskill-openclaw-plugin`
+  - explicitly called out that these runtime/install identifiers are retained for compatibility
+
+### Validation
+- Executed:
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+- Result:
+  - `60/60` Python tests pass.
+  - `60/60` adapter tests pass.
+
+### Self-Review Notes
+- This round intentionally focused on low-risk delivery hardening:
+  - no runtime extraction logic changed
+  - no OpenClaw hook behavior changed
+  - no memory/provider/tool path changed
+- The env-template/test fix matters because it catches drift that would otherwise only appear during deployment or manual configuration.
+
+### Remaining Issues / Risks
+- Embedded mode still depends on the host OpenClaw deployment actually executing lifecycle hooks such as `before_prompt_build` and `agent_end`.
+- The repository still assumes a local checkout for AutoSkill4OpenClaw runtime scripts rather than packaging it as a standalone Python distribution module.
+- Mirrored skill identity/conflict protection can still be hardened further before enabling any more aggressive automated pruning.
+
+### Next Step
+- Continue with delivery-focused hardening:
+  - add stronger mirrored-skill conflict guardrails
+  - add a lightweight real-runtime smoke check
+  - keep usage-based pruning conservative and fail-open
+
+## 2026-03-15 - Round 28 (installer and schema alignment for embedded mainline)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/install.py`, `AutoSkill4OpenClaw/.env.example`, `AutoSkill4OpenClaw/adapter/openclaw.plugin.json`, and plugin README alignment.
+- Objective: close delivery gaps where the documented embedded-first setup was not fully reflected in installer defaults, environment templates, or plugin config schema.
+
+### Completed
+- Fixed installer defaults in `AutoSkill4OpenClaw/install.py`:
+  - `openclaw.json` upsert now writes embedded-first defaults when values are absent:
+    - `runtimeMode=embedded`
+    - `openclawSkillInstallMode=openclaw_mirror`
+    - embedded directories for `skillBankDir`, `openclawSkillsDir`, and `sessionArchiveDir`
+    - `embedded.sessionMaxTurns=20`
+  - installer now creates `~/.openclaw/autoskill/embedded_sessions`
+  - generated `.env` template now includes `AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS=20`
+  - installer wording now describes the runtime/adapter installation more accurately instead of calling it only a sidecar installer
+- Fixed plugin schema drift in `AutoSkill4OpenClaw/adapter/openclaw.plugin.json`:
+  - added missing `embedded.sessionMaxTurns`
+  - added missing `embedded.promptPackPath`
+  - refreshed adapter description so it reflects embedded + sidecar support
+- Unified bare adapter defaults with the embedded-first product path:
+  - `AutoSkill4OpenClaw/adapter/index.js` now defaults `runtimeMode` to `embedded`
+  - `AutoSkill4OpenClaw/adapter/openclaw.plugin.json` now defaults `runtimeMode` to `embedded`
+  - `store_only` remains the explicit exception: retrieval auto-injection is still enabled there even under embedded runtime, so non-mirrored setups keep the expected behavior
+- Refreshed `AutoSkill4OpenClaw/.env.example` so it matches current runtime options instead of an older reduced variable set.
+- Updated plugin READMEs:
+  - installer behavior is now documented as writing embedded-first defaults automatically
+  - users only need manual edits for overrides or sidecar switching
+- Added regression coverage in `AutoSkill4OpenClaw/tests/test_install.py`:
+  - installer writes embedded defaults
+  - existing explicit runtime/install choices are preserved
+  - env template includes long-session turn limit
+  - `.env.example` stays aligned with `run_proxy.py` env keys
+  - plugin manifest schema exposes embedded fields used by code/docs
+
+### Validation
+- Executed:
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+  - `python3 -m compileall AutoSkill4OpenClaw`
+- Result:
+  - `60/60` Python tests pass.
+  - `60/60` adapter tests pass.
+  - `compileall` passes for `AutoSkill4OpenClaw`.
+
+### Self-Review Notes
+- This round now aligns both installer behavior and bare adapter defaults with the documented embedded-first path, while still preserving explicit user choices already present in `openclaw.json`.
+- Existing explicit `runtimeMode=sidecar` and `openclawSkillInstallMode=store_only` values are preserved by the installer.
+
+### Remaining Issues / Risks
+- The repository still assumes a local checkout for AutoSkill4OpenClaw runtime scripts rather than packaging it as a standalone Python distribution module.
+- Embedded mode still depends on the host OpenClaw deployment actually executing lifecycle hooks such as `before_prompt_build` and `agent_end`; AutoSkill now has better diagnostics for this, but it cannot force a non-hooked execution path to emit extraction events.
+
+### Next Step
+- Continue with a focused delivery audit:
+  - audit skill identity/conflict handling for mirrored installs
+  - tighten docs around hook-trigger troubleshooting and deployment boundaries
+  - consider a lightweight end-to-end smoke check for real OpenClaw runtime paths
+
+## 2026-03-15 - Round 27 (long-session auto-checkpoint after 20 turns)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/openclaw_conversation_archive.py`, `AutoSkill4OpenClaw/adapter/embedded_runtime.js`, and related config/docs/tests.
+- Objective: avoid waiting forever when `session_id` never changes by auto-closing a long-lived session segment after a safe turn threshold and running one extraction/maintenance pass.
+
+### Completed
+- Added a new session turn-limit safeguard to both runtime paths:
+  - Python sidecar/session-end archive path now supports `session_max_turns` in `OpenClawConversationArchiveConfig`
+  - embedded runtime now supports `embedded.sessionMaxTurns`
+- Set the default threshold to `20` turns on both paths:
+  - sidecar env/CLI: `AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS` / `--openclaw-session-max-turns`
+  - embedded adapter config/env: `embedded.sessionMaxTurns` / `AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_MAX_TURNS`
+- Implemented auto-close behavior:
+  - when the archived turn count for the active session reaches the threshold, the current session segment is finalized with reason `session_turn_limit`
+  - extraction/maintenance then runs on that closed segment instead of waiting forever for `session_done` or a session id change
+  - active in-memory bookkeeping is cleared so the next turn with the same `session_id` starts a fresh segment
+- Hardened observability:
+  - returned/logged session path now points to the finalized closed file after turn-limit close, instead of the pre-rename live path
+- Updated docs in both plugin READMEs to explain:
+  - the new `20`-turn default
+  - how to disable it by setting the value to `0`
+  - where the setting lives in embedded vs sidecar mode
+- Added regression coverage:
+  - `AutoSkill4OpenClaw/tests/test_conversation_archive.py`
+  - `AutoSkill4OpenClaw/tests/test_service_runtime.py`
+  - `AutoSkill4OpenClaw/tests/test_run_proxy_defaults.py`
+  - `AutoSkill4OpenClaw/adapter/index.test.mjs`
+  - `AutoSkill4OpenClaw/adapter/embedded_runtime.test.mjs`
+
+### Validation
+- Executed:
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+- Result:
+  - `59/59` adapter tests pass.
+  - `55/55` Python tests pass.
+
+### Self-Review Notes
+- The threshold is intentionally segment-based, not global-session destructive truncation: once a long session segment is closed, the next turn with the same `session_id` starts a new local segment cleanly.
+- This is fail-open relative to conversation continuity: it never blocks the live OpenClaw turn; it only affects when AutoSkill decides that the archived evidence is sufficient to attempt extraction.
+- No memory slot, compaction, provider routing, or OpenClaw core behavior was changed.
+
+### Remaining Issues / Risks
+- A very long multi-topic session can now produce multiple extraction passes instead of a single session-end pass. This is usually preferable to waiting forever, but it can increase maintenance frequency on noisy sessions.
+- The threshold is a simple turn count today. A future improvement could combine turn count with topic-change heuristics or inactivity signals for cleaner segmentation.
+
+### Next Step
+- Add one more safety layer for generated skill installation:
+  - audit name/identity conflicts between generated SkillBank skills and existing OpenClaw local/native skills
+  - prefer stable conflict detection before considering more aggressive automated pruning
+
+## 2026-03-15 - Round 26 (feedback + session-evidence extraction inputs)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/service_runtime.py` and `AutoSkill4OpenClaw/adapter/embedded_runtime.js`.
+- Objective: improve extraction quality by preserving explicit end-of-session user feedback and by giving the embedded extractor explicit session-level evidence about `main` turns and success state.
+
+### Completed
+- Audited current extraction-input paths and confirmed a real gap:
+  - `agent_end` already receives `user_feedback`, but the session-end extraction path was only archiving raw messages and silently dropping the feedback from the later extraction window.
+  - embedded extraction prompts required `turn_type=main` evidence, but the extractor only saw merged `session_messages`, not explicit turn summaries or main/success evidence.
+- Fixed session-end feedback loss in `AutoSkill4OpenClaw/service_runtime.py`:
+  - added `_append_user_feedback_message(...)`
+  - archived conversation records now append explicit `user_feedback` as a final user message when it adds new evidence
+  - session archive records now do the same, so session-end extraction keeps the strongest user-supplied supervision signal
+- Improved embedded extraction inputs in `AutoSkill4OpenClaw/adapter/embedded_runtime.js`:
+  - session archiving now preserves `payload.user_feedback` in the closed session transcript
+  - `loadClosedSession(...)` now builds compact `session_evidence`:
+    - `session_id`
+    - `closed_reason`
+    - `turn_count`
+    - `has_main_turn`
+    - `has_successful_main_turn`
+    - per-turn summaries: `turn_index`, `turn_type`, `success`, `message_count`, `roles`
+  - `extractCandidate(...)` now passes `session_evidence` into the extractor payload instead of relying only on the flattened message list
+- Updated shared prompt guidance in `AutoSkill4OpenClaw/adapter/openclaw_prompt_pack.txt` so the embedded extractor explicitly uses `session_evidence` when present.
+- Added regression coverage:
+  - `AutoSkill4OpenClaw/tests/test_service_runtime.py`
+    - verifies `user_feedback` is preserved in both archived session data and the scheduled extraction window
+  - `AutoSkill4OpenClaw/adapter/embedded_runtime.test.mjs`
+    - verifies extractor input contains explicit feedback text and `session_evidence`
+
+### Validation
+- Executed:
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+- Result:
+  - `57/57` adapter tests pass.
+  - `53/53` Python tests pass.
+
+### Self-Review Notes
+- This round improves only extraction input fidelity; it does not change retrieval injection, memory behavior, provider/model routing, or OpenClaw core execution.
+- The feedback append is deduplicated against the last user message to avoid obvious duplicate tails.
+- `session_evidence` is intentionally compact and summary-only, so it improves model grounding without duplicating the full transcript payload.
+
+### Remaining Issues / Risks
+- Embedded/session-end extraction is now better grounded, but it still operates on a whole-session view, which is intentionally different from the sidecar main-turn proxy’s `main-turn + assistant + next_state` sampling granularity.
+- Explicit user feedback is now preserved only when it is passed in the hook payload; if upstream channels never populate `user_feedback`, we still depend on the normal message trajectory for supervision.
+
+### Next Step
+- Reconcile and document the strengths/limits of the two extraction timings more explicitly:
+  - embedded/session-end extraction for convenience and stable OpenClaw-native skill evolution
+  - sidecar/main-turn sampling for finer-grained trajectory learning and RL-style data collection
+
+## 2026-03-15 - Round 25 (embedded bundled-resource preservation)
+
+### Scope
+- Target area: `AutoSkill4OpenClaw/adapter/embedded_runtime.js` and prompt pack alignment.
+- Objective: close the gap between OpenClaw standard skill artifacts and the embedded runtime by preserving extracted `scripts/`, `references/`, and `assets/` instead of dropping them.
+
+### Completed
+- Audited OpenClaw skill loading/authoring expectations against the current embedded runtime:
+  - confirmed OpenClaw standard skills are directory artifacts with `SKILL.md` plus optional bundled resources.
+  - confirmed AutoSkill embedded prompts already encouraged resources, but embedded write-paths were silently discarding them.
+- Implemented bundled resource support in `AutoSkill4OpenClaw/adapter/embedded_runtime.js`:
+  - added safe normalization for extracted resource paths under `scripts/`, `references/`, and `assets/`
+  - added flexible parsing for optional `files/resources` payloads from extractor/merge model outputs
+  - preserved bundled resources on add/merge writes into SkillBank
+  - rendered `## Files` in generated `SKILL.md`
+  - loaded existing resource files back from SkillBank during maintenance/BM25 matching
+  - included resource paths in duplicate detection so "same prompt but new reusable files" is no longer skipped
+  - preserved candidate resources during merge even when the merge LLM returns only metadata/prompt fields
+- Tightened embedded prompt pack alignment in `AutoSkill4OpenClaw/adapter/openclaw_prompt_pack.txt`:
+  - embedded extraction now explicitly allows concise optional resources/files
+  - embedded merge now explicitly preserves bundled resources when they improve the same capability
+- Updated embedded docs:
+  - `AutoSkill4OpenClaw/README.md`
+  - `AutoSkill4OpenClaw/README.zh-CN.md`
+  - both now explicitly state that generated skills can keep bundled resources in SkillBank and in the OpenClaw mirror
+- Added regression coverage in `AutoSkill4OpenClaw/adapter/embedded_runtime.test.mjs`:
+  - extracted bundled resources are written to SkillBank and mirrored to OpenClaw
+  - merge keeps candidate bundled resources even if the merge LLM omits them
+  - duplicate skip test now reflects a true metadata-identical duplicate instead of a candidate with different retrieval metadata
+
+### Validation
+- Executed:
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+- Result:
+  - `56/56` adapter tests pass.
+  - `52/52` Python tests pass.
+
+### Failed Attempts
+- Initial implementation treated any richer candidate description as a meaningful delta, which broke the duplicate-skip regression. Tightened the logic so description-only wording changes no longer bypass duplicate detection.
+- Initial merge implementation still lost candidate resources when the merge LLM returned JSON without `files`. Fixed by merging `existing.files + candidate.files` into the normalization fallback.
+
+### Self-Review Notes
+- This round is intentionally localized to the embedded runtime and shared prompt pack; it does not modify OpenClaw core, memory behavior, provider/model routing, hook registration, or sidecar transport.
+- Resource paths are constrained to safe relative paths under `scripts/`, `references/`, or `assets/`.
+- The write-path remains fail-open: if no resources are extracted, behavior stays equivalent to the previous `SKILL.md`-only flow.
+
+### Remaining Issues / Risks
+- Embedded maintenance now reads existing resource files from SkillBank for matching/preservation, which is correct but adds extra filesystem work per maintenance cycle; it may need a stricter cap if users maintain very large manual skills.
+- Binary assets are intentionally preserved on disk once written, but embedded maintenance only reads small text-like files back into memory; binary-heavy skills may need a lighter manifest-only path later.
+
+### Next Step
+- Revisit embedded maintenance scoring/prompts with full OpenClaw skill authoring semantics in mind:
+  - decide whether bundled resource paths should also influence add-vs-merge prompting more explicitly
+  - evaluate whether usage-count / stale-skill pruning can safely incorporate mirrored resource-heavy skills without false deletions
+
 ## 2026-03-15 - Round 24 (embedded install docs without provider args)
 
 ### Scope

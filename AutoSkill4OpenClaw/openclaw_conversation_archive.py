@@ -133,6 +133,7 @@ class OpenClawConversationArchiveConfig:
     max_messages_per_record: int = 200
     max_content_chars: int = 20000
     session_idle_timeout_seconds: int = 0
+    session_max_turns: int = 20
 
     def normalize(self) -> "OpenClawConversationArchiveConfig":
         self.enabled = bool(self.enabled)
@@ -140,6 +141,7 @@ class OpenClawConversationArchiveConfig:
         self.max_messages_per_record = max(1, int(self.max_messages_per_record or 200))
         self.max_content_chars = max(256, int(self.max_content_chars or 20000))
         self.session_idle_timeout_seconds = max(0, int(self.session_idle_timeout_seconds or 0))
+        self.session_max_turns = max(0, int(self.session_max_turns or 0))
         return self
 
 
@@ -151,6 +153,7 @@ class OpenClawConversationArchive:
         self._lock = threading.Lock()
         self._active_session_by_user: Dict[str, str] = {}
         self._active_session_touch_ms: Dict[str, int] = {}
+        self._active_session_turn_count: Dict[str, int] = {}
 
     def status(self) -> Dict[str, Any]:
         return {
@@ -159,6 +162,7 @@ class OpenClawConversationArchive:
             "max_messages_per_record": int(self.config.max_messages_per_record),
             "max_content_chars": int(self.config.max_content_chars),
             "session_idle_timeout_seconds": int(self.config.session_idle_timeout_seconds),
+            "session_max_turns": int(self.config.session_max_turns),
             "session_archive_dir": str((Path(self.config.archive_dir).expanduser().resolve() / "sessions")),
         }
 
@@ -268,6 +272,7 @@ class OpenClawConversationArchive:
         turn_type_norm = _safe_text(turn_type).lower()
         root = Path(self.config.archive_dir).expanduser().resolve()
         now_ms = int(time.time() * 1000)
+        current_path: Optional[Path] = None
         with self._lock:
             if int(self.config.session_idle_timeout_seconds or 0) > 0:
                 ended_sessions.extend(self._close_idle_session_locked(user_id=uid, now_ms=now_ms))
@@ -281,8 +286,10 @@ class OpenClawConversationArchive:
                         reason="session_id_changed",
                     )
                 )
+                self._active_session_turn_count.pop(uid, None)
 
             path = self._session_file_path(root=root, user_id=uid, session_id=sid)
+            current_path = path
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "record_id": uuid.uuid4().hex,
@@ -300,6 +307,8 @@ class OpenClawConversationArchive:
                 fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
             self._active_session_by_user[uid] = sid
             self._active_session_touch_ms[uid] = int(now_ms)
+            current_turn_count = int(self._active_session_turn_count.get(uid) or 0) + 1
+            self._active_session_turn_count[uid] = current_turn_count
 
             if bool(session_done):
                 ended_sessions.append(
@@ -309,11 +318,27 @@ class OpenClawConversationArchive:
                         reason="session_done",
                     )
                 )
-                if self._active_session_by_user.get(uid) == sid:
-                    self._active_session_by_user.pop(uid, None)
-                self._active_session_touch_ms.pop(uid, None)
+                self._clear_active_session_locked(user_id=uid, session_id=sid)
+            elif int(self.config.session_max_turns or 0) > 0 and current_turn_count >= int(
+                self.config.session_max_turns
+            ):
+                ended_sessions.append(
+                    self._close_session_file_locked(
+                        user_id=uid,
+                        session_id=sid,
+                        reason="session_turn_limit",
+                    )
+                )
+                self._clear_active_session_locked(user_id=uid, session_id=sid)
 
         ended_unique = self._dedupe_ended_sessions(ended_sessions)
+        if ended_unique:
+            for ended in reversed(ended_unique):
+                if _safe_text(ended.get("session_id")) == sid:
+                    ended_path = _safe_text(ended.get("path"))
+                    if ended_path:
+                        current_path = Path(ended_path)
+                    break
 
         return {
             "enabled": True,
@@ -321,7 +346,7 @@ class OpenClawConversationArchive:
             "reason": "",
             "user_id": uid,
             "session_id": sid,
-            "path": str(path),
+            "path": str(current_path or path),
             "record_id": str(payload["record_id"]),
             "ended_sessions": ended_unique,
         }
@@ -519,10 +544,19 @@ class OpenClawConversationArchive:
             session_id=sid,
             reason="session_idle_timeout",
         )
-        if self._active_session_by_user.get(uid) == sid:
-            self._active_session_by_user.pop(uid, None)
-        self._active_session_touch_ms.pop(uid, None)
+        self._clear_active_session_locked(user_id=uid, session_id=sid)
         return [closed]
+
+    def _clear_active_session_locked(self, *, user_id: str, session_id: str = "") -> None:
+        """Clear active-session bookkeeping for a user when the expected session matches."""
+
+        uid = _safe_text(user_id)
+        sid = _safe_text(session_id)
+        if sid and _safe_text(self._active_session_by_user.get(uid)) not in {"", sid}:
+            return
+        self._active_session_by_user.pop(uid, None)
+        self._active_session_touch_ms.pop(uid, None)
+        self._active_session_turn_count.pop(uid, None)
 
     @staticmethod
     def _dedupe_ended_sessions(ended_sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -68,6 +68,7 @@ class RunProxyDefaultsTest(unittest.TestCase):
         self.assertEqual(int(args.openclaw_usage_prune_min_retrieved), 40)
         self.assertEqual(int(args.openclaw_usage_prune_max_used), 0)
         self.assertEqual(int(args.openclaw_session_idle_timeout_s), 0)
+        self.assertEqual(int(args.openclaw_session_max_turns), 20)
 
 
 if __name__ == "__main__":

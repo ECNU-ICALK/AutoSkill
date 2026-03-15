@@ -74,6 +74,48 @@ class OpenClawConversationArchiveTest(unittest.TestCase):
             ended_path = Path(str(ended[0].get("path") or ""))
             self.assertTrue(ended_path.exists())
 
+    def test_append_session_record_closes_when_max_turns_is_reached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = OpenClawConversationArchive(
+                config=OpenClawConversationArchiveConfig(
+                    enabled=True,
+                    archive_dir=tmp,
+                    session_idle_timeout_seconds=0,
+                    session_max_turns=2,
+                ).normalize()
+            )
+            first = archive.append_session_record(
+                user_id="u1",
+                session_id="s-limit",
+                turn_type="main",
+                messages=[
+                    {"role": "user", "content": "task"},
+                    {"role": "assistant", "content": "step 1"},
+                ],
+                session_done=False,
+                success=True,
+            )
+            self.assertEqual(len(list(first.get("ended_sessions") or [])), 0)
+
+            second = archive.append_session_record(
+                user_id="u1",
+                session_id="s-limit",
+                turn_type="side",
+                messages=[
+                    {"role": "assistant", "content": "step 2"},
+                    {"role": "tool", "content": "workspace ready"},
+                ],
+                session_done=False,
+                success=True,
+            )
+            ended = list(second.get("ended_sessions") or [])
+            self.assertEqual(len(ended), 1)
+            self.assertEqual(str(ended[0].get("session_id") or ""), "s-limit")
+            self.assertEqual(str(ended[0].get("reason") or ""), "session_turn_limit")
+            ended_path = Path(str(ended[0].get("path") or ""))
+            self.assertTrue(ended_path.exists())
+            self.assertEqual(Path(str(second.get("path") or "")), ended_path)
+
 
 if __name__ == "__main__":
     unittest.main()

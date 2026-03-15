@@ -76,6 +76,7 @@ class OpenClawServiceRuntimeTest(unittest.TestCase):
         main_turn_enabled: bool = False,
         target_base_url: str = "",
         session_idle_timeout_s: int = 0,
+        session_max_turns: int = 20,
     ) -> OpenClawSkillRuntime:
         return OpenClawSkillRuntime(
             sdk=_FakeSDK(),
@@ -98,6 +99,7 @@ class OpenClawServiceRuntimeTest(unittest.TestCase):
                 enabled=True,
                 archive_dir=archive_dir,
                 session_idle_timeout_seconds=int(session_idle_timeout_s),
+                session_max_turns=int(session_max_turns),
             ).normalize(),
         )
 
@@ -385,6 +387,95 @@ class OpenClawServiceRuntimeTest(unittest.TestCase):
             )
             self.assertEqual(payload["extraction"]["status"], "scheduled")
             self.assertEqual(len(scheduled), 1)
+
+    def test_agent_end_schedules_when_session_reaches_max_turn_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._make_runtime(archive_dir=tmp, session_max_turns=2)
+            runtime._retrieve_context = lambda **_: {"hits": []}  # type: ignore[attr-defined]
+            scheduled: List[Dict[str, Any]] = []
+
+            def _schedule(**kwargs: Any) -> str:
+                scheduled.append(dict(kwargs))
+                return "job-turn-limit"
+
+            runtime._schedule_extraction_job = _schedule  # type: ignore[assignment]
+
+            first = runtime.openclaw_agent_end_api(
+                body={
+                    "user": "u-test",
+                    "session_id": "sess-turn-limit",
+                    "turn_type": "main",
+                    "success": True,
+                    "messages": [
+                        {"role": "user", "content": "long task"},
+                        {"role": "assistant", "content": "step one"},
+                    ],
+                },
+                headers={},
+            )
+            self.assertEqual(first["extraction"]["status"], "skipped")
+            self.assertEqual(first["extraction"]["reason"], "session_not_finished")
+
+            second = runtime.openclaw_agent_end_api(
+                body={
+                    "user": "u-test",
+                    "session_id": "sess-turn-limit",
+                    "turn_type": "side",
+                    "success": True,
+                    "messages": [
+                        {"role": "assistant", "content": "step two"},
+                        {"role": "tool", "content": "workspace updated"},
+                    ],
+                },
+                headers={},
+            )
+            self.assertEqual(second["extraction"]["status"], "scheduled")
+            self.assertEqual(len(scheduled), 1)
+            self.assertEqual(scheduled[0]["metadata"]["session_id"], "sess-turn-limit")
+            self.assertEqual(scheduled[0]["metadata"]["source"], "openclaw_agent_end_session_end")
+
+    def test_agent_end_preserves_user_feedback_in_archived_session_and_extraction_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._make_runtime(archive_dir=tmp)
+            runtime._retrieve_context = lambda **_: {"hits": []}  # type: ignore[attr-defined]
+            scheduled: List[Dict[str, Any]] = []
+
+            def _schedule(**kwargs: Any) -> str:
+                scheduled.append(dict(kwargs))
+                return "job-feedback"
+
+            runtime._schedule_extraction_job = _schedule  # type: ignore[assignment]
+
+            payload = runtime.openclaw_agent_end_api(
+                body={
+                    "user": "u-test",
+                    "session_id": "sess-feedback",
+                    "turn_type": "main",
+                    "session_done": True,
+                    "success": True,
+                    "user_feedback": "Keep the rollback verification and reuse it next time.",
+                    "messages": [
+                        {"role": "user", "content": "finish task"},
+                        {"role": "assistant", "content": "done"},
+                    ],
+                },
+                headers={},
+            )
+            self.assertEqual(payload["extraction"]["status"], "scheduled")
+            self.assertEqual(len(scheduled), 1)
+            extracted_messages = list(scheduled[0]["messages"])
+            self.assertEqual(extracted_messages[-1]["role"], "user")
+            self.assertEqual(
+                extracted_messages[-1]["content"],
+                "Keep the rollback verification and reuse it next time.",
+            )
+            archived = self._read_archive_lines(tmp)
+            archived_messages = list(archived[0]["messages"])
+            self.assertEqual(archived_messages[-1]["role"], "user")
+            self.assertEqual(
+                archived_messages[-1]["content"],
+                "Keep the rollback verification and reuse it next time.",
+            )
 
     def test_agent_end_still_waits_for_session_end_when_main_turn_proxy_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

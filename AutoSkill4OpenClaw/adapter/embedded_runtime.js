@@ -906,6 +906,18 @@ function sanitizeMessages(list) {
   return out;
 }
 
+function appendFeedbackMessage(messages, feedback) {
+  const out = Array.isArray(messages) ? messages.slice() : [];
+  const text = trimmed(feedback);
+  if (!text) return out;
+  const last = out.length ? out[out.length - 1] : null;
+  if (last && trimmed(last.role).toLowerCase() === "user" && trimmed(last.content) === text) {
+    return out;
+  }
+  out.push({ role: "user", content: text });
+  return out;
+}
+
 function mergeMessagesWithOverlap(existing, incoming) {
   const a = Array.isArray(existing) ? existing.slice() : [];
   const b = Array.isArray(incoming) ? incoming.slice() : [];
@@ -1080,6 +1092,59 @@ function normalizeComparableText(value) {
   return trimmed(value).replace(/\s+/g, " ").toLowerCase();
 }
 
+const MAX_SKILL_FILES = 16;
+const MAX_SKILL_FILE_PATH_CHARS = 160;
+const MAX_SKILL_FILE_CONTENT_CHARS = 12000;
+const ALLOWED_SKILL_FILE_ROOTS = new Set(["scripts", "references", "assets"]);
+
+function normalizeResourceRelPath(value, defaultRoot = "") {
+  const fallbackRoot = trimmed(defaultRoot).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+  const raw = asString(value).replace(/\\/g, "/").trim().replace(/^\/+/, "");
+  if (!raw) return "";
+  const parts = [];
+  for (const chunk of raw.split("/")) {
+    let token = trimmed(chunk);
+    if (!token || token === "." || token === "..") continue;
+    if (token.includes("..")) token = token.replace(/\.\./g, "_");
+    parts.push(token);
+  }
+  if (!parts.length) return "";
+  let rel = parts.join("/");
+  const root = parts[0].toLowerCase();
+  if (!ALLOWED_SKILL_FILE_ROOTS.has(root)) {
+    if (!fallbackRoot || !ALLOWED_SKILL_FILE_ROOTS.has(fallbackRoot)) {
+      return "";
+    }
+    rel = `${fallbackRoot}/${rel}`;
+  }
+  if (!rel || rel.toLowerCase() === "skill.md") return "";
+  if (rel.length > MAX_SKILL_FILE_PATH_CHARS) return "";
+  return rel;
+}
+
+function getCaseInsensitiveMappingValue(obj, key) {
+  const src = obj && typeof obj === "object" ? obj : {};
+  const target = normalizeComparableText(key);
+  for (const [k, v] of Object.entries(src)) {
+    if (normalizeComparableText(k) === target) {
+      return asString(v);
+    }
+  }
+  return "";
+}
+
+function setCaseInsensitiveMappingValue(obj, key, value) {
+  const src = obj && typeof obj === "object" ? obj : {};
+  const target = normalizeComparableText(key);
+  for (const existingKey of Object.keys(src)) {
+    if (normalizeComparableText(existingKey) === target) {
+      src[existingKey] = value;
+      return;
+    }
+  }
+  src[key] = value;
+}
+
 function normalizeStringList(values, maxItems, maxChars) {
   const src = Array.isArray(values) ? values : [];
   const out = [];
@@ -1096,6 +1161,124 @@ function normalizeStringList(values, maxItems, maxChars) {
   return out;
 }
 
+function extractPathFromFileObj(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  for (const key of ["path", "file", "file_path", "name"]) {
+    const value = trimmed(obj[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function extractContentFromFileObj(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  for (const key of ["content", "text", "body", "template", "snippet"]) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    const value = clampText(asString(obj[key]), MAX_SKILL_FILE_CONTENT_CHARS);
+    if (value || obj[key] === "") return value;
+  }
+  return "";
+}
+
+function addCandidateFile(out, filePath, content, defaultRoot = "") {
+  if (Object.keys(out).length >= MAX_SKILL_FILES) return;
+  const rel = normalizeResourceRelPath(filePath, defaultRoot);
+  if (!rel) return;
+  const nextContent = clampText(asString(content), MAX_SKILL_FILE_CONTENT_CHARS).trimEnd();
+  const prevContent = getCaseInsensitiveMappingValue(out, rel);
+  if (prevContent && prevContent.length >= nextContent.length) {
+    return;
+  }
+  setCaseInsensitiveMappingValue(out, rel, nextContent);
+}
+
+function ingestCandidateFilePayload(out, payload, defaultRoot = "", pathHint = "") {
+  if (Object.keys(out).length >= MAX_SKILL_FILES || payload == null) return;
+  if (typeof payload === "string") {
+    addCandidateFile(out, payload || pathHint, "", defaultRoot);
+    return;
+  }
+  if (typeof payload === "number" || typeof payload === "boolean") {
+    addCandidateFile(out, pathHint, String(payload), defaultRoot);
+    return;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (Object.keys(out).length >= MAX_SKILL_FILES) break;
+      ingestCandidateFilePayload(out, item, defaultRoot, pathHint);
+    }
+    return;
+  }
+  if (!payload || typeof payload !== "object") return;
+  const keys = new Set(Object.keys(payload).map((k) => normalizeComparableText(k)));
+  const looksLikeEntry = [
+    "path",
+    "file",
+    "file_path",
+    "name",
+    "content",
+    "text",
+    "body",
+    "template",
+    "snippet",
+  ].some((key) => keys.has(key));
+  if (looksLikeEntry) {
+    addCandidateFile(
+      out,
+      extractPathFromFileObj(payload) || pathHint,
+      extractContentFromFileObj(payload),
+      defaultRoot,
+    );
+    return;
+  }
+  for (const [key, value] of Object.entries(payload)) {
+    if (Object.keys(out).length >= MAX_SKILL_FILES) break;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value == null) {
+      addCandidateFile(out, key, value == null ? "" : String(value), defaultRoot);
+      continue;
+    }
+    ingestCandidateFilePayload(out, value, defaultRoot, key);
+  }
+}
+
+function normalizeSkillFiles(raw, fallback = {}) {
+  const base = raw && typeof raw === "object" ? raw : {};
+  const fb = fallback && typeof fallback === "object" ? fallback : {};
+  const out = {};
+  const fallbackFiles = fb.files && typeof fb.files === "object" ? fb.files : {};
+  ingestCandidateFilePayload(out, fallbackFiles);
+  const baseFiles = base.files;
+  if (baseFiles != null) ingestCandidateFilePayload(out, baseFiles);
+  const resources = base.resources;
+  if (resources && typeof resources === "object" && !Array.isArray(resources)) {
+    for (const key of ["scripts", "references", "assets"]) {
+      if (!Object.prototype.hasOwnProperty.call(resources, key)) continue;
+      ingestCandidateFilePayload(out, resources[key], key);
+    }
+  } else if (resources != null) {
+    ingestCandidateFilePayload(out, resources);
+  }
+  for (const key of ["scripts", "references", "assets"]) {
+    if (!Object.prototype.hasOwnProperty.call(base, key)) continue;
+    ingestCandidateFilePayload(out, base[key], key);
+  }
+  return out;
+}
+
+function mergeSkillFiles(existingFiles, candidateFiles) {
+  const out = {};
+  ingestCandidateFilePayload(out, existingFiles && typeof existingFiles === "object" ? existingFiles : {});
+  ingestCandidateFilePayload(out, candidateFiles && typeof candidateFiles === "object" ? candidateFiles : {});
+  return out;
+}
+
+function resourcePathsFromFiles(files) {
+  return Object.keys(files && typeof files === "object" ? files : {})
+    .map((item) => normalizeResourceRelPath(item))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function normalizeSkillPayload(raw, fallback = {}) {
   const base = raw && typeof raw === "object" ? raw : {};
   const fb = fallback && typeof fallback === "object" ? fallback : {};
@@ -1108,6 +1291,7 @@ function normalizeSkillPayload(raw, fallback = {}) {
     prompt: prompt || clampText(trimmed(fb.prompt || fb.instructions || ""), 6000),
     triggers: normalizeStringList(base.triggers || fb.triggers, 8, 120),
     tags: normalizeStringList(base.tags || fb.tags, 10, 48),
+    files: normalizeSkillFiles(base, fb),
   };
 }
 
@@ -1132,6 +1316,7 @@ function renderSkillMd(skill, previousId = "", previousVersion = "") {
   const safeName = oneLineYamlValue(skill.name, "Unnamed Skill");
   const safeDescription = oneLineYamlValue(skill.description, safeName);
   const safePrompt = asString(skill.prompt || skill.instructions || "").trim();
+  const resourcePaths = resourcePathsFromFiles(skill.files || {});
   const id = oneLineYamlValue(
     previousId || `skill-${slug(skill.name || skill.description || "unnamed")}-${nowMs()}`,
     `skill-${nowMs()}`,
@@ -1167,6 +1352,12 @@ function renderSkillMd(skill, previousId = "", previousVersion = "") {
   lines.push("");
   lines.push(safePrompt);
   lines.push("");
+  if (resourcePaths.length) {
+    lines.push("## Files");
+    lines.push("");
+    for (const rel of resourcePaths.slice(0, 50)) lines.push(`- \`${rel}\``);
+    lines.push("");
+  }
   if (triggers.length) {
     lines.push("## Triggers");
     lines.push("");
@@ -1193,6 +1384,51 @@ function loadUserSkills(skillBankDir, userId) {
     if (!fs.existsSync(mdPath)) continue;
     const md = fs.readFileSync(mdPath, "utf8");
     const fm = parseFrontmatter(md);
+    const files = {};
+    for (const root of ALLOWED_SKILL_FILE_ROOTS) {
+      const baseDir = path.join(dirPath, root);
+      if (!fs.existsSync(baseDir)) continue;
+      const queue = [baseDir];
+      while (queue.length) {
+        const currentDir = queue.shift();
+        if (!currentDir) break;
+        let entries = [];
+        try {
+          entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        } catch (_) {
+          entries = [];
+        }
+        for (const entry of entries) {
+          const absPath = path.join(currentDir, entry.name);
+          if (entry.isDirectory()) {
+            queue.push(absPath);
+            continue;
+          }
+          if (!entry.isFile()) continue;
+          const relPath = normalizeResourceRelPath(path.relative(dirPath, absPath));
+          if (!relPath) continue;
+          let content = "";
+          try {
+            const stat = fs.statSync(absPath);
+            if (stat.size <= MAX_SKILL_FILE_CONTENT_CHARS) {
+              const buffer = fs.readFileSync(absPath);
+              content = buffer.includes(0) ? "" : buffer.toString("utf8");
+            }
+          } catch (_) {
+            content = "";
+          }
+          setCaseInsensitiveMappingValue(files, relPath, clampText(content, MAX_SKILL_FILE_CONTENT_CHARS).trimEnd());
+        }
+      }
+    }
+    for (const relPath of parseListFromSection(md, "Files")) {
+      const normalized = normalizeResourceRelPath(relPath);
+      if (!normalized) continue;
+      if (!getCaseInsensitiveMappingValue(files, normalized)) {
+        setCaseInsensitiveMappingValue(files, normalized, "");
+      }
+    }
+    const resourcePaths = resourcePathsFromFiles(files);
     out.push({
       id: d.name,
       dirName: d.name,
@@ -1206,7 +1442,8 @@ function loadUserSkills(skillBankDir, userId) {
       prompt: parsePromptFromSkillMd(md),
       triggers: parseListFromSection(md, "Triggers"),
       tags: parseListFromSection(md, "Tags"),
-      text: `${trimmed(fm.name)}\n${trimmed(fm.description)}\n${parsePromptFromSkillMd(md)}\n${md}`,
+      files,
+      text: `${trimmed(fm.name)}\n${trimmed(fm.description)}\n${parsePromptFromSkillMd(md)}\n${resourcePaths.join("\n")}\n${md}`,
     });
   }
   return out;
@@ -1215,7 +1452,8 @@ function loadUserSkills(skillBankDir, userId) {
 function queryTextFromCandidate(candidate) {
   const triggers = Array.isArray(candidate.triggers) ? candidate.triggers.join("\n") : "";
   const tags = Array.isArray(candidate.tags) ? candidate.tags.join("\n") : "";
-  return `${asString(candidate.name)}\n${asString(candidate.description)}\n${asString(candidate.prompt)}\n${triggers}\n${tags}`;
+  const files = resourcePathsFromFiles(candidate.files || {}).join("\n");
+  return `${asString(candidate.name)}\n${asString(candidate.description)}\n${asString(candidate.prompt)}\n${triggers}\n${tags}\n${files}`;
 }
 
 function topBm25Hits(candidate, skills, topK) {
@@ -1228,11 +1466,14 @@ function topBm25Hits(candidate, skills, topK) {
   return ranked;
 }
 
-async function extractCandidate({ invokeModel, sessionMessages, model, metadata, renderSharedPrompt }) {
+async function extractCandidate({ invokeModel, sessionMessages, sessionEvidence, model, metadata, renderSharedPrompt }) {
   const fallbackSystem =
     "You are AutoSkill embedded extractor for OpenClaw sessions. " +
     "Extract at most one reusable skill from the provided session. " +
-    "Only extract if reusable and future-facing. Output strict JSON only.";
+    "Only extract if reusable and future-facing. " +
+    "Use any provided session_evidence to confirm main-turn and successful-session signals. " +
+    "Optional concise files/resources under scripts/, references/, and assets/ are allowed when they improve repeatability. " +
+    "Output strict JSON only.";
   const system = renderSharedPrompt("embedded.extract.system", fallbackSystem, { max_candidates: 1 });
   const user = jsonDump({
     schema: {
@@ -1243,6 +1484,8 @@ async function extractCandidate({ invokeModel, sessionMessages, model, metadata,
           prompt: "string markdown prompt",
           triggers: ["string"],
           tags: ["string"],
+          resources: { scripts: ["string"], references: ["string"], assets: ["string"] },
+          files: { "scripts/example.sh": "string", "references/checklist.md": "string" },
           confidence: 0.0,
         },
       ],
@@ -1251,8 +1494,10 @@ async function extractCandidate({ invokeModel, sessionMessages, model, metadata,
       "Require turn_type=main evidence in session.",
       "Ignore one-off payload.",
       "No examples field.",
+      "Only include optional files/resources when they directly improve repeated execution.",
       "Keep concise.",
     ],
+    session_evidence: sessionEvidence || null,
     session_messages: sessionMessages,
   });
   const text = await invokeModel({ system, user, model, metadata });
@@ -1321,9 +1566,13 @@ async function decideAction({ invokeModel, candidate, hits, model, metadata, ren
 }
 
 async function mergeSkillWithModel({ invokeModel, existing, candidate, model, metadata, renderSharedPrompt }) {
+  const mergedFallback = {
+    ...existing,
+    files: mergeSkillFiles(existing.files, candidate.files),
+  };
   const fallbackSystem =
     "Merge existing skill and candidate skill into one skill. " +
-    "Output strict JSON with name,description,prompt,triggers,tags.";
+    "Output strict JSON with name,description,prompt,triggers,tags and optional resources/files.";
   const system = renderSharedPrompt("embedded.maintain.merge.system", fallbackSystem);
   const user = jsonDump({
     existing: {
@@ -1332,6 +1581,7 @@ async function mergeSkillWithModel({ invokeModel, existing, candidate, model, me
       prompt: existing.prompt,
       triggers: existing.triggers,
       tags: existing.tags,
+      files: existing.files || {},
     },
     candidate,
   });
@@ -1339,7 +1589,7 @@ async function mergeSkillWithModel({ invokeModel, existing, candidate, model, me
     const text = await invokeModel({ system, user, model, metadata });
     const obj = parseJsonLoose(text);
     if (obj && typeof obj === "object") {
-      return normalizeSkillPayload(obj, existing);
+      return normalizeSkillPayload(obj, mergedFallback);
     }
   } catch (_) {
     // fallback heuristic below
@@ -1367,7 +1617,8 @@ async function mergeSkillWithModel({ invokeModel, existing, candidate, model, me
     prompt: asString(candidate.prompt).length > asString(existing.prompt).length ? candidate.prompt : existing.prompt,
     triggers: mergeSet(existing.triggers, candidate.triggers, 8),
     tags: mergeSet(existing.tags, candidate.tags, 10),
-  }, existing);
+    files: mergeSkillFiles(existing.files, candidate.files),
+  }, mergedFallback);
 }
 
 function writeSkill({ skillBankDir, userId, dirName, skill, existing }) {
@@ -1381,6 +1632,14 @@ function writeSkill({ skillBankDir, userId, dirName, skill, existing }) {
   );
   const mdPath = path.join(targetDir, "SKILL.md");
   fs.writeFileSync(mdPath, md, "utf8");
+  const files = skill && typeof skill === "object" ? skill.files : {};
+  for (const [relPath, content] of Object.entries(files && typeof files === "object" ? files : {})) {
+    const safeRel = normalizeResourceRelPath(relPath);
+    if (!safeRel) continue;
+    const absPath = path.join(targetDir, safeRel);
+    ensureDir(path.dirname(absPath));
+    fs.writeFileSync(absPath, asString(content), "utf8");
+  }
   return { dirPath: targetDir, mdPath };
 }
 
@@ -1433,10 +1692,30 @@ function isMirrorInstallEnabled(cfg) {
 
 function isDuplicateCandidate(existing, candidate) {
   if (!existing || !candidate) return false;
+  const hasMeaningfulDelta = () => {
+    const hasNovelListValue = (current, incoming) => {
+      const currentSet = new Set((Array.isArray(current) ? current : []).map((item) => normalizeComparableText(item)));
+      for (const item of Array.isArray(incoming) ? incoming : []) {
+        const key = normalizeComparableText(item);
+        if (key && !currentSet.has(key)) return true;
+      }
+      return false;
+    };
+    if (hasNovelListValue(existing.triggers, candidate.triggers)) return true;
+    if (hasNovelListValue(existing.tags, candidate.tags)) return true;
+    const existingFiles = existing.files && typeof existing.files === "object" ? existing.files : {};
+    const candidateFiles = candidate.files && typeof candidate.files === "object" ? candidate.files : {};
+    for (const relPath of resourcePathsFromFiles(candidateFiles)) {
+      const currentContent = normalizeComparableText(getCaseInsensitiveMappingValue(existingFiles, relPath));
+      const nextContent = normalizeComparableText(getCaseInsensitiveMappingValue(candidateFiles, relPath));
+      if (currentContent !== nextContent) return true;
+    }
+    return false;
+  };
   const existingPrompt = normalizeComparableText(existing.prompt || existing.instructions);
   const candidatePrompt = normalizeComparableText(candidate.prompt || candidate.instructions);
   if (existingPrompt && candidatePrompt && existingPrompt === candidatePrompt) {
-    return true;
+    return !hasMeaningfulDelta();
   }
   const existingName = normalizeComparableText(existing.name);
   const candidateName = normalizeComparableText(candidate.name);
@@ -1446,7 +1725,10 @@ function isDuplicateCandidate(existing, candidate) {
   if (!existingPrompt || !candidatePrompt) return false;
   const minLen = Math.min(existingPrompt.length, candidatePrompt.length);
   if (minLen < 40) return false;
-  return existingPrompt.includes(candidatePrompt) || candidatePrompt.includes(existingPrompt);
+  if (!(existingPrompt.includes(candidatePrompt) || candidatePrompt.includes(existingPrompt))) {
+    return false;
+  }
+  return !hasMeaningfulDelta();
 }
 
 export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
@@ -1484,7 +1766,7 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
     const now = nowMs();
     const turnType = trimmed(payload.turn_type).toLowerCase();
     const success = Boolean(payload.success);
-    const incomingMessages = sanitizeMessages(payload.messages);
+    const incomingMessages = appendFeedbackMessage(sanitizeMessages(payload.messages), payload.user_feedback);
     const prev = state.activeSessionByUser.get(uid);
     if (prev && prev !== sid) {
       const prevPath = sessionFilePath(uid, prev);
@@ -1541,22 +1823,35 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
     writeJson(currentSnapshotPath, live);
 
     state.activeSessionByUser.set(uid, sid);
-    if (Boolean(payload.session_done)) {
-      const closedCurrent = finalizeSessionFile(currentPath, "session_done");
-      const closedSnapshot = finalizeSnapshotFile(currentSnapshotPath, "session_done");
+    const shouldForceCloseByTurnLimit =
+      !Boolean(payload.session_done) &&
+      Number(cfg?.embedded?.sessionMaxTurns || 0) > 0 &&
+      Number(live.turn_count || 0) >= Number(cfg.embedded.sessionMaxTurns || 0);
+    const closeReason = Boolean(payload.session_done)
+      ? "session_done"
+      : shouldForceCloseByTurnLimit
+        ? "session_turn_limit"
+        : "";
+    let finalPath = currentPath;
+    let finalSnapshotPath = currentSnapshotPath;
+    if (closeReason) {
+      const closedCurrent = finalizeSessionFile(currentPath, closeReason);
+      const closedSnapshot = finalizeSnapshotFile(currentSnapshotPath, closeReason);
       if (closedCurrent) {
+        finalPath = closedCurrent;
+        if (closedSnapshot) finalSnapshotPath = closedSnapshot;
         ended.push({
           user: uid,
           session_id: sid,
           path: closedCurrent,
           snapshot_path: closedSnapshot,
-          reason: "session_done",
+          reason: closeReason,
         });
       }
       state.activeSessionByUser.delete(uid);
       state.liveSessionByKey.delete(key);
     }
-    return { ended, reason: "", path: currentPath, snapshot_path: currentSnapshotPath };
+    return { ended, reason: "", path: finalPath, snapshot_path: finalSnapshotPath };
   }
 
   function loadClosedSession(item) {
@@ -1564,14 +1859,33 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
     let hasMain = false;
     let hasMainSuccess = false;
     let messages = [];
+    const turnSummaries = [];
+    let turnIndex = 0;
     for (const rec of records) {
+      turnIndex += 1;
       const turnType = trimmed(rec.turn_type).toLowerCase();
       const success = Boolean(rec.success);
       if (turnType === "main") {
         hasMain = true;
         if (success) hasMainSuccess = true;
       }
-      messages = mergeMessagesWithOverlap(messages, sanitizeMessages(rec.messages));
+      const turnMessages = sanitizeMessages(rec.messages);
+      messages = mergeMessagesWithOverlap(messages, turnMessages);
+      const roles = [];
+      const seenRoles = new Set();
+      for (const msg of turnMessages) {
+        const role = trimmed(msg?.role).toLowerCase();
+        if (!role || seenRoles.has(role)) continue;
+        seenRoles.add(role);
+        roles.push(role);
+      }
+      turnSummaries.push({
+        turn_index: turnIndex,
+        turn_type: turnType,
+        success,
+        message_count: turnMessages.length,
+        roles,
+      });
     }
     return {
       ...item,
@@ -1579,6 +1893,14 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
       messages,
       hasMain,
       hasMainSuccess,
+      evidence: {
+        session_id: trimmed(item.session_id),
+        closed_reason: trimmed(item.reason),
+        turn_count: records.length,
+        has_main_turn: hasMain,
+        has_successful_main_turn: hasMainSuccess,
+        turns: turnSummaries,
+      },
     };
   }
 
@@ -1711,6 +2033,7 @@ export function createEmbeddedProcessor(cfg, api, log, deps = {}) {
         const candidate = await extractCandidate({
           invokeModel,
           sessionMessages: session.messages,
+          sessionEvidence: session.evidence,
           model: modelHint,
           metadata: { autoskill_internal: true, channel: "autoskill_embedded_extract" },
           renderSharedPrompt,

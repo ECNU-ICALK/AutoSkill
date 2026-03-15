@@ -204,6 +204,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional idle timeout (seconds) to auto-close active sessions for extraction fallback. 0 disables.",
     )
     parser.add_argument(
+        "--openclaw-session-max-turns",
+        type=int,
+        default=int(_env("AUTOSKILL_OPENCLAW_SESSION_MAX_TURNS", "20")),
+        help="Auto-close long-lived sessions after N archived turns even if session_id never changes. 0 disables.",
+    )
+    parser.add_argument(
         "--openclaw-usage-tracking-enabled",
         default=_env("AUTOSKILL_OPENCLAW_USAGE_TRACKING_ENABLED", "1"),
         help="Track per-skill retrieval/usage counters in OpenClaw plugin flow: 1|0",
@@ -376,6 +382,7 @@ def main() -> None:
         enabled=_is_truthy(args.openclaw_conversation_archive_enabled, default=True),
         archive_dir=str(args.openclaw_conversation_archive_dir or ""),
         session_idle_timeout_seconds=int(args.openclaw_session_idle_timeout_s),
+        session_max_turns=int(args.openclaw_session_max_turns),
     ).normalize()
     usage_tracking_cfg = OpenClawUsageTrackingConfig(
         enabled=_is_truthy(args.openclaw_usage_tracking_enabled, default=True),
@@ -450,7 +457,8 @@ def main() -> None:
         print(
             "[openclaw-plugin] conversation archive enabled: "
             f"dir={conversation_archive_cfg.archive_dir} "
-            f"idle_timeout_s={conversation_archive_cfg.session_idle_timeout_seconds}"
+            f"idle_timeout_s={conversation_archive_cfg.session_idle_timeout_seconds} "
+            f"max_turns={conversation_archive_cfg.session_max_turns}"
         )
     if skill_install_cfg.enabled:
         print(

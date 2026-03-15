@@ -11,7 +11,7 @@ const DEFAULTS = {
   baseUrl: "http://127.0.0.1:9100/v1",
   apiKey: "",
   userId: "",
-  runtimeMode: "sidecar",
+  runtimeMode: "embedded",
   skillScope: "all",
   topK: 3,
   minScore: 0.4,
@@ -32,6 +32,7 @@ const DEFAULTS = {
   },
   embedded: {
     sessionArchiveDir: "",
+    sessionMaxTurns: 20,
     skillBankDir: "",
     openclawSkillsDir: "",
     promptPackPath: "",
@@ -628,6 +629,7 @@ function normalizeConfig(raw) {
     !rawRecallEnabledProvided;
   const autoDisableRetrievalByEmbeddedRuntime =
     cfg.runtimeMode === "embedded" &&
+    cfg.skillInstallMode !== "store_only" &&
     !rawSkillEnabledProvided &&
     !envSkillEnabled &&
     !rawRecallEnabledProvided;
@@ -717,6 +719,17 @@ function normalizeConfig(raw) {
     sessionArchiveDir: resolvePathInput(
       rawEmbeddedCfg.sessionArchiveDir || env.AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_DIR,
       defaultSessionArchiveDir,
+    ),
+    sessionMaxTurns: Math.max(
+      0,
+      Math.min(
+        1000,
+        Number(
+          rawEmbeddedCfg.sessionMaxTurns ??
+            env.AUTOSKILL_OPENCLAW_EMBEDDED_SESSION_MAX_TURNS ??
+            DEFAULTS.embedded.sessionMaxTurns,
+        ) || DEFAULTS.embedded.sessionMaxTurns,
+      ),
     ),
     skillBankDir: resolvePathInput(
       rawEmbeddedCfg.skillBankDir || env.AUTOSKILL_SKILLBANK_DIR || env.AUTOSKILL_REPO_SKILLBANK_DIR,
