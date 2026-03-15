@@ -1,5 +1,37 @@
 # STATUS
 
+## 2026-03-15 - Round 31 (remove accidental GitHub workflow delivery)
+
+### Scope
+- Target area: `.github/workflows/autoskill4openclaw-ci.yml`.
+- Objective: remove the GitHub Actions workflow that was added during delivery hardening but should not be part of the submitted OpenClaw plugin changes.
+
+### Completed
+- Removed `.github/workflows/autoskill4openclaw-ci.yml` from the repository.
+- Kept all AutoSkill4OpenClaw code, tests, docs, and runtime changes intact.
+
+### Validation
+- Executed:
+  - `python3 -m unittest discover -s AutoSkill4OpenClaw/tests -q`
+  - `cd AutoSkill4OpenClaw/adapter && npm test`
+- Result:
+  - `62/62` Python tests pass.
+  - `60/60` adapter tests pass.
+
+### Self-Review Notes
+- This round only removed repository-level CI metadata and did not change runtime behavior, plugin hooks, extraction logic, or documentation outside the status log.
+
+### Remaining Issues / Risks
+- Embedded mode still depends on the host OpenClaw deployment actually executing lifecycle hooks such as `before_prompt_build` and `agent_end`.
+- The runtime still depends on a local repository checkout and is not yet packaged as a standalone distributable for `AutoSkill4OpenClaw`.
+- Mirrored skill identity/conflict protection can still be hardened further before enabling more aggressive automated pruning or overwrite behavior.
+
+### Next Step
+- Continue with delivery-focused runtime hardening only:
+  - add mirrored-skill conflict guardrails
+  - add one lightweight real-runtime smoke scenario for OpenClaw deployment boundaries
+  - keep pruning/cleanup logic conservative and fail-open
+
 ## 2026-03-15 - Round 30 (delivery hardening: CI, entrypoint smoke tests, and top-level docs)
 
 ### Scope
